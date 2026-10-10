@@ -76,9 +76,15 @@ export async function startRelayLab({ devices, inference }) {
     inflight.set(id, inputDigest);
     try {
       // Only the central adapter handles the content. It has no peer target.
-      const answer = await inference({ deviceId, prompt: payload.prompt, requestId: payload.request_id });
+      const response = await inference({ deviceId, prompt: payload.prompt, requestId: payload.request_id });
       if (!secrets.has(deviceId)) return send(res, 401, { ok: false, error: 'unauthorized' });
-      if (typeof answer !== 'string' || answer.length > 4096) throw new Error('invalid_adapter_response');
+      if (!response || typeof response !== 'object' || Array.isArray(response)
+        || Object.keys(response).sort().join(',') !== 'deviceId,requestId,result'
+        || response.deviceId !== deviceId || response.requestId !== payload.request_id
+        || typeof response.result !== 'string' || response.result.length > 4096) {
+        throw new Error('invalid_adapter_response');
+      }
+      const answer = response.result;
       // Bounded replay cache: laboratory only; no persistent history or shared user memory.
       if (completed.size >= 128) completed.delete(completed.keys().next().value);
       completed.set(id, { result: answer, inputDigest });
