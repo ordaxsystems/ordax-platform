@@ -67,6 +67,7 @@ test("status preserves published UUIDs and Product result, excluding extra datab
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.action.request_id, requestId);
+    assert.equal(body.action.device_id, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
     assert.equal(body.action.project_id, projectId);
     assert.equal(body.action.project, null);
     assert.equal(body.action.action, "project.text_read");
@@ -107,6 +108,7 @@ test("MCP polls the same accepted action through all statuses without dispatch o
       assert.equal(data.request_id, requestId);
       assert.equal(data.action.status, next);
       assert.equal(data.action.name, "project.text_read");
+      assert.equal(data.action.device_id, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
       assert.equal(data.action.project_id, projectId);
       assert.equal(data.action.project, null);
       assert.equal(data.pending, ["queued", "leased", "running"].includes(next));
