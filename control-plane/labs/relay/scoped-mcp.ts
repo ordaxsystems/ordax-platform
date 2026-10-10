@@ -114,9 +114,12 @@ export function scopeRelayMcp(handlers: OrdaxMcpHandlers, resolver: Resolver): O
       const action = payload?.action;
       if (payload?.ok !== true || !action || typeof action !== "object" || Array.isArray(action)) return denied();
       const data = action as Record<string,unknown>;
+      // Both subject and exact client must be verified by canonical authority.
+      // A central operator credential or a shared device is never sufficient.
       if (data.request_id !== requestId || data.device_id !== scope.deviceId
+        || data.subject_id !== scope.subjectId || data.client_id !== scope.clientId
         || !scope.actions.includes(data.action as Action)
-        || (data.project !== null && data.project !== scope.project)) return denied();
+        || data.project !== scope.project) return denied();
       return json(payload);
     }
   };
