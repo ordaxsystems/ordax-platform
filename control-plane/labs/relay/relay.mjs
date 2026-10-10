@@ -77,6 +77,7 @@ export async function startRelayLab({ devices, inference }) {
     try {
       // Only the central adapter handles the content. It has no peer target.
       const answer = await inference({ deviceId, prompt: payload.prompt, requestId: payload.request_id });
+      if (!secrets.has(deviceId)) return send(res, 401, { ok: false, error: 'unauthorized' });
       if (typeof answer !== 'string' || answer.length > 4096) throw new Error('invalid_adapter_response');
       // Bounded replay cache: laboratory only; no persistent history or shared user memory.
       if (completed.size >= 128) completed.delete(completed.keys().next().value);
@@ -93,6 +94,7 @@ export async function startRelayLab({ devices, inference }) {
   const address = server.address();
   return Object.freeze({
     url: `http://127.0.0.1:${address.port}`,
+    revokeDevice: deviceId => typeof deviceId === 'string' && secrets.delete(deviceId),
     close: () => new Promise((resolve, reject) => server.close(err => err ? reject(err) : resolve())),
   });
 }
