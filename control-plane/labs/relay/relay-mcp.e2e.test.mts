@@ -50,7 +50,7 @@ const handlers=scopeRelayMcp({
   return user?.scope || null;
 });
 
-async function adapter({deviceId,prompt}) {
+async function adapter({deviceId,prompt,requestId}) {
   const client=clients.find(c=>c.id===deviceId);
   if(!client) throw Error("unregistered");
   // This is an injected GPT/tool-choice fixture, not a real model decision.
@@ -70,7 +70,7 @@ async function adapter({deviceId,prompt}) {
   if(result?.ok!==true || result.action?.result?.device_id!==client.scope.deviceId) {
     throw Error("relay_target_mismatch");
   }
-  return JSON.stringify({requestDeviceId:client.scope.deviceId,files:result.action.result.files});
+  return {deviceId,requestId,result:JSON.stringify({requestDeviceId:client.scope.deviceId,files:result.action.result.files})};
 }
 async function post(url,client,prompt) {
   return fetch(url+"/v1/infer",{
