@@ -100,7 +100,13 @@ export async function startRelayLab({ devices, inference }) {
   const address = server.address();
   return Object.freeze({
     url: `http://127.0.0.1:${address.port}`,
-    revokeDevice: deviceId => typeof deviceId === 'string' && secrets.delete(deviceId),
+    revokeDevice: deviceId => {
+      if (typeof deviceId !== 'string' || !secrets.delete(deviceId)) return false;
+      for (const key of completed.keys()) {
+        if (key.startsWith(`${deviceId}:`)) completed.delete(key);
+      }
+      return true;
+    },
     close: () => new Promise((resolve, reject) => server.close(err => err ? reject(err) : resolve())),
   });
 }
