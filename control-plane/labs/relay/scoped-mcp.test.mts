@@ -30,7 +30,7 @@ function createFixture() {
       const d = devices.find(d => d.deviceId === action.device_id);
       if (!d) throw new Error("bad_device");
       records.set(requestId, {ok:true,action:{
-        request_id:requestId,device_id:d.deviceId,project:d.project,
+        request_id:requestId,device_id:d.deviceId,subject_id:d.subjectId,client_id:d.clientId,project:d.project,
         action:action.action,status:"succeeded",error_code:null,
         result:{device_id:d.deviceId,files:[d.privateFile],path:action.arguments.path},
       }});
@@ -149,4 +149,16 @@ test("credencial inválida não alcança catalogação, ferramentas ou ações",
   }, async()=>null));
   assert.equal(wrongCredential.status,403);
   assert.equal(lab.invocations.length,0);
+});
+
+test("mesmo PC e pasta não bastam: status de outro cliente é recusado", async () => {
+  const lab=createFixture();
+  const valid=await lab.tool(devices[0],"workspace_directory_list",args(devices[0]));
+  assert.equal(valid.ok,true);
+  // Same device can have multiple accounts; a request ID is not authorization.
+  // The fixture deliberately returns a status belonging to client-1 while a
+  // different token is used. It must not surface the private file.
+  const someoneElse=await lab.tool(devices[1],"ordax_action_status",{request_id:valid.request_id});
+  assert.equal(someoneElse.ok,false);
+  assert.ok(!JSON.stringify(someoneElse).includes(devices[0].privateFile));
 });
