@@ -139,6 +139,11 @@ export function createCanonicalProductMcpReadHandlers(
         // exposes only the published action fields, not arbitrary DB columns.
         return json({ ok: true, action: {
           request_id: result.request_id,
+          // Bound to signed OAuth subject/exact client; the existing RPC scopes
+          // the action before it can be returned. MCP's public projection
+          // removes these fields; Relay can use them for fail-closed checks.
+          subject_id: identity.ownerUserId,
+          client_id: identity.clientId,
           device_id: result.device_id,
           action: result.capability,
           project: null,
