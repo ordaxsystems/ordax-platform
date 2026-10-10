@@ -1315,12 +1315,12 @@ async function getProductAction(request: Request, env: Env, requestId: string): 
   const identity = await authenticateProductRequest(request, env);
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
   if (!UUID_RE.test(requestId)) return json({ ok: false, error: "product_request_id_invalid" }, 400);
-  const row = await env.DB.prepare(`SELECT r.request_id, r.action, r.project, r.created_at, j.status, j.result_json, j.error_code, j.started_at, j.finished_at, g.projects_json FROM ordax_product_action_requests r JOIN ordax_jobs j ON j.id = r.job_id LEFT JOIN ordax_product_grants g ON g.id = r.grant_id WHERE r.request_id = ?1 AND r.subject_id = ?2`).bind(requestId, identity.subjectId).first<Record<string, unknown>>();
+  const row = await env.DB.prepare(`SELECT r.request_id, r.device_id, r.action, r.project, r.created_at, j.status, j.result_json, j.error_code, j.started_at, j.finished_at, g.projects_json FROM ordax_product_action_requests r JOIN ordax_jobs j ON j.id = r.job_id LEFT JOIN ordax_product_grants g ON g.id = r.grant_id WHERE r.request_id = ?1 AND r.subject_id = ?2`).bind(requestId, identity.subjectId).first<Record<string, unknown>>();
   if (!row) return json({ ok: false, error: "product_action_not_found" }, 404);
   let result: unknown = null;
   if (typeof row.result_json === "string" && row.result_json) { try { result = JSON.parse(row.result_json); } catch { result = null; } }
   result = scopeProductResult(row.action, result, row.projects_json);
-  return json({ ok: true, action: { request_id: row.request_id, action: row.action, project: row.project, status: row.status, result, error_code: row.error_code, created_at: row.created_at, started_at: row.started_at, finished_at: row.finished_at } });
+  return json({ ok: true, action: { request_id: row.request_id, device_id: row.device_id, action: row.action, project: row.project, status: row.status, result, error_code: row.error_code, created_at: row.created_at, started_at: row.started_at, finished_at: row.finished_at } });
 }
 
 async function recordProductAudit(request: Request, env: Env): Promise<Response> {
