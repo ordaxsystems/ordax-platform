@@ -93,9 +93,9 @@ test("3 PCs: HTTP Relay -> MCP plugin -> executor correto -> resposta única por
     const reply=JSON.parse(replies[i].result);
     assert.equal(reply.requestDeviceId,clients[i].scope.deviceId);
     assert.deepEqual(reply.files,[clients[i].filename]);
-    assert.equal(executed[i].deviceId,clients[i].scope.deviceId);
-    assert.equal(executed[i].project,clients[i].scope.project);
-    assert.equal(executed[i].path,"pasta 1");
+    const execution=executed.find(item=>item.deviceId===clients[i].scope.deviceId);
+    assert.equal(execution?.project,clients[i].scope.project);
+    assert.equal(execution?.path,"pasta 1");
     assert.ok(!JSON.stringify(replies[i]).includes(clients[(i+1)%3].filename));
   }
 });
