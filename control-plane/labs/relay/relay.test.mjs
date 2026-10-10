@@ -72,3 +72,28 @@ test('falhas de inferência não expõem conteúdo, credenciais nem acionam outr
   assert.ok(!body.includes('conteudo privado'));
   assert.ok(!body.includes('pc-um'));
 });
+
+test('revogação central interrompe resposta pendente e não interfere em outros PCs', async t => {
+  let release;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const lab = await startRelayLab({
+    devices,
+    inference: async ({ deviceId }) => deviceId === devices[0].id ? blocked : 'resultado-de-outro-cliente',
+  });
+  t.after(() => lab.close());
+  const firstRequest = post(lab.url, devices[0], {request_id:randomUUID(),prompt:'analise a pasta 1'});
+  // Give the request time to reach the adapter. The test is not a proof of
+  // external inference cancellation: it proves the late result cannot leak.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(lab.revokeDevice(devices[0].id), true);
+  assert.equal(lab.revokeDevice(devices[0].id), false);
+  release('resposta atrasada nao autorizada');
+  const first = await firstRequest;
+  assert.equal(first.status, 401);
+  assert.equal((await first.json()).error, 'unauthorized');
+  const repeated = await post(lab.url, devices[0], {request_id:randomUUID(),prompt:'repetir'});
+  assert.equal(repeated.status, 401);
+  const other = await post(lab.url, devices[1], {request_id:randomUUID(),prompt:'requisicao independente'});
+  assert.equal(other.status, 200);
+  assert.equal((await other.json()).result, 'resultado-de-outro-cliente');
+});
