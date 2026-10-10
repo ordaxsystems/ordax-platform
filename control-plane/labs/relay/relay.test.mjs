@@ -12,7 +12,7 @@ const post = (url, device, body, secret = device.secret, path = '/v1/infer') => 
 
 test('3 PCs virtuais têm credenciais e resultados separados, sem lista de peers', async t => {
   const calls = [];
-  const lab = await startRelayLab({ devices, inference: async input => { calls.push(input); return `central:${input.deviceId}:${input.prompt}`; } });
+  const lab = await startRelayLab({ devices, inference: async input => { calls.push(input); return { deviceId:input.deviceId, requestId:input.requestId, result:`central:${input.deviceId}:${input.prompt}` }; } });
   t.after(() => lab.close());
   assert.match(lab.url, /^http:\/\/127\.0\.0\.1:/);
   const id = randomUUID();
@@ -37,7 +37,7 @@ test('3 PCs virtuais têm credenciais e resultados separados, sem lista de peers
 
 test('credencial roubada de outro PC, identificador trocado e campos extras são negados', async t => {
   let invoked = 0;
-  const lab = await startRelayLab({ devices, inference: async () => { invoked++; return 'ok'; } });
+  const lab = await startRelayLab({ devices, inference: async input => { invoked++; return {deviceId:input.deviceId,requestId:input.requestId,result:'ok'}; } });
   t.after(() => lab.close());
   const body = { request_id: randomUUID(), prompt: 'ola' };
   assert.equal((await post(lab.url, devices[0], body, devices[1].secret)).status, 401);
@@ -48,7 +48,7 @@ test('credencial roubada de outro PC, identificador trocado e campos extras são
 
 test('retries são idempotentes por dispositivo, nunca reutilizam saída de outro PC', async t => {
   let invoked = 0;
-  const lab = await startRelayLab({ devices, inference: async ({deviceId}) => { invoked++; return deviceId; } });
+  const lab = await startRelayLab({ devices, inference: async ({deviceId,requestId}) => { invoked++; return {deviceId,requestId,result:deviceId}; } });
   t.after(() => lab.close());
   const body = { request_id: randomUUID(), prompt: 'ola' };
   let first = await (await post(lab.url, devices[0], body)).json();
@@ -78,7 +78,7 @@ test('revogação central interrompe resposta pendente e não interfere em outro
   const blocked = new Promise(resolve => { release = resolve; });
   const lab = await startRelayLab({
     devices,
-    inference: async ({ deviceId }) => deviceId === devices[0].id ? blocked : 'resultado-de-outro-cliente',
+    inference: async ({ deviceId,requestId }) => deviceId === devices[0].id ? blocked.then(result=>({deviceId,requestId,result})) : {deviceId,requestId,result:'resultado-de-outro-cliente'},
   });
   t.after(() => lab.close());
   const firstRequest = post(lab.url, devices[0], {request_id:randomUUID(),prompt:'analise a pasta 1'});
@@ -96,4 +96,24 @@ test('revogação central interrompe resposta pendente e não interfere em outro
   const other = await post(lab.url, devices[1], {request_id:randomUUID(),prompt:'requisicao independente'});
   assert.equal(other.status, 200);
   assert.equal((await other.json()).result, 'resultado-de-outro-cliente');
+});
+
+test('resposta com deviceId ou requestId de outro usuário é rejeitada sem revelar conteúdo',async t=>{
+  const others = devices;
+  const lab = await startRelayLab({devices:others,inference:async ({deviceId,requestId})=>({
+    deviceId:deviceId === others[0].id ? others[1].id : deviceId,
+    requestId:deviceId === others[2].id ? randomUUID() : requestId,
+    result:'DADO_PRIVADO_NAO_PODE_SAIR',
+  })});
+  t.after(()=>lab.close());
+  for(const d of [others[0],others[2]]){
+    const response=await post(lab.url,d,{request_id:randomUUID(),prompt:'analise a pasta 1'});
+    assert.equal(response.status,503);
+    const body=await response.text();
+    assert.ok(!body.includes('DADO_PRIVADO_NAO_PODE_SAIR'));
+    assert.ok(!body.includes(others[1].secret));
+  }
+  const valid=await post(lab.url,others[1],{request_id:randomUUID(),prompt:'solicitacao valida'});
+  assert.equal(valid.status,200);
+  assert.equal((await valid.json()).result,'DADO_PRIVADO_NAO_PODE_SAIR');
 });
