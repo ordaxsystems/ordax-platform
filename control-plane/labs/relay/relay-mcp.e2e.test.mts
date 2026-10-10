@@ -33,7 +33,8 @@ const handlers=scopeRelayMcp({
     executed.push({deviceId:current.scope.deviceId,project:action.project,path:action.arguments.path});
     const jobId=randomUUID();
     jobs.set(jobId,{ok:true,action:{
-      request_id:jobId,device_id:current.scope.deviceId,project:current.scope.project,
+      request_id:jobId,device_id:current.scope.deviceId,
+      subject_id:current.scope.subjectId,client_id:current.scope.clientId,project:current.scope.project,
       action:action.action,status:"succeeded",error_code:null,
       result:{device_id:current.scope.deviceId,files:[current.filename]}
     }});
