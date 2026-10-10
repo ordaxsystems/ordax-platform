@@ -497,6 +497,7 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
       request_id: requestId ?? (typeof action.request_id === "string" ? action.request_id : ""),
       action: {
         name: typeof action.action === "string" ? action.action : "",
+        ...(isCanonicalUuid(action.device_id) ? { device_id: action.device_id } : {}),
         project: typeof action.project === "string" ? action.project : null,
         ...(isCanonicalUuid(action.project_id) ? { project_id: action.project_id } : {}),
         status,
