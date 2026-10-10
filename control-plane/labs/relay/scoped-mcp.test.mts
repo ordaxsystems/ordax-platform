@@ -136,8 +136,17 @@ test("resultado ou consulta de status de outro cliente não podem atravessar a f
 
 test("credencial inválida não alcança catalogação, ferramentas ou ações", async () => {
   const lab=createFixture();
-  const d={...devices[0],secret:devices[1].secret};
-  const result=await lab.tool(d,"workspace_directory_list",args(devices[0]));
-  assert.equal(result.ok,false);
+  const wrongCredential=await handleOrdaxMcp(new Request("https://lab.example/mcp", {
+    method:"POST",headers:{authorization:"Bearer invalid-credential","content-type":"application/json"},
+    body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",params:{
+      name:"workspace_directory_list",arguments:args(devices[0])
+    }})
+  }),scopeRelayMcp({
+    session:async()=>{throw new Error("should not reach backend");},
+    targets:async()=>{throw new Error("should not reach backend");},
+    createAction:async()=>{throw new Error("should not reach backend");},
+    getAction:async()=>{throw new Error("should not reach backend");},
+  }, async()=>null));
+  assert.equal(wrongCredential.status,403);
   assert.equal(lab.invocations.length,0);
 });
