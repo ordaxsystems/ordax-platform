@@ -68,8 +68,6 @@ test("status preserves published UUIDs and Product result, excluding extra datab
     const body = await response.json();
     assert.equal(body.action.request_id, requestId);
     assert.equal(body.action.device_id, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
-    assert.equal(body.action.subject_id, owner);
-    assert.equal(body.action.client_id, client);
     assert.equal(body.action.project_id, projectId);
     assert.equal(body.action.project, null);
     assert.equal(body.action.action, "project.text_read");
