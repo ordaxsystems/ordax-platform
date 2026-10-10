@@ -52,7 +52,7 @@ function permittedArgs(action: Action, args: unknown, root: string): boolean {
   }
   return true;
 }
-async function body(response: Response): Promise<Record<string,unknown>|null> {
+async function body(response: Response | Request): Promise<Record<string,unknown>|null> {
   try {
     const value = await response.json();
     return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string,unknown> : null;
@@ -97,7 +97,7 @@ export function scopeRelayMcp(handlers: OrdaxMcpHandlers, resolver: Resolver): O
     async createAction(request) {
       const scope = await scopeFor(request);
       if (!scope) return denied();
-      const data = await body(new Response(request.body, {headers:request.headers}));
+      const data = await body(request.clone());
       if (!data || data.device_id !== scope.deviceId || data.space_id !== scope.spaceId
         || data.project !== scope.project || typeof data.action !== "string"
         || !scope.actions.includes(data.action as Action)
