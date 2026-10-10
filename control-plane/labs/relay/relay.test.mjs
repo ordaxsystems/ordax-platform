@@ -1,0 +1,74 @@
+import assert from 'node:assert/strict';
+import { randomBytes, randomUUID } from 'node:crypto';
+import test from 'node:test';
+import { startRelayLab } from './relay.mjs';
+
+const devices = ['pc-um', 'pc-dois', 'pc-tres'].map(id => ({ id, secret: randomBytes(32).toString('hex') }));
+const post = (url, device, body, secret = device.secret, path = '/v1/infer') => fetch(url + path, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', authorization: `Bearer ${secret}`, 'x-ordax-lab-device-id': device.id },
+  body: JSON.stringify(body),
+});
+
+test('3 PCs virtuais têm credenciais e resultados separados, sem lista de peers', async t => {
+  const calls = [];
+  const lab = await startRelayLab({ devices, inference: async input => { calls.push(input); return `central:${input.deviceId}:${input.prompt}`; } });
+  t.after(() => lab.close());
+  assert.match(lab.url, /^http:\/\/127\.0\.0\.1:/);
+  const id = randomUUID();
+  const replies = await Promise.all(devices.map(async device => {
+    const res = await post(lab.url, device, { request_id: id, prompt: 'teste' });
+    assert.equal(res.status, 200);
+    return res.json();
+  }));
+  assert.equal(calls.length, 3);
+  for (let i = 0; i < devices.length; i++) {
+    assert.equal(replies[i].result, `central:${devices[i].id}:teste`);
+    assert.equal(replies[i].source, 'lab-adapter');
+    assert.equal(replies[i].replayed, false);
+    assert.ok(!JSON.stringify(replies[i]).includes(devices[(i + 1) % 3].id));
+  }
+  const response = await fetch(lab.url + '/v1/devices');
+  assert.equal(response.status, 404);
+  assert.ok(!JSON.stringify(await response.json()).includes('pc-dois'));
+  assert.equal((await post(lab.url, devices[0], { request_id: randomUUID(), prompt: 'toque' }, undefined, '/v1/infer/pc-dois')).status, 404);
+  assert.equal((await post(lab.url, devices[0], { request_id: randomUUID(), prompt: 'toque', target_device_id: 'pc-dois' })).status, 400);
+});
+
+test('credencial roubada de outro PC, identificador trocado e campos extras são negados', async t => {
+  let invoked = 0;
+  const lab = await startRelayLab({ devices, inference: async () => { invoked++; return 'ok'; } });
+  t.after(() => lab.close());
+  const body = { request_id: randomUUID(), prompt: 'ola' };
+  assert.equal((await post(lab.url, devices[0], body, devices[1].secret)).status, 401);
+  assert.equal((await post(lab.url, { ...devices[0], id: 'pc-inexistente' }, body)).status, 401);
+  assert.equal((await post(lab.url, devices[0], { ...body, space_id: 'outro' })).status, 400);
+  assert.equal(invoked, 0);
+});
+
+test('retries são idempotentes por dispositivo, nunca reutilizam saída de outro PC', async t => {
+  let invoked = 0;
+  const lab = await startRelayLab({ devices, inference: async ({deviceId}) => { invoked++; return deviceId; } });
+  t.after(() => lab.close());
+  const body = { request_id: randomUUID(), prompt: 'ola' };
+  let first = await (await post(lab.url, devices[0], body)).json();
+  let retry = await (await post(lab.url, devices[0], body)).json();
+  let other = await (await post(lab.url, devices[1], body)).json();
+  assert.equal(first.replayed, false);
+  assert.equal(retry.replayed, true);
+  assert.equal(other.replayed, false);
+  assert.equal(other.result, devices[1].id);
+  assert.equal(invoked, 2);
+  assert.equal((await post(lab.url, devices[0], { ...body, prompt: 'alterado' })).status, 409);
+});
+
+test('falhas de inferência não expõem conteúdo, credenciais nem acionam outro PC', async t => {
+  const lab = await startRelayLab({ devices, inference: async () => { throw new Error('private provider token'); } });
+  t.after(() => lab.close());
+  const response = await post(lab.url, devices[2], { request_id: randomUUID(), prompt: 'conteudo privado' });
+  assert.equal(response.status, 503);
+  const body = await response.text();
+  assert.ok(!body.includes('provider token'));
+  assert.ok(!body.includes('conteudo privado'));
+  assert.ok(!body.includes('pc-um'));
+});
