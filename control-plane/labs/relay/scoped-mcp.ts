@@ -16,6 +16,9 @@ type Scope = Readonly<{
   actions: readonly Action[];
 }>;
 type Resolver = (request: Request) => Promise<Scope | null>;
+// Must consult the canonical Product authority using authenticated owner/exact
+// client and request ID. No LLM assertion or status payload can attest ownership.
+type VerifyReceipt = (request: Request, requestId: string, scope: Scope) => Promise<boolean>;
 const json = (body: unknown, status = 200) => Response.json(body, {status, headers: {"cache-control":"no-store"}});
 const denied = () => json({ok:false,error:"relay_scope_denied"},403);
 const unavailable = () => json({ok:false,error:"relay_scope_unavailable"},503);
@@ -64,7 +67,8 @@ async function body(response: Response | Request): Promise<Record<string,unknown
  * boundary. No request JSON, LLM content or arbitrary device header may mint
  * this scope. Wraps the actual Product MCP handlers, not a second MCP server.
  */
-export function scopeRelayMcp(handlers: OrdaxMcpHandlers, resolver: Resolver): OrdaxMcpHandlers {
+export function scopeRelayMcp(handlers: OrdaxMcpHandlers, resolver: Resolver, verifyReceipt: VerifyReceipt): OrdaxMcpHandlers {
+  if (typeof verifyReceipt !== "function") throw new TypeError("relay_receipt_authority_required");
   const scopeFor = async (request: Request) => {
     try { const value = await resolver(request); return validScope(value) ? value : null; }
     catch { return null; }
@@ -108,16 +112,19 @@ export function scopeRelayMcp(handlers: OrdaxMcpHandlers, resolver: Resolver): O
     async getAction(request, requestId) {
       const scope = await scopeFor(request);
       if (!scope) return denied();
+      let ownershipVerified = false;
+      try { ownershipVerified = (await verifyReceipt(request, requestId, scope)) === true; }
+      catch { return denied(); }
+      if (!ownershipVerified) return denied();
       const upstream = await handlers.getAction(request, requestId);
       if (!upstream.ok) return denied();
       const payload = await body(upstream);
       const action = payload?.action;
       if (payload?.ok !== true || !action || typeof action !== "object" || Array.isArray(action)) return denied();
       const data = action as Record<string,unknown>;
-      // Both subject and exact client must be verified by canonical authority.
-      // A central operator credential or a shared device is never sufficient.
+      // Device/project must still match the attested request record. Ownership
+      // is verified independently to avoid exposing identities in MCP output.
       if (data.request_id !== requestId || data.device_id !== scope.deviceId
-        || data.subject_id !== scope.subjectId || data.client_id !== scope.clientId
         || !scope.actions.includes(data.action as Action)
         || data.project !== scope.project) return denied();
       return json(payload);
