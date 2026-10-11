@@ -17,6 +17,7 @@ function createFixture() {
   const records = new Map();
   const invocations = [];
   let corruptStatus = false;
+  let omitDevice = false;
   const hub = {
     async session() { return Response.json({ok:true,session:{subject_id:"HUB-OPERATOR-NOT-FOR-CLIENTS"}}); },
     async targets() { return Response.json({ok:true, targets:devices.map(d => ({
@@ -39,6 +40,10 @@ function createFixture() {
     async getAction(_req,requestId) {
       const record = records.get(requestId);
       if (!record) return Response.json({ok:false,error:"not_found"},{status:404});
+      if (omitDevice) {
+        const {device_id, ...unboundAction} = record.action;
+        return Response.json({ok:true,action:unboundAction});
+      }
       if (corruptStatus) return Response.json({ok:true,action:{...record.action,device_id:devices[2].deviceId,
         result:{secret:devices[2].privateFile}}});
       return Response.json(record);
@@ -71,7 +76,7 @@ function createFixture() {
     const payload = await res.json();
     return payload.result?.structuredContent || payload.error;
   }
-  return {tool,invocations, corrupt:()=>{corruptStatus=true;}};
+  return {tool,invocations, corrupt:()=>{corruptStatus=true;},omitDevice:()=>{omitDevice=true;}};
 }
 const args = d => ({device_id:d.deviceId,project:d.project,path:"pasta 1",wait_for_completion_ms:0});
 
@@ -226,4 +231,13 @@ test("caminhos codificados, aliases NTFS e Unicode equivalente não escapam do e
   assert.equal(lab.invocations.length,0);
   const permitted=await lab.tool(devices[0],"workspace_directory_list",{...args(devices[0]),path:"pasta 1/subpasta"});
   assert.equal(permitted.ok,true);
+});
+
+test("legacy MCP receipt without device_id cannot be mistaken for a valid Relay result",async()=>{
+  const lab=createFixture();
+  lab.omitDevice();
+  const first=await lab.tool(devices[0],"workspace_directory_list",args(devices[0]));
+  assert.equal(first.ok,false);
+  assert.ok(!JSON.stringify(first).includes(devices[0].privateFile));
+  assert.equal(lab.invocations.length,1);
 });
