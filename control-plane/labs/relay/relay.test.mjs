@@ -117,3 +117,87 @@ test('resposta com deviceId ou requestId de outro usuário é rejeitada sem reve
   assert.equal(valid.status,200);
   assert.equal((await valid.json()).result,'DADO_PRIVADO_NAO_PODE_SAIR');
 });
+
+test('cancelamento do mesmo cliente encerra uma solicitação sem repetir o adapter', async t => {
+  let begin;
+  const started = new Promise(resolve => { begin = resolve; });
+  let executed = 0, observedSignal;
+  const lab = await startRelayLab({
+    devices,
+    inferenceTimeoutMs: 5000,
+    inference: async input => {
+      executed++;
+      observedSignal = input.signal;
+      begin();
+      return new Promise(() => {});
+    },
+  });
+  t.after(() => lab.close());
+  const requestId = randomUUID();
+  const body = {request_id: requestId, prompt: 'analise a pasta 1'};
+  const pending = post(lab.url, devices[0], body);
+  await started;
+  // A different PC may not cancel this request even with its request ID.
+  const wrong = await post(lab.url, devices[1], { request_id: requestId }, undefined, '/v1/cancel');
+  assert.equal(wrong.status, 202);
+  assert.equal(observedSignal.aborted, false);
+  const cancel = await post(lab.url, devices[0], { request_id: requestId }, undefined, '/v1/cancel');
+  assert.equal(cancel.status, 202);
+  assert.equal((await cancel.json()).accepted, true);
+  const stopped = await pending;
+  assert.equal(stopped.status, 409);
+  assert.equal((await stopped.json()).error, 'request_cancelled');
+  assert.equal(observedSignal.aborted, true);
+  const retried = await post(lab.url, devices[0], body);
+  assert.equal(retried.status, 409);
+  assert.equal((await retried.json()).replayed, true);
+  assert.equal(executed, 1);
+});
+
+test('timeout termina trabalho preso sem permitir reexecução do mesmo request ID', async t => {
+  let executed = 0, signal;
+  const lab = await startRelayLab({
+    devices, inferenceTimeoutMs: 35,
+    inference: async input => { executed++; signal = input.signal; return new Promise(() => {}); }
+  });
+  t.after(() => lab.close());
+  const payload = {request_id:randomUUID(),prompt:'analisar conteudo'};
+  const timedOut = await post(lab.url,devices[0],payload);
+  assert.equal(timedOut.status,504);
+  assert.equal((await timedOut.json()).error,'adapter_timeout');
+  assert.equal(signal.aborted,true);
+  const duplicate = await post(lab.url,devices[0],payload);
+  assert.equal(duplicate.status,504);
+  assert.equal((await duplicate.json()).replayed,true);
+  assert.equal(executed,1);
+});
+
+test('falhas terminais e capacidade de recibos nunca fazem replay silencioso', async t => {
+  let count = 0;
+  const lab = await startRelayLab({
+    devices,maxReceipts:2,
+    inference:async ({deviceId,requestId}) => {
+      count++;
+      if(count===1) throw Error('secret-backend-stacktrace');
+      return {deviceId,requestId,result:'ok'};
+    }
+  });
+  t.after(()=>lab.close());
+  const first = {request_id:randomUUID(),prompt:'primeiro'};
+  assert.equal((await post(lab.url,devices[0],first)).status,503);
+  const retry = await post(lab.url,devices[0],first);
+  assert.equal(retry.status,503);
+  assert.equal((await retry.json()).error,'adapter_unavailable');
+  assert.equal((await post(lab.url,devices[1],{request_id:randomUUID(),prompt:'segundo'})).status,200);
+  const blocked = await post(lab.url,devices[2],{request_id:randomUUID(),prompt:'terceiro'});
+  assert.equal(blocked.status,503);
+  assert.equal((await blocked.json()).error,'lab_receipt_capacity_exhausted');
+  assert.equal(count,2);
+  assert.equal((await post(lab.url,devices[0],first)).status,503);
+  assert.equal(count,2);
+});
+
+test('tokens de dispositivo duplicados são recusados antes de iniciar qualquer conexão',async()=>{
+  await assert.rejects(startRelayLab({devices:[devices[0],{...devices[1],secret:devices[0].secret}],
+    inference:async()=>({})}),/duplicate_lab_credential/);
+});
