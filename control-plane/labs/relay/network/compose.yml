@@ -1,0 +1,89 @@
+# Fully isolated container NETWORK laboratory, not production orchestration.
+# No published host ports or shared spoke network. Each spoke reaches only hub
+# and its own sentinel. Kernel/filesystem VM isolation is NOT claimed.
+x-node-test: &node-test
+  image: node:22-alpine
+  user: node
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 40
+
+services:
+  hub:
+    <<: *node-test
+    command: [node, /lab/network/hub.mjs]
+    volumes: ["..:/lab:ro"]
+    environment:
+      ORDAX_RELAY_NETWORK_LAB: internal-container-only
+      RELAY_TEST_SPOKE1_TOKEN: "${RELAY_TEST_SPOKE1_TOKEN:?required}"
+      RELAY_TEST_SPOKE2_TOKEN: "${RELAY_TEST_SPOKE2_TOKEN:?required}"
+      RELAY_TEST_SPOKE3_TOKEN: "${RELAY_TEST_SPOKE3_TOKEN:?required}"
+    networks:
+      pair1: {ipv4_address: 172.29.201.10}
+      pair2: {ipv4_address: 172.29.202.10}
+      pair3: {ipv4_address: 172.29.203.10}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8900/v1/devices').then(r=>process.exit(r.status===404?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+  sentinel1:
+    <<: *node-test
+    command: [node, -e, "require('node:net').createServer(s=>s.end('ok')).listen(9901,'0.0.0.0')"]
+    networks:
+      pair1: {ipv4_address: 172.29.201.30}
+  sentinel2:
+    <<: *node-test
+    command: [node, -e, "require('node:net').createServer(s=>s.end('ok')).listen(9901,'0.0.0.0')"]
+    networks:
+      pair2: {ipv4_address: 172.29.202.30}
+  sentinel3:
+    <<: *node-test
+    command: [node, -e, "require('node:net').createServer(s=>s.end('ok')).listen(9901,'0.0.0.0')"]
+    networks:
+      pair3: {ipv4_address: 172.29.203.30}
+  spoke1:
+    <<: *node-test
+    command: [node, /lab/network/spoke.mjs]
+    volumes: ["..:/lab:ro"]
+    environment:
+      ORDAX_RELAY_NETWORK_LAB: internal-container-only
+      RELAY_TEST_CLIENT_ID: spoke-1
+      RELAY_TEST_CLIENT_TOKEN: "${RELAY_TEST_SPOKE1_TOKEN:?required}"
+      RELAY_TEST_OWN_SENTINEL: "1"
+    networks:
+      pair1: {ipv4_address: 172.29.201.20}
+  spoke2:
+    <<: *node-test
+    command: [node, /lab/network/spoke.mjs]
+    volumes: ["..:/lab:ro"]
+    environment:
+      ORDAX_RELAY_NETWORK_LAB: internal-container-only
+      RELAY_TEST_CLIENT_ID: spoke-2
+      RELAY_TEST_CLIENT_TOKEN: "${RELAY_TEST_SPOKE2_TOKEN:?required}"
+      RELAY_TEST_OWN_SENTINEL: "2"
+    networks:
+      pair2: {ipv4_address: 172.29.202.20}
+  spoke3:
+    <<: *node-test
+    command: [node, /lab/network/spoke.mjs]
+    volumes: ["..:/lab:ro"]
+    environment:
+      ORDAX_RELAY_NETWORK_LAB: internal-container-only
+      RELAY_TEST_CLIENT_ID: spoke-3
+      RELAY_TEST_CLIENT_TOKEN: "${RELAY_TEST_SPOKE3_TOKEN:?required}"
+      RELAY_TEST_OWN_SENTINEL: "3"
+    networks:
+      pair3: {ipv4_address: 172.29.203.20}
+
+networks:
+  pair1:
+    internal: true
+    ipam: {config: [{subnet: 172.29.201.0/24}]}
+  pair2:
+    internal: true
+    ipam: {config: [{subnet: 172.29.202.0/24}]}
+  pair3:
+    internal: true
+    ipam: {config: [{subnet: 172.29.203.0/24}]}
