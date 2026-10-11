@@ -11,7 +11,10 @@
  * Internal only. Never mount the "binding" parameter on a model-facing route.
  */
 import { authenticateProductMcpClientRequest, type ProductAuthEnv } from "./product_auth.ts";
-import { listCanonicalProductTargets, type ProductPostgresEnv } from "./product_postgres_store.ts";
+import {
+  listCanonicalProductTargets, verifyProductCentralConversation,
+  type ProductPostgresEnv,
+} from "./product_postgres_store.ts";
 import { selectCanonicalRelayProjectScope, selectCanonicalRelayDeviceScope } from "./product_relay_scope.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 
@@ -124,6 +127,42 @@ export function createCanonicalCentralAdmissionVerifier(env: Env, deps: Dependen
       });
     } catch {
       return unavailable();
+    }
+  };
+}
+
+
+/**
+ * Real Product PostgreSQL adapter for the previously abstract verifySession.
+ * Every lookup goes to the same canonical Hyperdrive/PostgreSQL owner.
+ * There is no cache and no fallback to browser URLs, MCP model arguments,
+ * a provider correlation marker alone or the old D1 database.
+ *
+ * Bindings can only be REGISTERED after a trusted host has authenticated the
+ * originating Central request and independently attested this conversation.
+ * The SQL lookup is an additional proof that the mapping exists and that the
+ * signed OAuth client + CURRENT grant still match; it cannot by itself prove
+ * that ChatGPT generated an observed _meta value.
+ */
+export function createPostgresCentralSessionVerifier(
+  env: Env,
+  lookup: typeof verifyProductCentralConversation=verifyProductCentralConversation,
+): VerifySession {
+  return async (client,binding):Promise<boolean> => {
+    if (!validBinding(binding) || !validChatGptSessionMarker(binding.sessionId)
+      || client.ownerUserId.toLowerCase()!==binding.subjectId.toLowerCase()
+      || client.clientId!==binding.clientId || client.clientKind!=="product-mcp")
+      return false;
+    try {
+      return (await lookup(env,{
+        ownerUserId:client.ownerUserId,clientId:client.clientId,
+        deviceId:binding.deviceId,spaceId:binding.spaceId,
+        projectId:binding.projectId,requestId:binding.requestId,
+        conversationId:binding.conversationId,sessionId:binding.sessionId,
+      }))===true;
+    } catch {
+      // DB/Hyperdrive unavailable is a hard denial, never a local fallback.
+      return false;
     }
   };
 }
