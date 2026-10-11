@@ -49,6 +49,11 @@ const handlers=scopeRelayMcp({
   const user=clients.find(client=>token.length===client.secret.length &&
     timingSafeEqual(Buffer.from(token),Buffer.from(client.secret)));
   return user?.scope || null;
+},async (_request,requestId,scope)=>{
+  const action=jobs.get(requestId)?.action;
+  return Boolean(action && action.subject_id===scope.subjectId &&
+    action.client_id===scope.clientId && action.device_id===scope.deviceId &&
+    action.project===scope.project);
 });
 
 async function adapter({deviceId,prompt,requestId}) {
