@@ -62,6 +62,7 @@ export function createCanonicalProductMcpGateway(env: Env, reads: ReadHandlers =
         oauth_discovery_ready: discovery.ok, supports_remote_actions: false,
         ...(discovery.error ? { error: discovery.error } : {}),
         ...(discovery.upstream_http_status !== undefined ? { upstream_http_status: discovery.upstream_http_status } : {}),
+        ...(discovery.failure_stage ? { failure_stage: discovery.failure_stage } : {}),
       }, discovery.ok ? 200 : 503);
     }
     if (request.method === "GET" && metadata) {
