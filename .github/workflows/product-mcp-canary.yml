@@ -1,3 +1,4 @@
+# Product OAuth readiness regressions are mandatory.
 name: Canonical Product MCP Canary
 
 on:
