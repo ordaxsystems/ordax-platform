@@ -156,7 +156,7 @@ test("model cannot supply device, project, operation UUID or idempotency in its 
   });
 });
 
-test("revoked, expired and ambiguous Product grants deny without creating a request",async()=>{
+test("revoked, expired, unbound and ambiguous Product grants deny without creating a request",async()=>{
   await withIssuer(async()=>{
     let mode="normal",writes=0;
     const handler=createCanonicalRelayActionSubmitHandler(env,{
@@ -164,7 +164,8 @@ test("revoked, expired and ambiguous Product grants deny without creating a requ
         if(mode==="revoked")return {ok:true,targets:[]};
         const current=grant();
         if(mode==="expired")current.targets[0].grant_groups[0].valid_until="2020-01-01T00:00:00Z";
-        if(mode==="multiple-targets")current.targets.push({device_id:secondDevice,grant_groups:[]});
+        if(mode==="target-absent")return {ok:true,targets:[{device_id:secondDevice,grant_groups:[]}]};
+        if(mode==="duplicate-device")current.targets.push(current.targets[0]);
         if(mode==="multiple-projects")current.targets[0].grant_groups.push({
           grant_group_id:randomUUID(),space_id:spaceId,project_id:randomUUID(),valid_until:null,
           capabilities:[{capability:"workspace.directory_list",access_mode:"read"}],
@@ -174,7 +175,7 @@ test("revoked, expired and ambiguous Product grants deny without creating a requ
       enqueue:async()=>{writes++;throw Error("unexpected");},
     });
     const jwt=await token();
-    for(mode of ["revoked","expired","multiple-targets","multiple-projects"]){
+    for(mode of ["revoked","expired","target-absent","duplicate-device","multiple-projects"]){
       const result=await submit(handler,jwt,bound);
       assert.equal(result.status,403,mode);
     }
@@ -271,5 +272,38 @@ test("same device with two OAuth clients retains separate operation and grant au
     assert.equal((writes[1] as Record<string,unknown>).projectId,projectB);
     assert.notEqual((writes[0] as Record<string,unknown>).idempotencyKey,
       (writes[1] as Record<string,unknown>).idempotencyKey);
+  });
+});
+
+test("two PCs under one signed account can dispatch only to the explicitly host-bound PC",async()=>{
+  await withIssuer(async()=>{
+    const many=[
+      grant({deviceId:device,projectId,spaceId}).targets[0],
+      grant({deviceId:secondDevice,projectId:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",spaceId}).targets[0],
+    ];
+    const calls:unknown[]=[];
+    const handler=createCanonicalRelayActionSubmitHandler(env,{
+      listTargets:async()=>({ok:true,targets:many}),
+      enqueue:async(_,input)=>{calls.push(input);
+        return {ok:true,request_id:randomUUID(),effect_id:randomUUID(),status:"queued",replayed:false};}
+    });
+    const jwt=await token();
+    const first=await submit(handler,jwt,bound);
+    const secondBinding={...bound,deviceId:secondDevice,
+      projectId:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",operationId:randomUUID()};
+    const second=await submit(handler,jwt,secondBinding);
+    assert.equal(first.status,202);
+    assert.equal(second.status,202);
+    assert.equal(first.body.device_id,device);
+    assert.equal(second.body.device_id,secondDevice);
+    assert.equal(calls.length,2);
+    assert.equal((calls[0] as Record<string,unknown>).deviceId,device);
+    assert.equal((calls[1] as Record<string,unknown>).deviceId,secondDevice);
+    // The LLM cannot pick a destination even when the account owns both PCs.
+    const untrusted=await submit(handler,jwt,bound,{...body,device_id:secondDevice});
+    assert.equal(untrusted.status,400);
+    const swapped=await submit(handler,jwt,{...bound,deviceId:secondDevice});
+    assert.equal(swapped.status,403);
+    assert.equal(calls.length,2);
   });
 });
