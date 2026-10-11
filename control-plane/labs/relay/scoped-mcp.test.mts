@@ -52,7 +52,15 @@ function createFixture() {
     const {secret, privateFile, ...scope} = d;
     return scope;
   };
-  const handlers = scopeRelayMcp(hub,resolver);
+  const verify = async (_req, requestId, scope) => {
+    // The test store plays the role of canonical Product authority. It is
+    // independent of the LLM's tool arguments and public result payload.
+    const action = records.get(requestId)?.action;
+    return Boolean(action && action.subject_id === scope.subjectId
+      && action.client_id === scope.clientId && action.device_id === scope.deviceId
+      && action.project === scope.project);
+  };
+  const handlers = scopeRelayMcp(hub,resolver,verify);
   async function tool(d, name, args) {
     const res = await handleOrdaxMcp(new Request("https://lab.example/mcp",{
       method:"POST",headers:{authorization:`Bearer ${d.secret}`,"content-type":"application/json"},
@@ -146,7 +154,7 @@ test("credencial inválida não alcança catalogação, ferramentas ou ações",
     targets:async()=>{throw new Error("should not reach backend");},
     createAction:async()=>{throw new Error("should not reach backend");},
     getAction:async()=>{throw new Error("should not reach backend");},
-  }, async()=>null));
+  }, async()=>null, async()=>false));
   assert.equal(wrongCredential.status,403);
   assert.equal(lab.invocations.length,0);
 });
