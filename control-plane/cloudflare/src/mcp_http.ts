@@ -523,8 +523,8 @@ function cloneWithAuth(source: Request, url: string, method: string, body?: unkn
   return new Request(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 }
 
-function toolDefinitions(): JsonObject[] {
-  return TOOLS.map((tool) => {
+function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
+  return TOOLS.filter(tool => !allowedTools || allowedTools.has(tool.name)).map((tool) => {
     const invocation = toolInvocationText(tool.name);
     return {
       name: tool.name,
@@ -726,7 +726,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   return textToolResult(finalPayload, failed);
 }
 
-export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandlers): Promise<Response> {
+export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandlers, allowedTools?: ReadonlySet<string>): Promise<Response> {
   if (request.method === "GET") return new Response(null, { status: 405, headers: { allow: "POST" } });
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "GET, POST" } });
 
@@ -760,14 +760,14 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
     serverInfo: { name: "ORDAX Control Plane", version: "0.4.2" },
     instructions: "Use ORDAX Studio only when the user asks to work with a connected ORDAX device or one of its registered projects. List authorized devices before project-scoped work when the target is unknown. The device hosting this conversation is not automatically the execution target. Select the user's intended device and project; do not silently switch targets. Device kind, account login and reported presence do not grant file, desktop or mobile capabilities. Use only tools authorized and supported by the selected device; do not infer phone file or sensor access from a mobile catalog entry. A cloud-hosted conversation, stored file or GitHub repository does not establish a cloud executor. Respect project boundaries and the user's explicit intent. Write, execute, Git and Blender mutation tools remain grant- and audit-protected by the ORDAX Runtime.",
   });
-  if (method === "tools/list") return rpcResult(id, { tools: toolDefinitions() });
+  if (method === "tools/list") return rpcResult(id, { tools: toolDefinitions(allowedTools) });
   if (method === "tools/call") {
     const params = message.params;
     if (!params || typeof params !== "object" || Array.isArray(params)) return rpcError(id, -32602, "Invalid params");
     const name = typeof (params as JsonObject).name === "string" ? String((params as JsonObject).name) : "";
     const rawArgs = (params as JsonObject).arguments;
     const args = rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
-    if (!specFor(name)) return rpcError(id, -32601, "Tool not found", { tool: name });
+    if (!specFor(name) || (allowedTools && !allowedTools.has(name))) return rpcError(id, -32601, "Tool not found", { tool: name });
     try {
       return rpcResult(id, await callTool(request, name, args, handlers));
     } catch {
