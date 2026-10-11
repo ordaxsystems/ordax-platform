@@ -51,6 +51,45 @@ if(response.status!==200 || data.ok!==true || data.request_id!==requestId
 for(const peer of [1,2,3].filter(n=>'spoke-'+n!==id)){
   if(data.result.includes('spoke-'+peer)) throw Error('PEER_CONTENT_LEAK');
 }
+// A real network-level attempt to impersonate the other spoke must not
+// reach the adapter even though all three clients talk to the same hub.
+const foreign='spoke-'+([1,2,3].find(n=>'spoke-'+n!==id));
+const impersonated=await fetch('http://hub:8900/v1/infer',{
+  method:'POST',headers:{
+    'content-type':'application/json','authorization':'Bearer '+token,
+    'x-ordax-lab-device-id':foreign,
+  },
+  body:JSON.stringify({request_id:randomUUID(),prompt:'tentar agir por outro pc'}),
+  signal:AbortSignal.timeout(8000),
+});
+if(impersonated.status!==401) throw Error('OTHER_DEVICE_IMPERSONATION_ACCEPTED');
+if(JSON.stringify(await impersonated.json()).includes('isolated:')) throw Error('OTHER_DEVICE_RESULT_EXPOSED');
+
+// Three independent conversation-like turns per spoke, interleaved across the
+// three real container clients. This proves receipt routing, NOT GPT memory.
+const latencies=[];
+for(let turn=1;turn<=3;turn++){
+  const turnId=randomUUID();
+  const phrase='turno-'+turn+'-'+id;
+  const started=performance.now();
+  const current=await fetch('http://hub:8900/v1/infer',{
+    method:'POST',headers:{
+      'content-type':'application/json','authorization':'Bearer '+token,
+      'x-ordax-lab-device-id':id,
+    },
+    body:JSON.stringify({request_id:turnId,prompt:phrase}),
+    signal:AbortSignal.timeout(8000),
+  });
+  const roundTripMs=performance.now()-started;
+  const value=await current.json();
+  if(current.status!==200 || value.request_id!==turnId
+    || value.result!=='isolated:'+id+':'+phrase) throw Error('CROSS_CONVERSATION_RESULT');
+  if([1,2,3].some(n=>'spoke-'+n!==id && JSON.stringify(value).includes('isolated:spoke-'+n))) {
+    throw Error('PEER_CONVERSATION_CONTENT_LEAK');
+  }
+  latencies.push(Number(roundTripMs.toFixed(2)));
+}
+console.log('RELAY_NETWORK_LATENCY_MS='+id+':'+latencies.join(','));
 const discovery=await fetch('http://hub:8900/v1/devices',{
   signal:AbortSignal.timeout(3000),
 });
