@@ -13,7 +13,7 @@ broker, fila de ações ou histórico paralelo.
 
 ## Contrato servidor
 
-- `ordax_bind_central_conversation_v1` — grava **uma associação imutável**
+- `ordax_bind_central_conversation_v1` — **uso exclusivo do attestor confiável**, grava **uma associação imutável**
   por request e recusa a reutilização da sessão ou conversa por outro pedido.
   Exige dono Auth elegível, PC ativo, grant canônico read vigente para o
   cliente exato, escopo exato e validade de no máximo **30 minutos**.
@@ -28,13 +28,28 @@ broker, fila de ações ou histórico paralelo.
   a RPC do owner canônico via Hyperdrive, sem caches ou queda para D1.
   Marcador ausente, resposta SQL inválida e falha de conectividade negam.
 
-As funções são `SECURITY DEFINER` com `search_path=''`, ACL explícita
-para **somente `ordax_edge_executor`**, sem acesso direto à tabela privada.
-`anon`, `authenticated`, `service_role` e
-`ordax_edge_runtime` não podem registrar/verificar/revogar.
-A tabela usa RLS forçada; `ordax_edge_executor` também não recebe SELECT
-direto. Teste `central_conversation_binding_postflight.sql` valida as ACLs
-no PostgreSQL efetivamente instalado, sem inserir dados.
+As funções são `SECURITY DEFINER` com `search_path=''`. A migração
+de endurecimento **`20261007214000_central_attestor_least_privilege_v1.sql`**
+corrige uma herança real descoberta na homologação: a role de login
+`ordax_edge_runtime` herda `ordax_edge_executor`, então conceder a
+este último **bind/revoke** também concederia escrita ao Runtime.
+O contrato efetivo separa:
+
+- `ordax_central_attestation_executor`: role **NOLOGIN, NOINHERIT**,
+  única com EXECUTE de **bind/revoke**; nenhum login/Worker público recebeu
+  essa role. Precisa de provisionamento explícito do host autenticado futuro.
+- `ordax_edge_executor`: apenas EXECUTE de **verify**, que o
+  `ordax_edge_runtime` herda para consultar uma associação já existente.
+  Não pode vinculá-la, alterá-la ou revogá-la.
+- `anon`, `authenticated` e `service_role`: nenhuma das três RPCs.
+  Nenhum papel cliente ou Runtime tem SELECT direto na tabela privada.
+
+A tabela usa RLS forçada. O teste SQL
+`central_conversation_binding_postflight.sql` já foi executado no
+PostgreSQL efetivamente instalado e aprovou as ACLs, os predicados de
+igualdade e a rejeição de sessão não cadastrada, sem gravar dados.
+**Migrações aplicadas:** versões reais Supabase `20261011230128`
+e `20261011230243`, ambas registradas no SSOT com hashes de blob.
 
 ## Regra obrigatória de confiança
 
