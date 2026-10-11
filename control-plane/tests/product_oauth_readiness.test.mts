@@ -59,7 +59,7 @@ test("disabled Supabase OAuth 2.1 server does not turn configured variables into
   assert.equal(status.status, 503);
   assert.deepEqual(await status.json(), {
     ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
-    supports_remote_actions: false, error: "oauth_discovery_unavailable",
+    supports_remote_actions: false, error: "oauth_discovery_unavailable", upstream_http_status: 404,
   });
   assert.equal(status.headers.get("cache-control"), "no-store");
   const health = await run(new Request("https://platform.example/health"));
