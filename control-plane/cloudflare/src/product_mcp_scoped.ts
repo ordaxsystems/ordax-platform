@@ -13,7 +13,7 @@ type Scope = Readonly<{
   spaceId: string | null;
   project: string;
   /** Canonical Product project UUID. Presence means read-only cutover mode. */
-  projectId?: string;
+  projectId?: string | null;
   rootPath: string;
   actions: readonly Action[];
 }>;
@@ -46,7 +46,7 @@ function validScope(scope: Scope | null): scope is Scope {
     && typeof scope.clientId === "string" && scope.clientId.length >= 8 && scope.clientId.length <= 160
     && /^[A-Za-z0-9][A-Za-z0-9._:-]+$/.test(scope.clientId)
     && (scope.spaceId === null || UUID.test(scope.spaceId)) && PROJECT.test(scope.project)
-    && (scope.projectId === undefined || UUID.test(scope.projectId))
+    && (scope.projectId === undefined || scope.projectId === null || UUID.test(scope.projectId))
     && pathWithin(scope.rootPath, scope.rootPath)
     && Array.isArray(scope.actions) && scope.actions.length > 0
     && scope.actions.every(item => ALLOWED.has(item));
