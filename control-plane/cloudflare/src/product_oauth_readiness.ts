@@ -12,6 +12,8 @@ export type ProductOAuthDiscovery = Readonly<{
   ok: boolean;
   error: "oauth_issuer_invalid" | "oauth_discovery_unavailable" | "oauth_discovery_invalid" | null;
   upstream_http_status?: number;
+  /** Diagnostic phase only; never return exception messages or upstream bodies. */
+  failure_stage?: "fetch" | "read_metadata";
 }>;
 
 function validEndpoint(value: unknown, issuer: string): boolean {
@@ -87,23 +89,30 @@ export async function checkCanonicalProductOAuthDiscovery(
   }
   const url = issuer.slice(0, -"/auth/v1".length)
     + "/.well-known/oauth-authorization-server/auth/v1";
+  // Distinguish a network/runtime failure from an unreadable metadata body.
+  // No exception text, upstream response body, user data or tokens are exposed.
+  let response: Response;
   try {
-    const response = await fetchDiscovery(url, {
+    response = await fetchDiscovery(url, {
       method: "GET",
       redirect: "error",
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(5000),
     });
-    if (response.status !== 200 || !response.ok) {
-      // HTTP status is safe to report. Never expose upstream body or headers.
-      return { ok: false, error: "oauth_discovery_unavailable", upstream_http_status: response.status };
-    }
-    const metadata = await boundedMetadata(response);
-    if (!validMetadata(metadata, issuer)) {
-      return { ok: false, error: "oauth_discovery_invalid" };
-    }
-    return { ok: true, error: null };
   } catch {
-    return { ok: false, error: "oauth_discovery_unavailable" };
+    return { ok: false, error: "oauth_discovery_unavailable", failure_stage: "fetch" };
   }
+  if (response.status !== 200 || !response.ok) {
+    return { ok: false, error: "oauth_discovery_unavailable", upstream_http_status: response.status };
+  }
+  let metadata: unknown;
+  try {
+    metadata = await boundedMetadata(response);
+  } catch {
+    return { ok: false, error: "oauth_discovery_unavailable", failure_stage: "read_metadata" };
+  }
+  if (!validMetadata(metadata, issuer)) {
+    return { ok: false, error: "oauth_discovery_invalid" };
+  }
+  return { ok: true, error: null };
 }
