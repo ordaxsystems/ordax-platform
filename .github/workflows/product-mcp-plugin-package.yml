@@ -1,0 +1,53 @@
+name: Canonical Product Plugin Package
+
+on:
+  pull_request:
+    paths:
+      - "integrations/chatgpt/product-canary/**"
+      - "scripts/cloudflare/package_product_plugin.py"
+      - "control-plane/tests/test_product_plugin_ssot.py"
+      - ".github/workflows/product-mcp-plugin-package.yml"
+      - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
+      - "control-plane/cloudflare/production-foundation.json"
+  push:
+    branches: [main]
+    paths:
+      - "integrations/chatgpt/product-canary/**"
+      - "scripts/cloudflare/package_product_plugin.py"
+      - "control-plane/tests/test_product_plugin_ssot.py"
+      - ".github/workflows/product-mcp-plugin-package.yml"
+      - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
+      - "control-plane/cloudflare/production-foundation.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Plugin package SSOT
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Deterministic package regression
+        run: python -m unittest discover -s control-plane/tests -p test_product_plugin_ssot.py -v
+      - name: Generate private ChatGPT plugin ZIP
+        run: python scripts/cloudflare/package_product_plugin.py --out dist/ordax-product-canary-plugin.zip
+      - name: Verify packaged file
+        run: |
+          sha256sum dist/ordax-product-canary-plugin.zip
+          python - <<'PY'
+          import json, zipfile
+          with zipfile.ZipFile("dist/ordax-product-canary-plugin.zip") as archive:
+              m = json.loads(archive.read("mcp.json"))
+              assert m["mcpServers"]["ordax-product-canary"]["url"].endswith(".ordaxsystems.workers.dev/mcp")
+              print("ORDAX_CHATGPT_PLUGIN_SINGLE_OWNER=PASS")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ordax-product-canary-plugin
+          path: dist/ordax-product-canary-plugin.zip
+          retention-days: 7
