@@ -110,15 +110,30 @@ test("missing, forged or malformed binding is denied before target RPC",async()=
     assert.equal(f.calls.filter(x=>x.kind==="catalog").length,0);
   });
 });
-test("ambiguous Product grants, revoked grants and missing durable chat mapping all fail closed",async()=>{
+test("revoked grants, expired grants and missing durable chat mapping fail closed",async()=>{
   await withIssuer(async()=>{
     const f=fixture(),guard=createCanonicalCentralAdmissionVerifier(env,f.deps);
     const req=identity(await token());
-    for(const mode of ["ambiguous","revoked","expired","missing-session"]){
+    for(const mode of ["revoked","expired","missing-session"]){
       f.setMode(mode);
       const response=await guard(req.clone(),binding);
       assert.equal(response.ok,false,JSON.stringify({mode,response}));
     }
+  });
+});
+test("a trusted persisted conversation may select an exact PC among several OAuth targets",async()=>{
+  await withIssuer(async()=>{
+    const f=fixture(),guard=createCanonicalCentralAdmissionVerifier(env,f.deps);
+    f.setMode("ambiguous");
+    const jwt=await token();
+    // Single OAuth client is not an implicit PC selection. verifySession
+    // must prove the original request and one device BEFORE catalog lookup.
+    const admitted=await guard(identity(jwt),binding);
+    assert.equal(admitted.ok,true,JSON.stringify(admitted));
+    if(admitted.ok)assert.equal(admitted.deviceId,device);
+    f.setMode("missing-session");
+    assert.equal((await guard(identity(jwt),binding)).ok,false);
+    assert.equal((await guard(identity(jwt),{...binding,deviceId:secondDevice})).ok,false);
   });
 });
 test("unsigned, wrong OAuth subject, missing signed client never reach catalog or session",async()=>{
