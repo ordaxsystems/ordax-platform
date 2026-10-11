@@ -11,7 +11,7 @@
 
 ## Escolha imutável do PC
 
-O candidato só aceita um **único dispositivo** retornado pela autoridade Product para o cliente OAuth, e um **único grant de projeto** com UUID de projeto e Space canônicos e capacidade de leitura. Vários dispositivos, vários grants elegíveis, identidade inválida, projeto sem UUID ou ausência de capacidade causam negação. Não se escolhe o primeiro da lista, não há resolução por nome e não se permite ao modelo fornecer um novo destino.
+O caminho de **leitura sem vínculo explícito de operação** só aceita um único dispositivo retornado pela autoridade Product e um único grant de projeto para impedir escolhas ambíguas. Já o caminho de **submissão com `TrustedRelayOperation` persistida** suporta vários computadores autorizados na mesma conta: seleciona exatamente o UUID do dispositivo previamente associado à operação pelo host e revalida sua permissão Product. Se não houver correspondência, se houver dispositivos duplicados na projeção, projeto ambíguo ou grant vencido, a chamada é recusada. A IA nunca escolhe um dispositivo pela ordem da lista, por nome de PC ou por campos em seu payload.
 
 Esse limite é deliberado. Para múltiplos dispositivos legítimos, o Produto deve prover um **pareamento explícito e persistido em sua autoridade canônica**, com seleção feita pelo proprietário e não pelo LLM. Não contornar a ambiguidade criando outra tabela ou cache de dispositivos no Studio.
 
