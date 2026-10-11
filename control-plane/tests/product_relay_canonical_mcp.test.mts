@@ -117,7 +117,9 @@ test("ambiguous target/project grants and wrong canonical record fail closed",as
       if(mode==="corruptedReceipt")lab.corrupt();
       const result=await tool(lab.handlers,jwt,"ordax_action_status",{request_id:requestId});
       const data=result.body?.result?.structuredContent;
-      assert.equal(data?.ok,false,JSON.stringify({mode,result}));
+      assert.ok(result.status === 403
+        ? result.body?.error === "relay_scope_denied"
+        : data?.ok === false,JSON.stringify({mode,result}));
       assert.ok(!JSON.stringify(result).includes(people[1].privateResult));
     }
   });
