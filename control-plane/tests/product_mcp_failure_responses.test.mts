@@ -174,3 +174,51 @@ test("oversized and invalid UTF-8 responses are rejected and their readers cance
     assert.equal(cancelled, 1);
   }
 });
+
+test("explicit malformed Space never becomes a global Product request", async () => {
+  let dispatched = 0;
+  for (const space_id of [null, "", "not-a-uuid", 0, false, [], {}, "782c01a5-0ee3-4589-9f9b-11555191f35a/../"]) {
+    const { body } = await call("computer_screen_info", {
+      createAction: async () => {
+        dispatched++;
+        assert.fail("malformed caller-supplied Space reached Product dispatch");
+      },
+    }, { space_id });
+    assert.equal(body.result.isError, true);
+    assert.deepEqual(body.result.structuredContent, { ok: false, error: "space_id_invalid" });
+  }
+  assert.equal(dispatched, 0);
+});
+
+test("well-formed explicit Space reaches canonical Product grant decision unchanged", async () => {
+  const space_id = "782c01a5-0ee3-4589-9f9b-11555191f35a";
+  let seen = 0;
+  const { body } = await call("computer_screen_info", {
+    createAction: async (request) => {
+      seen++;
+      const submitted = await request.json();
+      assert.equal(submitted.space_id, space_id);
+      assert.equal(submitted.action, "computer.screen_info");
+      // The canonical Product backend owns this denial. MCP must not
+      // reinterpret an explicit UUID as a global Space grant.
+      return Response.json({ ok: false, error: "product_grant_not_resolved" }, { status: 403 });
+    },
+  }, { space_id });
+  assert.equal(seen, 1);
+  assert.equal(body.result.isError, true);
+  assert.equal(body.result.structuredContent.error, "product_grant_not_resolved");
+});
+
+test("omitted Space remains explicitly unscoped, not a fabricated Space grant", async () => {
+  let seen = 0;
+  const { body } = await call("computer_screen_info", {
+    createAction: async (request) => {
+      seen++;
+      assert.equal((await request.json()).space_id, null);
+      return Response.json({ ok: false, error: "product_grant_not_resolved" }, { status: 403 });
+    },
+  });
+  assert.equal(seen, 1);
+  assert.equal(body.result.isError, true);
+  assert.equal(body.result.structuredContent.error, "product_grant_not_resolved");
+});
