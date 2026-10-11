@@ -201,3 +201,24 @@ test('tokens de dispositivo duplicados são recusados antes de iniciar qualquer 
   await assert.rejects(startRelayLab({devices:[devices[0],{...devices[1],secret:devices[0].secret}],
     inference:async()=>({})}),/duplicate_lab_credential/);
 });
+
+test('central status is read-only and requires distinct operator credentials', async t => {
+  const adminToken=randomBytes(32).toString('hex');
+  const lab=await startRelayLab({
+    devices,adminToken,
+    inference:async ({deviceId,requestId})=>({deviceId,requestId,result:'ok'})
+  });
+  t.after(()=>lab.close());
+  const url=lab.url+'/v1/admin/status';
+  assert.equal((await fetch(url)).status,401);
+  const response=await fetch(url,{headers:{authorization:'Bearer '+adminToken}});
+  assert.equal(response.status,200);
+  const value=await response.json();
+  assert.equal(value.schema,'ordax.relay-lab-status/1');
+  assert.equal(value.acceptingClients,3);
+  assert.equal(value.activeRequests,0);
+  assert.equal(value.retainedReceipts,0);
+  assert.equal(Object.keys(value).includes('targets'),false);
+  assert.equal(lab.revokeDevice(devices[0].id),true);
+  assert.equal((await (await fetch(url,{headers:{authorization:'Bearer '+adminToken}})).json()).acceptingClients,2);
+});
