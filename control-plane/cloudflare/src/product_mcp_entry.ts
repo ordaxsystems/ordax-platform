@@ -1,7 +1,7 @@
 /**
  * Product MCP over the canonical PostgreSQL authority.
  *
- * Staging entrypoint for #42. Never imports the legacy D1 Worker, never
+ * Staging entrypoint for #42; OAuth discovery must be proven before activation. Never imports the legacy D1 Worker, never
  * dispatches a model-provided operation and never becomes a second grant owner.
  * Runtime enrolment, durable trusted-operation dispatch and provider inference
  * must be completed before promoting this source to the production Worker.
@@ -10,6 +10,7 @@ import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
 import { productAuthConfigured, type ProductAuthEnv } from "./product_auth.ts";
 import { productPostgresConfigured, type ProductPostgresEnv } from "./product_postgres_store.ts";
+import { checkCanonicalProductOAuthDiscovery } from "./product_oauth_readiness.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
@@ -29,7 +30,7 @@ function resourceMetadata(origin: string, issuer: string) {
 }
 
 /** Injecting read handlers is an internal test seam, never an HTTP option. */
-export function createCanonicalProductMcpGateway(env: Env, reads: ReadHandlers = createCanonicalProductMcpReadHandlers(env)) {
+export function createCanonicalProductMcpGateway(env: Env, reads: ReadHandlers = createCanonicalProductMcpReadHandlers(env), discoveryFetch: typeof fetch = fetch) {
   const handlers: OrdaxMcpHandlers = {
     ...reads,
     // The public model cannot choose a PC, Space, project or operation ID.
@@ -49,6 +50,18 @@ export function createCanonicalProductMcpGateway(env: Env, reads: ReadHandlers =
         postgres_configured: productPostgresConfigured(env),
         supports_remote_actions: false,
       });
+    }
+    if (request.method === "GET" && url.pathname === "/ready") {
+      if (!productAuthConfigured(env) || !productPostgresConfigured(env)) {
+        return respond({ ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
+          supports_remote_actions: false, error: "platform_mcp_unconfigured" }, 503);
+      }
+      const discovery = await checkCanonicalProductOAuthDiscovery(String(env.PRODUCT_AUTH_ISSUER), discoveryFetch);
+      return respond({
+        ok: discovery.ok, service: "ordax-platform-mcp",
+        oauth_discovery_ready: discovery.ok, supports_remote_actions: false,
+        ...(discovery.error ? { error: discovery.error } : {}),
+      }, discovery.ok ? 200 : 503);
     }
     if (request.method === "GET" && metadata) {
       if (!productAuthConfigured(env)) return respond({ ok: false, error: "product_auth_unconfigured" }, 503);
