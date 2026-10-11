@@ -113,3 +113,43 @@ test("network errors, 302 responses, JSON parse errors and oversized bodies fail
     assert.ok(["oauth_discovery_unavailable","oauth_discovery_invalid"].includes(String(res.error)));
   }
 });
+
+test("Worker readiness distinguishes failed fetch from unreadable metadata without exposing internal details", async () => {
+  const failures = [
+    {
+      fetcher: (async () => { throw new Error("private token=supersecret"); }) as typeof fetch,
+      stage: "fetch",
+    },
+    {
+      fetcher: (async () => new Response("not valid JSON", { status: 200 })) as typeof fetch,
+      stage: "read_metadata",
+    },
+    {
+      fetcher: (async () => new Response("x".repeat(65537), { status: 200 })) as typeof fetch,
+      stage: "read_metadata",
+    },
+  ];
+  for (const { fetcher, stage } of failures) {
+    const result = await checkCanonicalProductOAuthDiscovery(ISSUER, fetcher);
+    assert.deepEqual(result, {
+      ok: false, error: "oauth_discovery_unavailable", failure_stage: stage,
+    });
+    const gateway = createCanonicalProductMcpGateway(env, handlers, fetcher);
+    const reply = await gateway(new Request("https://platform.example/ready"));
+    assert.equal(reply.status, 503);
+    const body = await reply.json();
+    assert.equal(body.failure_stage, stage);
+    assert.equal(body.error, "oauth_discovery_unavailable");
+    assert.equal(body.supports_remote_actions, false);
+    assert.doesNotMatch(JSON.stringify(body), /supersecret|private token/i);
+  }
+});
+
+test("HTTP denial is separate from upstream transport failure", async () => {
+  const fetcher = (async () => response({ error: "secret response" }, 403)) as typeof fetch;
+  const result = await checkCanonicalProductOAuthDiscovery(ISSUER, fetcher);
+  assert.deepEqual(result, {
+    ok: false, error: "oauth_discovery_unavailable", upstream_http_status: 403,
+  });
+  assert.equal("failure_stage" in result, false);
+});
