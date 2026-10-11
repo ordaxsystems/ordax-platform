@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from verify_product_oauth_server import validate_metadata
+from scripts.cloudflare.verify_product_oauth_server import validate_metadata
 
 ROOT = Path(__file__).resolve().parents[2]
 MAX_BYTES = 65536
