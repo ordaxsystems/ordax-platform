@@ -9,6 +9,7 @@ on:
       - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_oauth_readiness.test.mts"
       - ".github/workflows/product-mcp-canary.yml"
   push:
     branches: [main]
@@ -18,6 +19,7 @@ on:
       - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_oauth_readiness.test.mts"
       - ".github/workflows/product-mcp-canary.yml"
   workflow_dispatch:
 
