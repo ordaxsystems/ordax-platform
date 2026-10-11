@@ -21,15 +21,16 @@ function readGrant(person:typeof people[number]){
 }
 function fixtures(){
   const trace:{type:string;identity:unknown}[]=[];
-  let extraTarget=false,extraGrant=false,maliciousAction=false;
+  let extraTarget=false,extraGrant=false,maliciousAction=false,revokedClient=null,sameDevice=false;
   const byClient=(input:{ownerUserId:string;clientId:string})=>
     people.find(p=>p.owner===input.ownerUserId&&p.client===input.clientId);
   const handlers=createCanonicalRelayReadOnlyHandlers(env,{
     listTargets:async (_env,input)=>{
       trace.push({type:"targets",identity:input});
       const person=byClient(input);
-      if(!person)return {ok:true,targets:[]};
+      if(!person || input.clientId===revokedClient)return {ok:true,targets:[]};
       const target=readGrant(person);
+      if(sameDevice && person===people[1])target.device_id=people[0].device;
       if(extraGrant) target.grant_groups.push({space_id:spaceId,project_id:randomUUID(),
         capabilities:[{capability:"workspace.text_read",access_mode:"read"}]});
       return {ok:true,targets:extraTarget?[target,readGrant(people[1])]:[target]};
@@ -40,15 +41,17 @@ function fixtures(){
       const original=people.find(p=>p.requestId===input.requestId);
       if(!person||person!==original)return null;
       const target=maliciousAction?people[1]:person;
+      const boundDevice=sameDevice && person===people[1]?people[0].device:target.device;
       return actionRecord({
-        request_id:person.requestId,device_id:target.device,project_id:target.project,
+        request_id:person.requestId,device_id:boundDevice,project_id:target.project,
         capability:"workspace.text_read",status:"succeeded",
         result:{ok:true,data:{content:person.privateResult}},finished_at:"2026-10-09T12:02:00Z",
       });
     },
   });
   return {handlers,trace,extraTarget:()=>{extraTarget=true},extraGrant:()=>{extraGrant=true},
-    corrupt:()=>{maliciousAction=true}};
+    corrupt:()=>{maliciousAction=true},revoke:clientId=>{revokedClient=clientId},
+    shareDevice:()=>{sameDevice=true}};
 }
 async function tool(handlers:ReturnType<typeof createCanonicalRelayReadOnlyHandlers>,
   jwt:string,name:string,args:Record<string,unknown>){
@@ -131,5 +134,37 @@ test("invalid and missing OAuth token cannot read or discover another client",as
     const invalid=await tool(lab.handlers,"expired.invalid.token","ordax_targets",{});
     assert.equal(invalid.status,403);
     assert.equal(lab.trace.length,0);
+  });
+});
+
+test("revogação de grant bloqueia novo status sem reutilizar a sessão anterior",async()=>{
+  await withIssuer(async()=>{
+    const lab=fixtures();
+    const jwt=await token({sub:people[0].owner,client_id:people[0].client});
+    const before=await tool(lab.handlers,jwt,"ordax_action_status",{request_id:people[0].requestId});
+    assert.equal(before.body.result.structuredContent.ok,true);
+    lab.revoke(people[0].client);
+    const denied=await tool(lab.handlers,jwt,"ordax_action_status",{request_id:people[0].requestId});
+    assert.equal(denied.status,403);
+    assert.equal(denied.body.error,"relay_scope_denied");
+    assert.ok(!JSON.stringify(denied).includes(people[0].privateResult));
+  });
+});
+
+test("clientes OAuth distintos no mesmo computador não leem reciprocamente seus recibos",async()=>{
+  await withIssuer(async()=>{
+    const lab=fixtures();
+    lab.shareDevice();
+    for(const p of [people[0],people[1]]){
+      const jwt=await token({sub:p.owner,client_id:p.client});
+      const own=await tool(lab.handlers,jwt,"ordax_action_status",{request_id:p.requestId});
+      assert.equal(own.body.result.structuredContent.ok,true);
+      assert.equal(own.body.result.structuredContent.action.device_id,people[0].device);
+      assert.equal(own.body.result.structuredContent.action.result.data.content,p.privateResult);
+      const another=people.find(x=>x!==p && x.owner===p.owner);
+      const cross=await tool(lab.handlers,jwt,"ordax_action_status",{request_id:another.requestId});
+      assert.equal(cross.body.result.structuredContent.ok,false);
+      assert.ok(!JSON.stringify(cross).includes(another.privateResult));
+    }
   });
 });
