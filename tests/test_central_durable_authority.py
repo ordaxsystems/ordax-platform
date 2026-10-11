@@ -9,6 +9,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "control-plane/supabase/migrations/20261007213500_central_durable_conversation_binding_v1.sql"
 POSTFLIGHT = ROOT / "control-plane/supabase/tests/central_conversation_binding_postflight.sql"
+HARDENING = ROOT / "control-plane/supabase/migrations/20261007214000_central_attestor_least_privilege_v1.sql"
 STORE = ROOT / "control-plane/cloudflare/src/product_postgres_store.ts"
 ADMISSION = ROOT / "control-plane/cloudflare/src/product_central_admission.ts"
 
@@ -16,6 +17,7 @@ class CentralDurableContract(unittest.TestCase):
     def setUp(self):
         self.sql = MIGRATION.read_text(encoding="utf-8").lower()
         self.probe = POSTFLIGHT.read_text(encoding="utf-8").lower()
+        self.hardening = HARDENING.read_text(encoding="utf-8").lower()
         self.store = STORE.read_text(encoding="utf-8")
         self.admission = ADMISSION.read_text(encoding="utf-8")
 
@@ -62,8 +64,13 @@ class CentralDurableContract(unittest.TestCase):
             "to ordax_edge_executor;",
         ):
             self.assertIn(x, self.sql)
-        self.assertIn("'anon','authenticated','service_role','ordax_edge_runtime'", self.probe)
+        self.assertIn("'anon','authenticated','service_role'", self.probe)
         self.assertIn("central_session_table_acl_exposed", self.probe)
+        self.assertIn("create role ordax_central_attestation_executor", self.hardening)
+        self.assertIn("nologin noinherit nobypassrls", self.hardening)
+        self.assertIn("from ordax_edge_executor,ordax_edge_runtime,public,anon,authenticated,service_role", self.hardening)
+        self.assertIn("to ordax_central_attestation_executor;", self.hardening)
+        self.assertIn("central_session_attestor_or_worker_acl_mismatch", self.probe)
 
     def test_web_transport_never_mints_authorization_implicitly(self):
         self.assertIn("crypto.subtle.digest", self.store)
