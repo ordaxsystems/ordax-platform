@@ -201,3 +201,29 @@ test("dois clientes do mesmo PC e projeto não compartilham recibos",async () =>
   assert.equal(allowed.isError,false);
   assert.ok(JSON.stringify(allowed).includes("PRIVADO_CLIENTE_A"));
 });
+
+test("caminhos codificados, aliases NTFS e Unicode equivalente não escapam do escopo",async()=>{
+  const lab=createFixture();
+  const forbidden=[
+    "pasta 1/%2e%2e/private",
+    "pasta 1/%2Fprivate",
+    "pasta 1/%5cprivate",
+    "pasta 1/arquivo:stream",
+    "pasta 1/con",
+    "pasta 1/COM1.txt",
+    "pasta 1/private.",
+    "pasta 1/private ",
+    "pasta 1/\uFF0E\uFF0E/private",
+    "pasta 1/\u2215private",
+    "pasta 1/aux",
+    "pasta 1//private",
+  ];
+  for(const path of forbidden){
+    const output=await lab.tool(devices[0],"workspace_directory_list",{...args(devices[0]),path});
+    assert.equal(output.ok,false,JSON.stringify({path,output}));
+    assert.equal(output.error,"relay_scope_denied");
+  }
+  assert.equal(lab.invocations.length,0);
+  const permitted=await lab.tool(devices[0],"workspace_directory_list",{...args(devices[0]),path:"pasta 1/subpasta"});
+  assert.equal(permitted.ok,true);
+});
