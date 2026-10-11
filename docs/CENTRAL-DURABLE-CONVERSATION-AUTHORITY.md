@@ -83,3 +83,19 @@ chamadas do plugin que aconteçam *durante* a geração daquela resposta.
 
 **A PR desta implementação prova a autoridade persistente e as barreiras,
 não prova o passo 3.** O plugin legado e a falha P0 #118 continuam separados.
+
+
+## Composição interna do MCP com associação instalada
+
+`createPersistedCentralSessionMcpGateway` utiliza o **gateway MCP canônico
+existente**, `scopeRelayMcp` e
+`createPostgresCentralSessionVerifier`, sem expor um MCP paralelo.
+A consulta SQL é obrigatória mesmo quando um chamador tenta injetar outro
+callback `verifySession`. A consulta aos alvos e recibos só acontece
+depois de verificar JWT OAuth, associação Product persistida e grants atuais;
+se a conexão PostgreSQL estiver indisponível, a ferramenta é recusada.
+
+**Não há rota pública nova:** o host da Central ainda precisa obter de forma
+confiável o vínculo `trusted` e a atestação independente da conversa
+ChatGPT. Esta factory não preenche nem adivinha os campos a partir do
+conteúdo de uma mensagem ou de `openai/session`.
