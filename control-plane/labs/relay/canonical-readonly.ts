@@ -60,6 +60,12 @@ export function createCanonicalRelayReadOnlyHandlers(
       const grants = target.grant_groups.filter(grant => {
         if (!grant || typeof grant !== "object" || Array.isArray(grant)) return false;
         const g = grant as Record<string,unknown>;
+        // The RPC is authoritative for active grants. Expiration is also
+        // checked here to fail closed if an outdated projection is returned.
+        if (g.valid_until !== undefined && g.valid_until !== null
+          && (typeof g.valid_until !== "string"
+            || !Number.isFinite(Date.parse(g.valid_until))
+            || Date.parse(g.valid_until) <= Date.now())) return false;
         return isCanonicalUuid(g.project_id) && isCanonicalUuid(g.space_id)
           && Array.isArray(g.capabilities)
           && g.capabilities.some(item => {
