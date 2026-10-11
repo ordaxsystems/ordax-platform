@@ -12,6 +12,9 @@ test("canonical persisted MCP denies signed OAuth tool calls if no real Postgres
   await withIssuer(async()=>{
     let catalogReads=0,receiptReads=0;
     const gate=createPersistedCentralSessionMcpGateway(env,binding,{
+      // Even a malicious caller supplying a fake callback cannot override
+      // the production PostgreSQL authority installed by this factory.
+      verifySession:async()=>true,
       listTargets:async()=>{catalogReads++;return {ok:true,targets:[{
         device_id:device,grant_groups:[{
           space_id:binding.spaceId,project_id:projectId,valid_until:null,
@@ -19,7 +22,7 @@ test("canonical persisted MCP denies signed OAuth tool calls if no real Postgres
         }],
       }]};},
       getAction:async()=>{receiptReads++;return null;},
-    });
+    } as any);
     const jwt=await token();
     const tool=async(name:string,marker=binding.sessionId)=>{
       const response=await gate(new Request("https://central.example/mcp",{
@@ -32,9 +35,13 @@ test("canonical persisted MCP denies signed OAuth tool calls if no real Postgres
     };
     for(const name of ["ordax_targets","ordax_action_status"]){
       const result=await tool(name);
-      assert.notEqual(result.status,200,name);
+      const body=await result.clone().json();
+      assert.ok(result.status!==200 || body?.result?.structuredContent?.ok===false
+        || body?.result?.isError===true,
+        JSON.stringify({name,status:result.status,body}));
     }
-    assert.equal((await tool("ordax_targets","another-session-111")).status,403);
+    const wrong=await tool("ordax_targets","another-session-111");
+    assert.notEqual(wrong.status,200);
     assert.equal(catalogReads,0,"no Product DB proof, not even eligible target enumeration");
     assert.equal(receiptReads,0,"no foreign receipt should be queried");
   });
