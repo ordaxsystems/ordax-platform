@@ -12,6 +12,8 @@ type Scope = Readonly<{
   clientId: string;
   spaceId: string | null;
   project: string;
+  /** Canonical Product project UUID. Presence means read-only cutover mode. */
+  projectId?: string;
   rootPath: string;
   actions: readonly Action[];
 }>;
@@ -43,6 +45,7 @@ function validScope(scope: Scope | null): scope is Scope {
   return !!scope && UUID.test(scope.deviceId) && UUID.test(scope.subjectId)
     && typeof scope.clientId === "string" && /^[a-zA-Z0-9_-]{3,100}$/.test(scope.clientId)
     && (scope.spaceId === null || UUID.test(scope.spaceId)) && PROJECT.test(scope.project)
+    && (scope.projectId === undefined || UUID.test(scope.projectId))
     && pathWithin(scope.rootPath, scope.rootPath)
     && Array.isArray(scope.actions) && scope.actions.length > 0
     && scope.actions.every(item => ALLOWED.has(item));
@@ -109,7 +112,8 @@ export function scopeRelayMcp(handlers: OrdaxMcpHandlers, resolver: Resolver, ve
     },
     async createAction(request) {
       const scope = await scopeFor(request);
-      if (!scope) return denied();
+      // Canonical read-only scopes must never reach the D1/legacy action writer.
+      if (!scope || scope.projectId !== undefined) return denied();
       const data = await body(request.clone());
       if (!data || data.device_id !== scope.deviceId || data.space_id !== scope.spaceId
         || data.project !== scope.project || typeof data.action !== "string"
@@ -133,9 +137,12 @@ export function scopeRelayMcp(handlers: OrdaxMcpHandlers, resolver: Resolver, ve
       const data = action as Record<string,unknown>;
       // Device/project must still match the attested request record. Ownership
       // is verified independently to avoid exposing identities in MCP output.
+      const projectMatches = scope.projectId !== undefined
+        ? data.project === null && data.project_id === scope.projectId
+        : data.project === scope.project;
       if (data.request_id !== requestId || data.device_id !== scope.deviceId
         || !scope.actions.includes(data.action as Action)
-        || data.project !== scope.project) return denied();
+        || !projectMatches) return denied();
       return json(payload);
     }
   };
