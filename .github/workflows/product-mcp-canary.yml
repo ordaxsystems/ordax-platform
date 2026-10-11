@@ -1,0 +1,52 @@
+name: Canonical Product MCP Canary
+
+on:
+  pull_request:
+    paths:
+      - "control-plane/cloudflare/src/mcp_http.ts"
+      - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
+      - "control-plane/tests/product_mcp_entry.test.mts"
+      - ".github/workflows/product-mcp-canary.yml"
+  push:
+    branches: [main]
+    paths:
+      - "control-plane/cloudflare/src/mcp_http.ts"
+      - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
+      - "control-plane/tests/product_mcp_entry.test.mts"
+      - ".github/workflows/product-mcp-canary.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-canonical-readonly:
+    name: OAuth Postgres MCP, no D1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install only pinned Worker Postgres dependency
+        run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Protocol, fail-closed and signed OAuth regressions
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_discovery.test.mts
+      - name: Compile candidate with Wrangler without deploying
+        working-directory: control-plane/cloudflare
+        run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.product-mcp-canary.toml --outdir .canary-bundle
+      - name: Assert bundle cannot access legacy D1
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          bundle=Path('control-plane/cloudflare/.canary-bundle')
+          scripts=list(bundle.glob('*.js'))
+          assert len(scripts)==1, f'Expected one bundled entry: {scripts}'
+          source=scripts[0].read_text(encoding='utf-8')
+          assert 'D1Database' not in source and 'env.DB.prepare' not in source
+          assert 'trusted_operation_required' in source
+          assert 'read-only-canary' in source
+          print('ORDAX_MCP_CANARY_D1_FREE=PASS')
+          PY
