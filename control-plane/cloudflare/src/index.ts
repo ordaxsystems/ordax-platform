@@ -25,9 +25,7 @@ import {
   listOwnerDeviceIntelligenceGrants,
   revokeOwnerDeviceIntelligenceGrant,
 } from "./product_intelligence_grants";
-import { handleOrdaxMcp } from "./mcp_http";
 import { scopeProductResult } from "./product_results";
-import { oauthConsentResponse } from "./oauth_consent";
 import { openAiAppsChallenge, publicProductPage } from "./public_pages";
 import { readBoundedJsonObject } from "./request_json";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence";
@@ -1257,60 +1255,6 @@ async function productSession(request: Request, env: Env): Promise<Response> {
   });
 }
 
-async function createProductAction(request: Request, env: Env): Promise<Response> {
-  const identity = await authenticateProductRequest(request, env);
-  if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
-  const body = await parseSmallJson(request, 64 * 1024);
-  if (!body) return json({ ok: false, error: "invalid_json" }, 400);
-  const deviceId = typeof body.device_id === "string" ? body.device_id : "";
-  const spaceId = body.space_id == null ? null : typeof body.space_id === "string" ? body.space_id : "";
-  const action = typeof body.action === "string" ? body.action : "";
-  const project = body.project == null ? null : typeof body.project === "string" ? body.project : "";
-  const argumentsValue = isRecord(body.arguments) ? { ...body.arguments } : {};
-  if (!UUID_RE.test(deviceId) || (spaceId !== null && !PRODUCT_ID_RE.test(spaceId)) || !PRODUCT_ACTIONS.has(action) || (project !== null && !PROJECT_SLUG_RE.test(project)) || !projectBindingMatchesScope(action, project, PRODUCT_PROJECT_ACTIONS)) {
-    return json({ ok: false, error: "product_action_invalid" }, 400);
-  }
-  if (project !== null) {
-    if (argumentsValue.project != null && argumentsValue.project !== project) return json({ ok: false, error: "product_project_conflict" }, 400);
-    argumentsValue.project = project;
-  } else if ("project" in argumentsValue) {
-    return json({ ok: false, error: "product_action_invalid" }, 400);
-  }
-  const device = await env.DB.prepare("SELECT id FROM ordax_devices WHERE id = ?1 AND revoked_at IS NULL").bind(deviceId).first();
-  if (!device) return json({ ok: false, error: "device_not_found" }, 404);
-  const grant = await resolveProductGrantForContext(env, { subjectId: identity.subjectId, spaceId, deviceId, action, project });
-  if (!grant) return json({ ok: false, error: "product_grant_not_resolved" }, 403);
-  let actions: string[] = [];
-  let projects: string[] = [];
-  try {
-    const rawActions = JSON.parse(grant.actions_json);
-    const rawProjects = JSON.parse(grant.projects_json);
-    if (!Array.isArray(rawActions) || !rawActions.every((item) => typeof item === "string") || !Array.isArray(rawProjects) || !rawProjects.every((item) => typeof item === "string")) throw new Error("invalid grant");
-    actions = rawActions; projects = rawProjects;
-  } catch { return json({ ok: false, error: "product_grant_corrupt" }, 500); }
-  const requestId = crypto.randomUUID();
-  const jobId = crypto.randomUUID();
-  const effectId = crypto.randomUUID();
-  const createdAt = nowIso();
-  const expiresAtUnix = grant.expires_at == null ? null : Math.floor(new Date(grant.expires_at).getTime() / 1000);
-  const invocation = {
-    action, arguments: argumentsValue,
-    context: { request_id: requestId, subject_id: identity.subjectId, device_id: deviceId, space_id: spaceId },
-    grant: { grant_id: grant.id, subject_id: grant.subject_id, actions, projects, space_id: grant.space_id, device_id: grant.device_id, expires_at_unix: Number.isFinite(expiresAtUnix) ? expiresAtUnix : null },
-  };
-  const payloadBytes = new TextEncoder().encode(JSON.stringify(invocation));
-  if (payloadBytes.byteLength > 64 * 1024) return json({ ok: false, error: "product_payload_too_large" }, 413);
-  const payloadText = new TextDecoder().decode(payloadBytes);
-  const payloadB64 = bytesToBase64(payloadBytes);
-  const payloadSha256 = await sha256Text(payloadText);
-  await env.DB.batch([
-    env.DB.prepare(`INSERT INTO ordax_jobs (id, device_id, capability, payload_canonical_b64, payload_sha256, status, effect_id, execution_epoch, created_at) VALUES (?1, ?2, 'ordax.product.invoke', ?3, ?4, 'queued', ?5, 0, ?6)`).bind(jobId, deviceId, payloadB64, payloadSha256, effectId, createdAt),
-    env.DB.prepare(`INSERT INTO ordax_product_action_requests (request_id, job_id, subject_id, space_id, device_id, grant_id, action, project, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`).bind(requestId, jobId, identity.subjectId, spaceId, deviceId, grant.id, action, project, createdAt),
-  ]);
-  await wakeDeviceSession(env, deviceId);
-  return json({ ok: true, request_id: requestId, status: "queued" }, 202);
-}
-
 async function getProductAction(request: Request, env: Env, requestId: string): Promise<Response> {
   const identity = await authenticateProductRequest(request, env);
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
@@ -2249,24 +2193,17 @@ export default {
       return provisionDevice(request, env);
     }
     if (request.method === "GET" && url.pathname === "/oauth/consent") {
-      return oauthConsentResponse(request, env);
+      // Supabase OAuth consent belongs to the first-party OrdaX Web owner.
+      return json({ ok: false, error: "legacy_oauth_route_retired" }, 410);
     }
     if (request.method === "GET" && url.pathname === "/.well-known/oauth-protected-resource") {
-      const authorizationServers = env.PRODUCT_AUTH_ISSUER ? [env.PRODUCT_AUTH_ISSUER] : [];
-      return json({
-        resource: `${url.origin}/mcp`,
-        authorization_servers: authorizationServers,
-        bearer_methods_supported: ["header"],
-        scopes_supported: ["openid", "email", "offline_access"],
-      });
+      // Never advertise this D1 Worker as an MCP OAuth protected resource.
+      return json({ ok: false, error: "legacy_mcp_retired" }, 410);
     }
     if (url.pathname === "/mcp") {
-      return handleOrdaxMcp(request, {
-        session: (inner) => productSession(inner, env),
-        targets: (inner) => listProductTargets(inner, env),
-        createAction: (inner) => createProductAction(inner, env),
-        getAction: (inner, requestId) => getProductAction(inner, env, requestId),
-      });
+      // This Worker has a D1 product authority and MUST NOT serve MCP.
+      // The new OrdaX MCP has a separate, PostgreSQL-only entrypoint.
+      return json({ ok: false, error: "legacy_mcp_retired" }, 410);
     }
     if (request.method === "GET" && url.pathname === "/v3/product/session") {
       return productSession(request, env);
@@ -2335,7 +2272,8 @@ export default {
       return listProductTargets(request, env);
     }
     if (request.method === "POST" && url.pathname === "/v3/product/actions") {
-      return createProductAction(request, env);
+      // No D1-based remote action enqueue remains reachable from this source.
+      return json({ ok: false, error: "legacy_product_action_retired" }, 410);
     }
     if (request.method === "GET" && parts[0] === "v3" && parts[1] === "product" && parts[2] === "actions" && parts.length === 4) {
       return getProductAction(request, env, parts[3]);
