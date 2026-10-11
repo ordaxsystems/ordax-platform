@@ -16,7 +16,7 @@ import { createCanonicalRelayReceiptVerifier } from "./product_relay_receipt.ts"
 import { scopeRelayMcp } from "./product_mcp_scoped.ts";
 import type { OrdaxMcpHandlers } from "./mcp_http.ts";
 import { createCanonicalProductMcpGateway } from "./product_mcp_entry.ts";
-import { createCanonicalCentralAdmissionVerifier, type TrustedCentralConversation } from "./product_central_admission.ts";
+import { createCanonicalCentralAdmissionVerifier, validChatGptSessionMarker, type TrustedCentralConversation } from "./product_central_admission.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 type Dependencies = Readonly<{
@@ -110,6 +110,32 @@ export function createCanonicalCentralMcpGateway(
 }
 
 /**
+ * ChatGPT includes an anonymized per-conversation correlation marker in
+ * tools/call params._meta["openai/session"] (Jan 2026 host contract).
+ * It is NOT a signed identity or grant. A client can spoof request metadata;
+ * only the canonical OAuth, Product grant and durable verifySession can
+ * establish authority. On every tool call, still refuse another marker.
+ *
+ * tools/list/initialize do not carry the marker and are not action receipts;
+ * existing Product gateway handles their authenticated discovery.
+ */
+export async function matchesCentralMcpSession(
+  request:Request, trusted:TrustedCentralConversation | null,
+):Promise<boolean> {
+  try {
+    const value=await request.clone().json() as Record<string,unknown>;
+    if(!value || typeof value!=="object" || Array.isArray(value))return false;
+    if(value.method!=="tools/call")return true;
+    if(!validChatGptSessionMarker(trusted?.sessionId))return false;
+    const params=value.params;
+    if(!params || typeof params!=="object" || Array.isArray(params))return false;
+    const meta=(params as Record<string,unknown>)._meta;
+    if(!meta || typeof meta!=="object" || Array.isArray(meta))return false;
+    return (meta as Record<string,unknown>)["openai/session"]===trusted?.sessionId;
+  }catch{return false;}
+}
+
+/**
  * Internal MCP composition for a trusted, persisted Central turn. Enforces
  * admission on EVERY exposed tool call, including tools/list via session(),
  * before invoking canonical read handlers. No public route is installed here.
@@ -128,7 +154,9 @@ export function createCanonicalCentralSessionMcpGateway(
   const denied=()=>Response.json({ok:false,error:"central_admission_denied"},{
     status:403,headers:{"cache-control":"no-store"},
   });
-  const admit=async(request:Request)=> (await verify(request,trusted)).ok===true;
+  const admit=async(request:Request)=>
+    (await matchesCentralMcpSession(request,trusted))
+    && (await verify(request,trusted)).ok===true;
   const guarded:OrdaxMcpHandlers={
     session:async req=>(await admit(req))?reads.session(req):denied(),
     targets:async req=>(await admit(req))?reads.targets(req):denied(),
