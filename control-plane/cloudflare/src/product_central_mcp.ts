@@ -15,6 +15,7 @@ import { selectCanonicalRelayProjectScope } from "./product_relay_scope.ts";
 import { createCanonicalRelayReceiptVerifier } from "./product_relay_receipt.ts";
 import { scopeRelayMcp } from "./product_mcp_scoped.ts";
 import type { OrdaxMcpHandlers } from "./mcp_http.ts";
+import { createCanonicalProductMcpGateway } from "./product_mcp_entry.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 type Dependencies = Readonly<{
@@ -92,3 +93,17 @@ export function createCanonicalCentralMcpReadHandlers(
 
 // Preserve the laboratory export shape while keeping one canonical owner.
 export const createCanonicalRelayReadOnlyHandlers = createCanonicalCentralMcpReadHandlers;
+
+/**
+ * Inactive composition candidate for a Central-bound Product MCP connection.
+ * Reuses the existing read-only canary gateway, protocol and OAuth discovery.
+ * It advertises only the four safe Product MCP tools; no execution endpoint,
+ * D1 Worker, provider session, cookie or conversation-specific authority.
+ * DO NOT install/activate for a shared ChatGPT OAuth connection unless each
+ * plugin connection is independently attested for exactly one device.
+ */
+export function createCanonicalCentralMcpGateway(
+  env: Env, deps: Dependencies = {}, discoveryFetch: typeof fetch = fetch,
+) {
+  return createCanonicalProductMcpGateway(env,createCanonicalCentralMcpReadHandlers(env,deps),discoveryFetch);
+}
