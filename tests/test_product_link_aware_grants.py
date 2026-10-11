@@ -45,5 +45,19 @@ class ProductLinkAwareGrantContractTests(unittest.TestCase):
         self.assertIn("persistProductGrant", linked)
 
 
+    def test_explicit_space_is_never_implicitly_satisfied_by_global_grants(self):
+        discovery_start = self.worker.index("async function listProductTargets")
+        discovery_end = self.worker.index("async function createProductDevicePairing", discovery_start)
+        discovery = self.worker[discovery_start:discovery_end]
+        self.assertIn("AND (?3 IS NULL OR g.space_id = ?3)", discovery)
+        self.assertNotIn("g.space_id IS NULL OR g.space_id = ?3", discovery)
+
+        authorization_start = self.worker.index("async function resolveProductGrantForContext")
+        authorization_end = self.worker.index("async function resolveProductGrant", authorization_start) if "async function resolveProductGrant" in self.worker[authorization_start + 10:] else self.worker.index("async function createProductAction", authorization_start)
+        authorization = self.worker[authorization_start:authorization_end]
+        self.assertIn("AND ((space_id IS NULL AND ?4 IS NULL) OR space_id = ?4)", authorization)
+        self.assertNotIn("space_id IS NULL OR space_id = ?4", authorization)
+
+
 if __name__ == "__main__":
     unittest.main()
