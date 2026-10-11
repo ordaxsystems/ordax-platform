@@ -157,6 +157,21 @@ const RPC_SPECS = {
     keys: ["p_owner_user_id", "p_grant_group_id"],
     casts: ["uuid", "uuid"],
   },
+  ordax_bind_central_conversation_v1: {
+    keys: ["p_owner_user_id","p_client_id","p_device_id","p_space_id",
+      "p_project_id","p_request_id","p_conversation_id","p_session_sha256",
+      "p_expires_at"],
+    casts: ["uuid","text","uuid","uuid","uuid","uuid","text","text","timestamptz"],
+  },
+  ordax_verify_central_conversation_v1: {
+    keys: ["p_owner_user_id","p_client_id","p_device_id","p_space_id",
+      "p_project_id","p_request_id","p_conversation_id","p_session_sha256"],
+    casts: ["uuid","text","uuid","uuid","uuid","uuid","text","text"],
+  },
+  ordax_revoke_central_conversation_v1: {
+    keys: ["p_owner_user_id","p_client_id","p_request_id"],
+    casts: ["uuid","text","uuid"],
+  },
   ordax_list_product_targets_v1: {
     keys: ["p_owner_user_id", "p_client_kind", "p_client_id"],
     casts: ["uuid", "text", "text"],
@@ -612,4 +627,77 @@ export async function listCanonicalProductTargets(
   const args = canonicalRemoteClient(input.ownerUserId, input.clientKind, input.clientId);
   if (!args) throw new ProductPostgresError("product_target_identity_invalid", 400);
   return callRpc<JsonObject>(env, "ordax_list_product_targets_v1", args);
+}
+
+
+/** Product's only durable Central request-to-ChatGPT conversation mapping.
+ * These calls are trusted-server operations, NEVER expose them as model tools.
+ * The caller must authenticate the originating Central request and attest the
+ * provider session/conversation before binding. Neither a prompt nor a
+ * provider _meta marker (which can be forged) alone is authority.
+ */
+export type CentralSessionRecord = {
+  ownerUserId: string;
+  clientId: string;
+  deviceId: string;
+  spaceId: string | null;
+  projectId: string | null;
+  requestId: string;
+  conversationId: string;
+  /** Provider correlation marker, kept out of PostgreSQL in raw form. */
+  sessionId: string;
+};
+const CENTRAL_WEB_ID=/^[A-Za-z0-9_-]{8,128}$/;
+const CENTRAL_CLIENT_ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/;
+function validCentralRecord(x:CentralSessionRecord): boolean {
+  return isCanonicalUuid(x.ownerUserId) && isCanonicalUuid(x.deviceId)
+    && isCanonicalUuid(x.requestId)
+    && (x.spaceId===null && x.projectId===null
+      || (isCanonicalUuid(x.spaceId) && isCanonicalUuid(x.projectId)))
+    && CENTRAL_CLIENT_ID.test(x.clientId)
+    && CENTRAL_WEB_ID.test(x.conversationId)
+    && typeof x.sessionId==="string"
+    && x.sessionId.length>=8 && x.sessionId.length<=256
+    && !/[\x00-\x20\x7f]/u.test(x.sessionId);
+}
+async function centralParams(x:CentralSessionRecord):Promise<JsonObject> {
+  if(!x || !validCentralRecord(x))
+    throw new ProductPostgresError("central_session_invalid",400);
+  const hash=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(x.sessionId));
+  const sessionSha256=Array.from(new Uint8Array(hash),x=>x.toString(16).padStart(2,"0")).join("");
+  return {
+    p_owner_user_id:x.ownerUserId,
+    p_client_id:x.clientId,
+    p_device_id:x.deviceId,
+    p_space_id:x.spaceId,
+    p_project_id:x.projectId,
+    p_request_id:x.requestId,
+    p_conversation_id:x.conversationId,
+    p_session_sha256:sessionSha256,
+  };
+}
+export async function bindProductCentralConversation(
+  env:ProductPostgresEnv, trusted:CentralSessionRecord, expiresAt:string,
+):Promise<boolean> {
+  if(typeof expiresAt!=="string"||Number.isNaN(Date.parse(expiresAt)))
+    throw new ProductPostgresError("central_expiry_invalid",400);
+  return callRpc<boolean>(env,"ordax_bind_central_conversation_v1",{
+    ...await centralParams(trusted),p_expires_at:expiresAt,
+  });
+}
+export async function verifyProductCentralConversation(
+  env:ProductPostgresEnv, trusted:CentralSessionRecord,
+):Promise<boolean> {
+  return callRpc<boolean>(env,"ordax_verify_central_conversation_v1",
+    await centralParams(trusted));
+}
+export async function revokeProductCentralConversation(
+  env:ProductPostgresEnv,ownerUserId:string,clientId:string,requestId:string,
+):Promise<boolean> {
+  if(!isCanonicalUuid(ownerUserId)||!isCanonicalUuid(requestId)
+    ||!CENTRAL_CLIENT_ID.test(clientId))
+    throw new ProductPostgresError("central_revocation_invalid",400);
+  return callRpc<boolean>(env,"ordax_revoke_central_conversation_v1",{
+    p_owner_user_id:ownerUserId,p_client_id:clientId,p_request_id:requestId,
+  });
 }
