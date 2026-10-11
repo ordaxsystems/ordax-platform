@@ -21,7 +21,7 @@ function readGrant(person:typeof people[number]){
 }
 function fixtures(){
   const trace:{type:string;identity:unknown}[]=[];
-  let extraTarget=false,extraGrant=false,maliciousAction=false,revokedClient=null,sameDevice=false;
+  let extraTarget=false,extraGrant=false,maliciousAction=false,revokedClient=null,sameDevice=false,expiredGrant=false;
   const byClient=(input:{ownerUserId:string;clientId:string})=>
     people.find(p=>p.owner===input.ownerUserId&&p.client===input.clientId);
   const handlers=createCanonicalRelayReadOnlyHandlers(env,{
@@ -30,6 +30,7 @@ function fixtures(){
       const person=byClient(input);
       if(!person || input.clientId===revokedClient)return {ok:true,targets:[]};
       const target=readGrant(person);
+      if(expiredGrant)target.grant_groups[0].valid_until='2020-01-01T00:00:00Z';
       if(sameDevice && person===people[1])target.device_id=people[0].device;
       if(extraGrant) target.grant_groups.push({space_id:spaceId,project_id:randomUUID(),
         capabilities:[{capability:"workspace.text_read",access_mode:"read"}]});
@@ -51,7 +52,7 @@ function fixtures(){
   });
   return {handlers,trace,extraTarget:()=>{extraTarget=true},extraGrant:()=>{extraGrant=true},
     corrupt:()=>{maliciousAction=true},revoke:clientId=>{revokedClient=clientId},
-    shareDevice:()=>{sameDevice=true}};
+    shareDevice:()=>{sameDevice=true},expire:()=>{expiredGrant=true}};
 }
 async function tool(handlers:ReturnType<typeof createCanonicalRelayReadOnlyHandlers>,
   jwt:string,name:string,args:Record<string,unknown>){
@@ -113,11 +114,12 @@ test("cross-client read and model-selected write target both fail before any exe
 test("ambiguous target/project grants and wrong canonical record fail closed",async()=>{
   await withIssuer(async()=>{
     const jwt=await token();
-    for(const mode of ["twoTargets","twoProjects","corruptedReceipt"]){
+    for(const mode of ["twoTargets","twoProjects","corruptedReceipt","expiredGrant"]){
       const lab=fixtures();
       if(mode==="twoTargets")lab.extraTarget();
       if(mode==="twoProjects")lab.extraGrant();
       if(mode==="corruptedReceipt")lab.corrupt();
+      if(mode==="expiredGrant")lab.expire();
       const result=await tool(lab.handlers,jwt,"ordax_action_status",{request_id:requestId});
       const data=result.body?.result?.structuredContent;
       assert.ok(result.status === 403
