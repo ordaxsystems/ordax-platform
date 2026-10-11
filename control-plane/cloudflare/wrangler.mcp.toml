@@ -1,0 +1,22 @@
+# Canonical OrdaX MCP release target. Not the legacy D1 Control Plane.
+# This config is NOT a deployment authorization. Gate requires real E2E
+# identity, device enrolment, trusted session attestation and verified DNS/TLS.
+name = "ordax-mcp"
+main = "src/product_mcp_entry.ts"
+compatibility_date = "2026-09-27"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+redact_query_string = true
+
+[vars]
+PRODUCT_AUTH_ISSUER = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1"
+PRODUCT_AUTH_AUDIENCE = "authenticated"
+PRODUCT_AUTH_JWKS_URL = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1/.well-known/jwks.json"
+
+[[hyperdrive]]
+binding = "POSTGRES"
+id = "4b601ec5815f43259bd8040053825d2a"
