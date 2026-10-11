@@ -4,6 +4,10 @@ import type { OrdaxMcpHandlers } from "./mcp_http.ts";
 
 type Action = "project.text_read" | "workspace.directory_list" | "workspace.file_stat" | "workspace.text_read";
 const ALLOWED = new Set<Action>(["project.text_read", "workspace.directory_list", "workspace.file_stat", "workspace.text_read"]);
+const DEVICE_RECEIPT_ONLY = new Set<string>([
+  "computer.access_status","computer.active_window","computer.processes",
+  "computer.screen_info","computer.windows",
+]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PROJECT = /^[a-zA-Z0-9_-]{1,100}$/;
 type Scope = Readonly<{
@@ -13,9 +17,9 @@ type Scope = Readonly<{
   spaceId: string | null;
   project: string;
   /** Canonical Product project UUID. Presence means read-only cutover mode. */
-  projectId?: string;
+  projectId?: string | null;
   rootPath: string;
-  actions: readonly Action[];
+  actions: readonly string[];
 }>;
 type Resolver = (request: Request) => Promise<Scope | null>;
 // Must consult the canonical Product authority using authenticated owner/exact
@@ -46,10 +50,10 @@ function validScope(scope: Scope | null): scope is Scope {
     && typeof scope.clientId === "string" && scope.clientId.length >= 8 && scope.clientId.length <= 160
     && /^[A-Za-z0-9][A-Za-z0-9._:-]+$/.test(scope.clientId)
     && (scope.spaceId === null || UUID.test(scope.spaceId)) && PROJECT.test(scope.project)
-    && (scope.projectId === undefined || UUID.test(scope.projectId))
+    && (scope.projectId === undefined || scope.projectId === null || UUID.test(scope.projectId))
     && pathWithin(scope.rootPath, scope.rootPath)
     && Array.isArray(scope.actions) && scope.actions.length > 0
-    && scope.actions.every(item => ALLOWED.has(item));
+    && scope.actions.every(item => ALLOWED.has(item as Action) || DEVICE_RECEIPT_ONLY.has(item));
 }
 function permittedArgs(action: Action, args: unknown, root: string): boolean {
   if (!args || typeof args !== "object" || Array.isArray(args)) return false;
@@ -76,6 +80,9 @@ async function body(response: Response | Request): Promise<Record<string,unknown
 }
 
 /**
+ * Device read capability names are accepted for RECEIPTS only, NEVER for
+ * createAction, including legacy sessions with no canonical project ID.
+ *
  * The resolver MUST authenticate a distinct Relay client at the trusted server
  * boundary. No request JSON, LLM content or arbitrary device header may mint
  * this scope. Wraps the actual Product MCP handlers, not a second MCP server.
@@ -118,7 +125,8 @@ export function scopeRelayMcp(handlers: OrdaxMcpHandlers, resolver: Resolver, ve
       const data = await body(request.clone());
       if (!data || data.device_id !== scope.deviceId || data.space_id !== scope.spaceId
         || data.project !== scope.project || typeof data.action !== "string"
-        || !scope.actions.includes(data.action as Action)
+        || !ALLOWED.has(data.action as Action)
+        || !scope.actions.includes(data.action)
         || !permittedArgs(data.action as Action,data.arguments,scope.rootPath)
         || Object.keys(data).some(k => !["device_id","space_id","project","action","arguments"].includes(k))) return denied();
       return handlers.createAction(request);

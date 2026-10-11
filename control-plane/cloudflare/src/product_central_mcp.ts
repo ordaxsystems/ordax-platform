@@ -11,7 +11,7 @@ import {
   listCanonicalProductTargets, getProductAction,
   type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
-import { selectCanonicalRelayProjectScope } from "./product_relay_scope.ts";
+import { selectCanonicalRelayProjectScope, selectCanonicalRelayDeviceScope } from "./product_relay_scope.ts";
 import { createCanonicalRelayReceiptVerifier } from "./product_relay_receipt.ts";
 import { scopeRelayMcp } from "./product_mcp_scoped.ts";
 import type { OrdaxMcpHandlers } from "./mcp_http.ts";
@@ -33,9 +33,10 @@ type Dependencies = Readonly<{
  * multi-PC routing without independent caller attestation.
  *
  * Deliberately rejects clients with ambiguous entitlements. A signed Product
- * OAuth client must have exactly one authorized target with precisely one
- * project-scoped, read-only group. The authorized project UUID is authoritative
- * even if a model provides a different device/project/path argument.
+ * OAuth client must have exactly one authorized target and ONE read-only
+ * scope type: either a device-only NULL-Space/NULL-project grant or a
+ * project-scoped grant. It cannot mix the two without a trusted persisted
+ * Central conversation mapping. All IDs come from canonical grants.
  *
  * A real user with multiple devices needs an explicit, server-side binding
  * flow under Product (not model/device discovery) before Relay can support it.
@@ -59,7 +60,13 @@ export function createCanonicalCentralMcpReadHandlers(
         clientKind: identity.clientKind,
         clientId: identity.clientId,
       });
-      const target = selectCanonicalRelayProjectScope(catalog);
+      const project = selectCanonicalRelayProjectScope(catalog);
+      const device = selectCanonicalRelayDeviceScope(catalog);
+      // Without a durable session mapping the OAuth client must represent
+      // exactly ONE type of authority on precisely ONE computer. Never
+      // prefer global PC reads over scoped projects or vice versa.
+      if (!!project === !!device) return null;
+      const target = project ?? device;
       if (!target) return null;
       return Object.freeze({
         deviceId: target.deviceId,
