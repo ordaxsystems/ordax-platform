@@ -16,6 +16,7 @@ import { createCanonicalRelayReceiptVerifier } from "./product_relay_receipt.ts"
 import { scopeRelayMcp } from "./product_mcp_scoped.ts";
 import type { OrdaxMcpHandlers } from "./mcp_http.ts";
 import { createCanonicalProductMcpGateway } from "./product_mcp_entry.ts";
+import { createCanonicalCentralAdmissionVerifier, type TrustedCentralConversation } from "./product_central_admission.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 type Dependencies = Readonly<{
@@ -106,4 +107,33 @@ export function createCanonicalCentralMcpGateway(
   env: Env, deps: Dependencies = {}, discoveryFetch: typeof fetch = fetch,
 ) {
   return createCanonicalProductMcpGateway(env,createCanonicalCentralMcpReadHandlers(env,deps),discoveryFetch);
+}
+
+/**
+ * Internal MCP composition for a trusted, persisted Central turn. Enforces
+ * admission on EVERY exposed tool call, including tools/list via session(),
+ * before invoking canonical read handlers. No public route is installed here.
+ *
+ * A caller MUST supply a genuine durable verifySession function from the
+ * Product conversation authority; a browser's chat ID is not that authority.
+ * With no such owner connected, this factory refuses construction.
+ */
+export function createCanonicalCentralSessionMcpGateway(
+  env: Env, trusted: TrustedCentralConversation | null,
+  deps: Dependencies & { verifySession: Parameters<typeof createCanonicalCentralAdmissionVerifier>[1]["verifySession"] },
+  discoveryFetch: typeof fetch = fetch,
+) {
+  const verify=createCanonicalCentralAdmissionVerifier(env,deps);
+  const reads=createCanonicalCentralMcpReadHandlers(env,deps);
+  const denied=()=>Response.json({ok:false,error:"central_admission_denied"},{
+    status:403,headers:{"cache-control":"no-store"},
+  });
+  const admit=async(request:Request)=> (await verify(request,trusted)).ok===true;
+  const guarded:OrdaxMcpHandlers={
+    session:async req=>(await admit(req))?reads.session(req):denied(),
+    targets:async req=>(await admit(req))?reads.targets(req):denied(),
+    getAction:async(req,id)=>(await admit(req))?reads.getAction(req,id):denied(),
+    createAction:async()=>denied(),
+  };
+  return createCanonicalProductMcpGateway(env,guarded,discoveryFetch);
 }
