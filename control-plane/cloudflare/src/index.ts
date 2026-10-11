@@ -753,7 +753,7 @@ async function resolveProductGrantForContext(
        AND revoked_at IS NULL
        AND (expires_at IS NULL OR expires_at > ?2)
        AND device_id = ?3
-       AND (space_id IS NULL OR space_id = ?4)
+       AND ((space_id IS NULL AND ?4 IS NULL) OR space_id = ?4)
      ORDER BY
        CASE WHEN space_id IS NULL THEN 0 ELSE 1 END DESC,
        created_at DESC
