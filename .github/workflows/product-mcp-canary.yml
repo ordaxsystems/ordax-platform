@@ -6,6 +6,7 @@ on:
     paths:
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
       - ".github/workflows/product-mcp-canary.yml"
@@ -14,6 +15,7 @@ on:
     paths:
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
       - ".github/workflows/product-mcp-canary.yml"
