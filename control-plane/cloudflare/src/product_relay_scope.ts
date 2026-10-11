@@ -136,8 +136,12 @@ export function selectCanonicalRelayDeviceScope(
   for (const group of target.grant_groups as unknown[]) {
     const allowed = readCapabilities(group, RELAY_DEVICE_READ_CAPABILITIES);
     if (allowed === null) return null;
-    if (!record(group) || group.scope_kind !== "device"
-      || group.space_id !== null || group.project_id !== null) continue;
+    // The canonical ordax_list_product_targets_v1 RPC intentionally does
+    // NOT expose scope_kind. Its PostgreSQL constraint enforces that a
+    // NULL-Space/NULL-project grant is device-scoped. Do not demand an
+    // invented field or accept half-null scopes as device grants.
+    if (!record(group) || group.space_id !== null
+      || group.project_id !== null) continue;
     if (allowed.length > 0) eligible.push(Object.freeze({
       deviceId: target.device_id as string,
       spaceId: null,
