@@ -26,6 +26,8 @@ export type TrustedCentralConversation = Readonly<{
   requestId: string;
   /** Stable, host-observed provider conversation identifier, not a grant. */
   conversationId: string;
+  /** ChatGPT MCP _meta["openai/session"] marker; correlation only. */
+  sessionId?: string;
 }>;
 export type VerifiedCentralAdmission = Readonly<{
   subjectId: string;
@@ -49,10 +51,16 @@ type Dependencies = Readonly<{
 const CLIENT=/^[A-Za-z0-9][A-Za-z0-9._:-]+$/;
 const CONVERSATION=/^[A-Za-z0-9_-]{8,128}$/;
 const KEYS="clientId,conversationId,deviceId,projectId,requestId,spaceId,subjectId";
+const KEYS_WITH_SESSION="clientId,conversationId,deviceId,projectId,requestId,sessionId,spaceId,subjectId";
+export const validChatGptSessionMarker=(value:unknown):value is string=>
+  typeof value==="string" && value.length>=8 && value.length<=256
+  && !/[\x00-\x20\x7f]/u.test(value);
 function validBinding(value: unknown): value is TrustedCentralConversation {
   if(!value || typeof value!=="object" || Array.isArray(value))return false;
   const b=value as Record<string,unknown>;
-  return Object.keys(b).sort().join(",")===KEYS
+  return (Object.keys(b).sort().join(",")===KEYS
+      || Object.keys(b).sort().join(",")===KEYS_WITH_SESSION)
+    && (b.sessionId===undefined || validChatGptSessionMarker(b.sessionId))
     && isCanonicalUuid(b.subjectId) && isCanonicalUuid(b.deviceId)
     && isCanonicalUuid(b.spaceId) && isCanonicalUuid(b.projectId)
     && isCanonicalUuid(b.requestId) && typeof b.clientId==="string"

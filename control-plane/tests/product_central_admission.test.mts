@@ -11,10 +11,12 @@ import {
 const spaceId="99999999-9999-4999-8999-999999999999";
 const chatId="chat-authorized-0001";
 const otherChat="chat-elsewhere-0002";
+const sessionId="chatgpt-session-A-20261011";
+const otherSessionId="chatgpt-session-B-20261011";
 const binding=Object.freeze({subjectId:owner,clientId:client,deviceId:device,
-  spaceId,projectId,requestId,conversationId:chatId});
+  spaceId,projectId,requestId,conversationId:chatId,sessionId});
 const otherBinding=Object.freeze({...binding,clientId:otherClient,
-  deviceId:secondDevice,projectId:randomUUID(),conversationId:otherChat,requestId:randomUUID()});
+  deviceId:secondDevice,projectId:randomUUID(),conversationId:otherChat,requestId:randomUUID(),sessionId:otherSessionId});
 type Binding=typeof binding;
 const identity=(jwt:string)=>new Request("https://central.example/mcp",{
   method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+jwt,
@@ -43,7 +45,8 @@ function fixture(){
       return Boolean(row && row.subjectId===clientInfo.ownerUserId
         && row.clientId===value.clientId && row.deviceId===value.deviceId
         && row.projectId===value.projectId && row.spaceId===value.spaceId
-        && row.requestId===value.requestId && row.conversationId===value.conversationId);
+        && row.requestId===value.requestId && row.conversationId===value.conversationId
+        && row.sessionId===value.sessionId);
     },
   };
   return {deps,calls,setMode:(next:string)=>{mode=next},rows};
@@ -127,13 +130,14 @@ test("unsigned, wrong OAuth subject, missing signed client never reach catalog o
     assert.equal(f.calls.length,0);
   });
 });
-function call(jwt:string,name:string,args:Record<string,unknown>={}){
+function call(jwt:string,name:string,args:Record<string,unknown>={},marker:string|null=sessionId){
   return new Request("https://central.example/mcp",{
     method:"POST",
     headers:{"content-type":"application/json",authorization:"Bearer "+jwt,
       "x-ordax-device-id":secondDevice},
     body:JSON.stringify({jsonrpc:"2.0",id:1,method:name,
-      params:name==="tools/call"?{name:"ordax_targets",arguments:args}:undefined}),
+      params:name==="tools/call"?{name:"ordax_targets",arguments:args,
+        ...(marker!==null?{_meta:{"openai/session":marker}}:{})}:undefined}),
   });
 }
 test("same MCP gateway rechecks session for each call; revoke blocks tool before read",async()=>{
@@ -162,5 +166,45 @@ test("MCP session gate denies discovery if OAuth chat mapping is absent",async()
     const gateway=createCanonicalCentralSessionMcpGateway(env,binding,f.deps);
     const response=await gateway(call(await token(),"tools/list"));
     assert.notEqual(response.status,200);
+  });
+});
+
+test("OpenAI per-conversation MCP marker prevents cross-chat reads under the same OAuth client",async()=>{
+  await withIssuer(async()=>{
+    const f=fixture();
+    const gateway=createCanonicalCentralSessionMcpGateway(env,binding,f.deps);
+    const jwt=await token();
+    const before=f.calls.length;
+    for(const marker of [null,otherSessionId,"bad marker", "", "x".repeat(257)]){
+      const response=await gateway(call(jwt,"tools/call",{},marker));
+      assert.notEqual(response.status,200,JSON.stringify({marker,status:response.status}));
+    }
+    assert.equal(f.calls.length,before,"wrong metadata must fail before Product RPC");
+    const valid=await gateway(call(jwt,"tools/call",{},sessionId));
+    assert.equal(valid.status,200);
+    const payload=await valid.json();
+    assert.equal(payload.result.structuredContent.targets[0].device_id,device);
+    assert.ok(f.calls.some(c=>c.kind==="session"));
+  });
+});
+test("session marker in model tool arguments cannot override OpenAI MCP _meta",async()=>{
+  await withIssuer(async()=>{
+    const f=fixture(),gateway=createCanonicalCentralSessionMcpGateway(env,binding,f.deps);
+    const jwt=await token();
+    const bad=await gateway(call(jwt,"tools/call",{
+      "_meta":{"openai/session":sessionId},
+    },otherSessionId));
+    assert.notEqual(bad.status,200);
+    assert.equal(f.calls.length,0);
+  });
+});
+test("unbound Central gateway refuses tools even with signed OAuth and supplied MCP marker",async()=>{
+  await withIssuer(async()=>{
+    const f=fixture();
+    const {sessionId:_omit,...unbound}=binding;
+    const gateway=createCanonicalCentralSessionMcpGateway(env,unbound,f.deps);
+    const response=await gateway(call(await token(),"tools/call",{},sessionId));
+    assert.notEqual(response.status,200);
+    assert.equal(f.calls.length,0);
   });
 });
