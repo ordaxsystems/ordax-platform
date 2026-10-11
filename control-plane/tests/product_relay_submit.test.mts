@@ -236,3 +236,40 @@ test("unknown outcome, invalid receipt and unauthenticated attempts never claim 
     assert.equal((await submit(broken,jwt,bound)).status,503);
   });
 });
+
+test("same device with two OAuth clients retains separate operation and grant authority", async () => {
+  await withIssuer(async () => {
+    const projectA=projectId,projectB=randomUUID();
+    const clients=[
+      {owner,client,projectId:projectA,operationId:randomUUID()},
+      {owner,client:otherClient,projectId:projectB,operationId:randomUUID()},
+    ];
+    const writes:unknown[]=[];
+    const handler=createCanonicalRelayActionSubmitHandler(env,{
+      listTargets:async (_,input)=>{
+        const member=clients.find(x=>x.owner===input.ownerUserId&&x.client===input.clientId);
+        return member?grant({deviceId:device,spaceId,projectId:member.projectId}):{ok:true,targets:[]};
+      },
+      enqueue:async (_,input)=>{writes.push(input);
+        return {ok:true,request_id:randomUUID(),effect_id:randomUUID(),replayed:false,status:"queued"};},
+    });
+    for(const member of clients){
+      const jwt=await token({sub:member.owner,client_id:member.client});
+      const binding={subjectId:member.owner,clientId:member.client,deviceId:device,
+        spaceId,projectId:member.projectId,operationId:member.operationId};
+      assert.equal((await submit(handler,jwt,binding)).status,202);
+      // Same physical PC is not authority to switch to another client's grant.
+      const other=clients.find(x=>x!==member)!;
+      assert.equal((await submit(handler,jwt,{...binding,projectId:other.projectId})).status,403);
+      assert.equal((await submit(handler,jwt,{...binding,clientId:other.client})).status,403);
+      assert.equal((await submit(handler,jwt,{...binding,operationId:""})).status,403);
+    }
+    assert.equal(writes.length,2);
+    assert.equal((writes[0] as Record<string,unknown>).deviceId,device);
+    assert.equal((writes[1] as Record<string,unknown>).deviceId,device);
+    assert.equal((writes[0] as Record<string,unknown>).projectId,projectA);
+    assert.equal((writes[1] as Record<string,unknown>).projectId,projectB);
+    assert.notEqual((writes[0] as Record<string,unknown>).idempotencyKey,
+      (writes[1] as Record<string,unknown>).idempotencyKey);
+  });
+});
