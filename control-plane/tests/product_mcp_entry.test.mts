@@ -37,6 +37,7 @@ test("health is honest about read-only operation, Product authority and readines
   const response = await run(new Request("https://canary.example/health"));
   const status = await response.json();
   assert.equal(response.status, 200);
+  assert.equal(status.service, "ordax-platform-mcp");
   assert.deepEqual({
     mode: status.mode, supports_remote_actions: status.supports_remote_actions,
     auth: status.auth_configured, postgres: status.postgres_configured,
@@ -101,4 +102,30 @@ test("unconfigured and unauthenticated clients fail closed, no legacy routes exp
     const answer = await gateway(new Request("https://canary.example" + path, { method }));
     assert.equal(answer.status, 404, path);
   }
+});
+
+test("canary session accurately reports the exposed tool count, not hidden executor tools", async () => {
+  const { handlers } = fakeHandlers();
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers);
+  const response = await gateway(request("ordax_session"));
+  const json = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(json.result.structuredContent.ok, true);
+  assert.equal(json.result.structuredContent.authenticated, true);
+  assert.equal(json.result.structuredContent.mcp_tool_count, 4);
+  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-11.1");
+});
+
+test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {
+  const { handlers } = fakeHandlers();
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers);
+  const response = await gateway(new Request(MCP_URL, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
+  }));
+  const json = await response.json();
+  assert.equal(json.result.serverInfo.name, "OrdaX Platform");
+  assert.equal(json.result.serverInfo.version, "0.5.0");
+  assert.match(json.result.instructions, /OrdaX Platform MCP/);
+  assert.doesNotMatch(json.result.instructions, /Use ORDAX Studio only/);
 });

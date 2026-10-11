@@ -43,7 +43,7 @@ export function createCanonicalProductMcpGateway(env: Env, reads: ReadHandlers =
     if (request.method === "GET" && url.pathname === "/health") {
       // Not a liveness guarantee for accounts/devices/inference.
       return respond({
-        ok: true, service: "ordax-product-mcp",
+        ok: true, service: "ordax-platform-mcp",
         mode: "read-only-canary",
         auth_configured: productAuthConfigured(env),
         postgres_configured: productPostgresConfigured(env),

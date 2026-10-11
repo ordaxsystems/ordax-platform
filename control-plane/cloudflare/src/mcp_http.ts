@@ -52,7 +52,7 @@ const REPLACEMENTS = {
   },
 };
 
-const MCP_TOOL_SURFACE_REVISION = "2026-10-07.1";
+const MCP_TOOL_SURFACE_REVISION = "2026-10-11.1";
 
 const TOOLS: ToolSpec[] = [
   { name: "ordax_session", description: "Inspect whether the current ORDAX Product connection is authenticated." },
@@ -629,7 +629,7 @@ async function waitForAction(source: Request, requestId: string, timeoutMs: numb
   }
 }
 
-async function callTool(source: Request, name: string, args: JsonObject, handlers: OrdaxMcpHandlers): Promise<JsonObject> {
+async function callTool(source: Request, name: string, args: JsonObject, handlers: OrdaxMcpHandlers, advertisedToolCount: number): Promise<JsonObject> {
   if (name === "ordax_session") {
     const response = await handlers.session(cloneWithAuth(source, new URL("/v3/product/session", source.url).toString(), "GET"));
     const payload = await bodyJson(response);
@@ -640,14 +640,14 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
             ok: true,
             authenticated: true,
             mcp_tool_surface_revision: MCP_TOOL_SURFACE_REVISION,
-            mcp_tool_count: TOOLS.length,
+            mcp_tool_count: advertisedToolCount,
           }
         : {
             ok: false,
             authenticated: false,
             error: "authentication_required",
             mcp_tool_surface_revision: MCP_TOOL_SURFACE_REVISION,
-            mcp_tool_count: TOOLS.length,
+            mcp_tool_count: advertisedToolCount,
           },
       !authenticated,
     );
@@ -757,8 +757,8 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
   if (method === "initialize") return rpcResult(id, {
     protocolVersion: "2025-06-18",
     capabilities: { tools: { listChanged: false } },
-    serverInfo: { name: "ORDAX Control Plane", version: "0.4.2" },
-    instructions: "Use ORDAX Studio only when the user asks to work with a connected ORDAX device or one of its registered projects. List authorized devices before project-scoped work when the target is unknown. The device hosting this conversation is not automatically the execution target. Select the user's intended device and project; do not silently switch targets. Device kind, account login and reported presence do not grant file, desktop or mobile capabilities. Use only tools authorized and supported by the selected device; do not infer phone file or sensor access from a mobile catalog entry. A cloud-hosted conversation, stored file or GitHub repository does not establish a cloud executor. Respect project boundaries and the user's explicit intent. Write, execute, Git and Blender mutation tools remain grant- and audit-protected by the ORDAX Runtime.",
+    serverInfo: { name: "OrdaX Platform", version: "0.5.0" },
+    instructions: "Use OrdaX Platform MCP only when the user asks to work with an authorized OrdaX device or one of its registered projects. List authorized devices before project-scoped work when the target is unknown. The device hosting this conversation is not automatically the execution target. Select the user's intended device and project; do not silently switch targets. Device kind, account login and reported presence do not grant file, desktop or mobile capabilities. Use only tools authorized and supported by the selected device; do not infer phone file or sensor access from a mobile catalog entry. A cloud-hosted conversation, stored file or GitHub repository does not establish a cloud executor. Respect project boundaries and the user's explicit intent. Write, execute, Git and Blender mutation tools remain grant- and audit-protected by the ORDAX Runtime.",
   });
   if (method === "tools/list") return rpcResult(id, { tools: toolDefinitions(allowedTools) });
   if (method === "tools/call") {
@@ -769,7 +769,7 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
     const args = rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
     if (!specFor(name) || (allowedTools && !allowedTools.has(name))) return rpcError(id, -32601, "Tool not found", { tool: name });
     try {
-      return rpcResult(id, await callTool(request, name, args, handlers));
+      return rpcResult(id, await callTool(request, name, args, handlers, toolDefinitions(allowedTools).length));
     } catch {
       return rpcResult(id, textToolResult({ ok: false, error: "ordax_mcp_internal_error" }, true));
     }
