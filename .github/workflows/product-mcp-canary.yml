@@ -38,7 +38,7 @@ jobs:
       - name: Install only pinned Worker Postgres dependency
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
       - name: Protocol, fail-closed and signed OAuth regressions
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_discovery.test.mts
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_oauth_readiness.test.mts
       - name: Compile candidate with Wrangler without deploying
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.product-mcp-canary.toml --outdir .canary-bundle
