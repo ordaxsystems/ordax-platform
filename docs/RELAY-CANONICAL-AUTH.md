@@ -100,3 +100,44 @@ A composição ainda inativa `createCanonicalCentralSessionMcpGateway` agora exi
 **Limites de segurança:** `_meta["openai/session"]` é informação enviada pelo cliente MCP e, portanto, **pode ser forjada por um cliente malicioso**. Não é assinatura, token, segredo, permissão ou prova de titularidade do ChatGPT. Sem OAuth e registro confiável não concede acesso; mesmo com a comparação de igualdade, continua obrigatório um mecanismo que estabeleça a associação inicial `sessionId → solicitação Central → dispositivo` por um canal autenticado e com proteção contra replay. O ChatGPT pode fornecer um correlator, mas não fornece automaticamente ao Studio a autorização para agir em outro computador. A composição continua **não montada em produção**.
 
 Testes: `product_central_admission.test.mts` usa mensagens MCP reais em formato JSON-RPC, OAuth assinado, grants canônicos injetados, sessões A/B, metadados faltantes/trocados e tentativa de mover o marcador para parâmetros do modelo. **Esses testes não são uma captura ao vivo do _meta emitido pelo ChatGPT**. A prova real em conversa ChatGPT → plugin → Runtime no Windows foi executada separadamente.
+
+
+## Central: PC sem Space/projeto não é autorização de projeto (11/10/2026)
+
+A fonte real do Product, `public.ordax_list_product_targets_v1`, expõe
+`grant_groups[].space_id` e `grant_groups[].project_id`, **mas não**
+`scope_kind`. No PostgreSQL, a constraint do grant define explicitamente
+`scope_kind=device` com `project_id=NULL`; para o fluxo de Central somente
+leitura, exigir **os dois campos NULL** é a distinção inequívoca, sem criar
+outro campo ou mecanismo paralelo. Um Space fornecido pelo modelo jamais
+converte essa concessão em project grant.
+
+A função `selectCanonicalRelayDeviceScope` extrai do catálogo por owner +
+OAuth client exato apenas capacidades inofensivas e explicitamente concedidas
+(`computer.access_status`, `computer.active_window`,
+`computer.processes`, `computer.screen_info`, `computer.windows`) em modo
+**read**. Não enfileira tarefas, não amplia Full Access, não concede leitura
+de arquivo nem transforma a permissão em `createAction`.
+`selectCanonicalRelayProjectScope` continua independente e aceita somente
+grants com Space e projeto UUID explícitos.
+
+O gateway de leitura sem associação de conversa exige **um único PC e um
+único tipo de autoridade**; quando um OAuth client possui grants de ambos os
+tipos, recusa a ambiguidade. Já a admissão **de uma conversa confiavelmente
+persistida no Product** aceita o PC exato da associação, inclusive quando
+o mesmo client OAuth tem vários PCs, mas consulta
+`verifySession` **antes** de usar o `deviceId` para selecionar um alvo no
+catálogo. Sem esse owner durável, nem o UUID no prompt, nem a URL Web, nem o
+marcador MCP OpenAI são prova de autorização.
+
+Para grants device-scoped, `spaceId` e `projectId` devem ser NULL juntos;
+pares misturados NULL/UUID falham. Os recibos precisam confirmar o mesmo
+`device_id`, `project_id=NULL`, ação autorizada, sujeito, OAuth client e
+identificador da solicitação. A entrada legada de escrita continua negada
+quando o grant é do computador. Testes em
+`product_central_device_scope.test.mts` exercem o payload real do RPC,
+múltiplos alvos, revogação, mistura de escopos, tentativas de escrita e
+marcador de sessão.
+
+**Escopo:** fonte + testes, NÃO implantação. O Worker canary permanece
+somente leitura e não existe associação de conversas persistida em produção.
