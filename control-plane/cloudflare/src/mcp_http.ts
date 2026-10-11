@@ -687,6 +687,12 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   if (!spec?.action) return textToolResult({ ok: false, error: "tool_not_found", tool: name }, true);
   const deviceId = typeof args.device_id === "string" ? args.device_id : "";
   const project = spec.projectRequired && typeof args.project === "string" ? args.project : null;
+  // A supplied but invalid Space must never be silently converted into
+  // an unscoped action. The canonical Product authority still decides whether
+  // the exact UUID is granted; the MCP boundary only validates the input.
+  if (Object.prototype.hasOwnProperty.call(args, "space_id") && !isCanonicalUuid(args.space_id)) {
+    return textToolResult({ ok: false, error: "space_id_invalid" }, true);
+  }
   const spaceId = typeof args.space_id === "string" ? args.space_id : null;
   const rawWait = typeof args.wait_for_completion_ms === "number" && Number.isFinite(args.wait_for_completion_ms) ? args.wait_for_completion_ms : 8000;
   const waitMs = Math.max(0, Math.min(20000, Math.floor(rawWait)));
