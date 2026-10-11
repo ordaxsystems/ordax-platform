@@ -33,7 +33,7 @@ test("ready uses canonical discovery URL with 5s deadline and rejects redirects"
   const fake = (async (url: RequestInfo | URL, options?: RequestInit) => {
     calls++;
     assert.equal(url, DISCOVERY_URL);
-    assert.equal(options?.redirect, "error");
+    assert.equal(options?.redirect, "manual");
     assert.equal(options?.method, "GET");
     assert.equal(options?.headers && (options.headers as Record<string,string>).accept, "application/json");
     assert.ok(options?.signal instanceof AbortSignal);
@@ -152,4 +152,20 @@ test("HTTP denial is separate from upstream transport failure", async () => {
     ok: false, error: "oauth_discovery_unavailable", upstream_http_status: 403,
   });
   assert.equal("failure_stage" in result, false);
+});
+
+test("Cloudflare-safe redirect=manual never follows a third-party OAuth discovery redirect", async () => {
+  let called = false;
+  const fake = (async (_url: RequestInfo | URL, options?: RequestInit) => {
+    called = true;
+    assert.equal(options?.redirect, "manual");
+    return new Response(null, {
+      status: 302, headers: { location: "https://evil.example/collect" },
+    });
+  }) as typeof fetch;
+  const answer = await checkCanonicalProductOAuthDiscovery(ISSUER, fake);
+  assert.equal(called, true);
+  assert.deepEqual(answer, {
+    ok: false, error: "oauth_discovery_unavailable", upstream_http_status: 302,
+  });
 });
