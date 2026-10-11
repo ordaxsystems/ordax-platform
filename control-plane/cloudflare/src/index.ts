@@ -921,7 +921,7 @@ async function listProductTargets(request: Request, env: Env): Promise<Response>
        AND g.revoked_at IS NULL
        AND d.revoked_at IS NULL
        AND (g.expires_at IS NULL OR g.expires_at > ?2)
-       AND (?3 IS NULL OR g.space_id IS NULL OR g.space_id = ?3)
+       AND (?3 IS NULL OR g.space_id = ?3)
      ORDER BY d.name ASC, g.created_at DESC
      LIMIT 200`,
   ).bind(identity.subjectId, now, spaceId).all<{
