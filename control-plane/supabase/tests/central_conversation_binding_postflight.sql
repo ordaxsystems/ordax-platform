@@ -23,17 +23,23 @@ begin
      or has_table_privilege('ordax_edge_runtime',v_table,'SELECT')
   then raise exception 'central_session_table_acl_exposed'; end if;
   for v_source in select unnest(array[
-    'anon','authenticated','service_role','ordax_edge_runtime'
+    'anon','authenticated','service_role'
   ]) loop
     if has_function_privilege(v_source,v_bind,'EXECUTE')
        or has_function_privilege(v_source,v_verify,'EXECUTE')
        or has_function_privilege(v_source,v_revoke,'EXECUTE')
     then raise exception 'central_session_rpc_exposed_to_%',v_source; end if;
   end loop;
-  if not has_function_privilege('ordax_edge_executor',v_bind,'EXECUTE')
+  -- Runtime INHERITS edge_executor in this production database. Binding
+  -- and revocation MUST therefore use a separate NOLOGIN attestor role.
+  if has_function_privilege('ordax_edge_executor',v_bind,'EXECUTE')
+     or has_function_privilege('ordax_edge_executor',v_revoke,'EXECUTE')
+     or has_function_privilege('ordax_edge_runtime',v_bind,'EXECUTE')
+     or has_function_privilege('ordax_edge_runtime',v_revoke,'EXECUTE')
+     or not has_function_privilege('ordax_central_attestation_executor',v_bind,'EXECUTE')
+     or not has_function_privilege('ordax_central_attestation_executor',v_revoke,'EXECUTE')
      or not has_function_privilege('ordax_edge_executor',v_verify,'EXECUTE')
-     or not has_function_privilege('ordax_edge_executor',v_revoke,'EXECUTE')
-  then raise exception 'central_session_worker_execute_missing'; end if;
+  then raise exception 'central_session_attestor_or_worker_acl_mismatch'; end if;
   v_source:=pg_get_functiondef(v_verify::oid);
   if strpos(v_source,'b.owner_user_id=p_owner_user_id')=0
     or strpos(v_source,'b.client_id=p_client_id')=0
