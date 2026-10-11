@@ -157,25 +157,47 @@ export function createCanonicalCentralSessionMcpGateway(
   discoveryFetch: typeof fetch = fetch,
 ) {
   const verify=createCanonicalCentralAdmissionVerifier(env,deps);
-  const reads=createCanonicalCentralMcpReadHandlers(env,deps);
+  const authorizedAction=deps.getAction ?? getProductAction;
+  const canonical=createCanonicalProductMcpReadHandlers(env,{
+    listTargets:deps.listTargets ?? listCanonicalProductTargets,
+    getAction:authorizedAction,
+  });
+  const attest=createCanonicalRelayReceiptVerifier(env,{getAction:authorizedAction});
   const denied=()=>Response.json({ok:false,error:"central_admission_denied"},{
     status:403,headers:{"cache-control":"no-store"},
   });
-  // handleOrdaxMcp intentionally creates internal GET Requests for session,
-  // targets and receipts, without the incoming JSON-RPC body. Keep the
-  // provider _meta check at the ORIGINAL /mcp HTTP boundary, not inside
-  // the handler that receives only the authenticated internal projection.
-  const admit=async(request:Request)=> (await verify(request,trusted)).ok===true;
-  const guarded:OrdaxMcpHandlers={
-    session:async req=>(await admit(req))?reads.session(req):denied(),
-    targets:async req=>(await admit(req))?reads.targets(req):denied(),
-    getAction:async(req,id)=>(await admit(req))?reads.getAction(req,id):denied(),
-    createAction:async()=>denied(),
+
+  // Crucially, use the SAME authenticated, durable-session admission to
+  // select the authorized PC for every read. An unbound OAuth client with
+  // several targets is intentionally ambiguous, but an independently
+  // attested Central request can select its precise PC. NEVER use a model
+  // argument or a device header as a replacement for this admission.
+  const resolver=async(request:Request)=>{
+    const allowed=await verify(request,trusted);
+    if(!allowed.ok)return null;
+    return Object.freeze({
+      deviceId:allowed.deviceId,subjectId:allowed.subjectId,
+      clientId:allowed.clientId,spaceId:allowed.spaceId,
+      project:"canonical",projectId:allowed.projectId,
+      rootPath:"canonical",actions:allowed.allowedActions,
+    });
   };
-  const gateway=createCanonicalProductMcpGateway(env,guarded,discoveryFetch);
+  const scoped=scopeRelayMcp({
+    ...canonical,
+    // A provider session gets only read projections and existing receipts;
+    // durable Product command enqueue is a distinct trusted request path.
+    createAction:async()=>denied(),
+  },resolver,(request,requestId,scope)=>attest(request,requestId,{
+    subjectId:scope.subjectId,clientId:scope.clientId,
+    deviceId:scope.deviceId,
+    projectId:scope.projectId === undefined ? null : scope.projectId,
+    allowedActions:scope.actions,
+  }));
+  const gateway=createCanonicalProductMcpGateway(env,scoped,discoveryFetch);
   return async (request:Request):Promise<Response>=>{
-    // Correlate before the canonical gateway consumes/clones the tool body.
-    // GET metadata/discovery paths have no model action to correlate.
+    // The original JSON-RPC request carries the provider correlation marker.
+    // Internal read projections become GET Requests and lose that body, so
+    // correlate BEFORE dispatch and recheck Product session per tool call.
     if(request.method==="POST" && new URL(request.url).pathname==="/mcp"
       && !(await matchesCentralMcpSession(request,trusted)))return denied();
     return gateway(request);

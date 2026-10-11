@@ -141,3 +141,30 @@ marcador de sessão.
 
 **Escopo:** fonte + testes, NÃO implantação. O Worker canary permanece
 somente leitura e não existe associação de conversas persistida em produção.
+
+
+## MCP: isolamento real de leitura após atestação da sessão
+
+O Product OAuth pode ter **vários PCs autorizados no mesmo client_id**.
+O seletor genérico do plugin sem contexto continua negando a ambiguidade
+corretamente; porém a Central com `verifySession` já possui a associação
+imutável entre pedido e PC. Essa associação deve ser a fonte da seleção
+do destino **também nas consultas subsequentes**, não só na admissão inicial.
+
+`createCanonicalCentralSessionMcpGateway` reaproveita
+`createCanonicalCentralAdmissionVerifier` para gerar o
+resolver de `scopeRelayMcp` em cada chamada. Após a assinatura OAuth,
+o client_id exato, o registro durável da conversa e os grants atuais do
+PostgreSQL passarem, esse resolver limita `ordax_targets` a **um PC**
+e permite consultar somente os recibos cujo `device_id`, `project_id`,
+capability, request_id, sujeito e client correspondam à mesma admissão.
+Nunca retorna inventário de um PC vizinho e nunca consulta um recibo
+através de outros clientes. A revogação invalida o próximo acesso.
+`_meta["openai/session"]` é conferido na requisição JSON-RPC original
+antes de chamadas internas, como correlação, sem substituir OAuth.
+
+O `createAction` permanece recusado. O plugin canary público continua
+sem essa composição até existir um owner Product que persista e prove
+`verifySession` de verdade. Os testes de 2 PCs e dois tipos de scope
+usam JWTs criptograficamente assinados **em laboratório**; não representam
+um ChatGPT real, não foram implantados no Worker e não criaram grants.
