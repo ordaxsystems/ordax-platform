@@ -113,5 +113,32 @@
       "legacy_rest_backend_secret": false,
       "direct_table_mutation": false
     }
+  },
+  "mcp_release": {
+    "worker_name": "ordax-mcp",
+    "hostname": "mcp.ordax.com.br",
+    "path": "/mcp",
+    "wrangler": "control-plane/cloudflare/wrangler.mcp.toml",
+    "entrypoint": "src/product_mcp_entry.ts",
+    "transport": "streamable-http",
+    "authority": "postgresql",
+    "oauth_issuer": "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1",
+    "custom_domain_required": true,
+    "workers_dev": false,
+    "deployment_ready": false,
+    "readiness_blockers": [
+      "canonical_custom_domain_not_verified",
+      "chatgpt_oauth_client_consent_not_verified",
+      "product_device_enrollment_and_grants_missing",
+      "central_trusted_session_attestor_not_provisioned",
+      "legacy_control_plane_v3_runtime_not_retired",
+      "end_to_end_chatgpt_to_device_not_verified"
+    ],
+    "safety": {
+      "allow_d1": false,
+      "allow_legacy_fallback": false,
+      "allow_untrusted_model_dispatch": false,
+      "allow_production_release_without_e2e": false
+    }
   }
 }
