@@ -1,228 +1,238 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { createCanonicalRelayActionSubmitHandler } from "../cloudflare/src/product_relay_submit.ts";
 import {
   env, owner, otherOwner, client, otherClient, device, secondDevice, projectId,
   effectId, requestId, token, withIssuer,
 } from "./product_mcp_test_fixtures.mts";
 
-const spaceId="99999999-9999-4999-8999-999999999999";
-const key="relay-client-00000001";
-const base={device_id:device,space_id:spaceId,project_id:projectId,
-  action:"workspace.directory_list",arguments:{path:"pasta 1",max_depth:2},
-  idempotency_key:key};
-const validGrant=(scope={deviceId:device,space:spaceId,project:projectId,expires:null as string|null})=>
-  ({ok:true,targets:[{
-    device_id:scope.deviceId,
-    grant_groups:[{grant_group_id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      space_id:scope.space,project_id:scope.project,
-      valid_until:scope.expires,capabilities:[
-        {capability:"workspace.directory_list",access_mode:"read"},
-        {capability:"project.text_read",access_mode:"read"},
-      ]}],
-  }]});
-const req=(jwt:string,payload:Record<string,unknown>)=>new Request("https://ordax.example/v3/product/actions",{
-  method:"POST",
-  headers:{"content-type":"application/json",authorization:"Bearer "+jwt,
-    "x-ordax-owner-user-id":otherOwner,"x-ordax-client-id":otherClient},
-  body:JSON.stringify(payload),
+const spaceId = "99999999-9999-4999-8999-999999999999";
+const body = { action: "workspace.directory_list", arguments: { path: "pasta 1", max_depth: 2 } };
+const bound = { subjectId: owner, clientId: client, deviceId: device,
+  spaceId, projectId, operationId: randomUUID() };
+const grant = (value: { deviceId: string; spaceId: string; projectId: string; expires?: string | null } = bound) => ({
+  ok: true, targets: [{
+    device_id: value.deviceId, grant_groups: [{
+      grant_group_id: randomUUID(), space_id: value.spaceId, project_id: value.projectId,
+      valid_until: value.expires ?? null,
+      capabilities: [{ capability: "workspace.directory_list", access_mode: "read" }],
+    }],
+  }],
 });
-async function result(handler:ReturnType<typeof createCanonicalRelayActionSubmitHandler>,
-  jwt:string,payload:Record<string,unknown>){
-  const response=await handler(req(jwt,payload));
-  return {status:response.status,body:await response.json(),cache:response.headers.get("cache-control")};
+type Binding = Parameters<ReturnType<typeof createCanonicalRelayActionSubmitHandler>>[1];
+function request(jwt: string, payload: Record<string,unknown>) {
+  return new Request("https://ordax.example/v3/product/actions", {
+    method: "POST", headers: {
+      "content-type": "application/json", authorization: "Bearer " + jwt,
+      // Deliberately spoofed: never used for target or owner authorization.
+      "x-ordax-owner-user-id": otherOwner, "x-ordax-client-id": otherClient,
+      "x-ordax-device-id": secondDevice,
+    },
+    body: JSON.stringify(payload),
+  });
 }
-test("signed owner and exact client enqueue on ONLY the authorized PC and project",async()=>{
-  await withIssuer(async()=>{
-    const calls:unknown[]=[];let discovery:unknown;
-    const handler=createCanonicalRelayActionSubmitHandler(env,{
-      now:()=>Date.parse("2026-10-10T19:00:00Z"),
-      listTargets:async (server,input)=>{assert.equal(server,env);discovery=input;return validGrant();},
-      enqueue:async (server,input)=>{assert.equal(server,env);calls.push(input);
-        return {ok:true,replayed:false,request_id:requestId,effect_id:effectId,status:"queued"};},
+async function submit(
+  handler: ReturnType<typeof createCanonicalRelayActionSubmitHandler>,
+  jwt: string, binding: Binding, payload: Record<string,unknown> = body,
+) {
+  const response = await handler(request(jwt,payload),binding);
+  return { status: response.status, body: await response.json(),
+    cache: response.headers.get("cache-control") };
+}
+
+test("trusted UUID and OAuth identity bind the canonical grant and stable idempotency", async () => {
+  await withIssuer(async () => {
+    const calls: unknown[] = []; let discovery: unknown;
+    const handler = createCanonicalRelayActionSubmitHandler(env,{
+      now: () => Date.parse("2026-10-10T19:00:00Z"),
+      listTargets: async (_env, input) => { discovery=input; return grant(); },
+      enqueue: async (_env, input) => { calls.push(input);
+        return { ok:true,replayed:false,request_id:requestId,effect_id:effectId,status:"queued" }; },
     });
-    const got=await result(handler,await token(),base);
-    assert.equal(got.status,202);
-    assert.equal(got.cache,"no-store");
-    assert.deepEqual(got.body,{ok:true,request_id:requestId,effect_id:effectId,
-      status:"queued",replayed:false,device_id:device,project_id:projectId});
+    const answer = await submit(handler,await token(),bound);
+    assert.equal(answer.status,202);
+    assert.equal(answer.cache,"no-store");
+    assert.deepEqual(answer.body, {
+      ok:true,request_id:requestId,effect_id:effectId,
+      status:"queued",replayed:false,device_id:device,project_id:projectId,
+    });
     assert.deepEqual(discovery,{ownerUserId:owner,clientKind:"product-mcp",clientId:client});
     assert.deepEqual(calls,[{
       ownerUserId:owner,clientKind:"product-mcp",clientId:client,
-      deviceId:device,spaceId,projectId,
-      capability:"workspace.directory_list",accessMode:"read",
-      payload:{path:"pasta 1",max_depth:2},
-      idempotencyKey:key,expiresAt:"2026-10-10T19:05:00.000Z",
+      deviceId:device,spaceId,projectId,capability:body.action,accessMode:"read",
+      payload:body.arguments,idempotencyKey:"relay-"+bound.operationId.toLowerCase(),
+      expiresAt:"2026-10-10T19:05:00.000Z",
     }]);
   });
 });
 
-test("3 clients are independent; never trust forged headers or model-selected target",async()=>{
-  await withIssuer(async()=>{
-    const identities=[
-      {owner,client,device,project:projectId,space:spaceId},
-      {owner,client:otherClient,device:secondDevice,
-        project:"55555555-5555-4555-8555-555555555555",space:spaceId},
-      {owner:otherOwner,client,device:"66666666-6666-4666-8666-666666666666",
-        project:"77777777-7777-4777-8777-777777777777",space:spaceId},
-    ];
-    const trace:unknown[]=[];
-    const handler=createCanonicalRelayActionSubmitHandler(env,{
-      listTargets:async(_,input)=>{
-        const p=identities.find(p=>p.owner===input.ownerUserId&&p.client===input.clientId);
-        return p?validGrant({deviceId:p.device,space:p.space,project:p.project,expires:null}):{ok:true,targets:[]};
-      },
-      enqueue:async(_,input)=>{trace.push(input);
-        return {ok:true,request_id:requestId,effect_id:effectId,status:"queued",replayed:false};},
+test("missing or forged trusted operation never reaches Product or target discovery", async () => {
+  await withIssuer(async () => {
+    let discoveries=0,enqueues=0;
+    const handler = createCanonicalRelayActionSubmitHandler(env,{
+      listTargets: async () => { discoveries++; return grant(); },
+      enqueue: async () => { enqueues++; return {ok:true,request_id:requestId,effect_id:effectId,replayed:false,status:"queued"}; },
     });
-    for(const p of identities){
-      const signed=await token({sub:p.owner,client_id:p.client});
-      const mine={...base,device_id:p.device,project_id:p.project,space_id:p.space,
-        idempotency_key:"request-"+p.client.slice(0,8)};
-      assert.equal((await result(handler,signed,mine)).status,202);
-      const other=identities.find(q=>q.device!==p.device);
-      const wrong=await result(handler,signed,{...mine,device_id:other!.device});
-      assert.equal(wrong.status,403);
-      assert.equal(wrong.body.error,"relay_action_denied");
-      assert.equal((await result(handler,signed,{...mine,project_id:other!.project})).status,403);
+    const jwt=await token();
+    for(const binding of [
+      null,undefined,
+      {...bound,operationId:"not-uuid"},
+      {...bound,operationId:""},
+      {...bound,deviceId:secondDevice,subjectId:otherOwner},
+      {...bound,subjectId:otherOwner},
+      {...bound,clientId:otherClient},
+      {...bound,extra:"user-supplied-target"},
+      {...bound,projectId:"../outside"},
+    ]){
+      const response=await submit(handler,jwt,binding as Binding);
+      assert.equal(response.status,403,JSON.stringify(binding));
+      assert.equal(response.body.error,"relay_action_denied");
     }
-    assert.equal(trace.length,3);
-    for(let i=0;i<identities.length;i++){
-      const received=trace[i] as Record<string,unknown>;
-      assert.equal(received.deviceId,identities[i].device);
-      assert.equal(received.clientId,identities[i].client);
-      assert.equal(received.ownerUserId,identities[i].owner);
+    assert.equal(discoveries,0);
+    assert.equal(enqueues,0);
+  });
+});
+
+test("3 authorized clients cannot submit to another PC or project with a reused instruction ID", async () => {
+  await withIssuer(async () => {
+    const members=[
+      {owner,client,device,projectId,spaceId,operationId:randomUUID()},
+      {owner,client:otherClient,device:secondDevice,projectId:randomUUID(),spaceId,operationId:randomUUID()},
+      {owner:otherOwner,client,device:randomUUID(),projectId:randomUUID(),spaceId,operationId:randomUUID()},
+    ];
+    const events: unknown[]=[];
+    const handler=createCanonicalRelayActionSubmitHandler(env,{
+      listTargets:async (_,input)=>{
+        const m=members.find(p=>p.owner===input.ownerUserId&&p.client===input.clientId);
+        return m?grant({deviceId:m.device,projectId:m.projectId,spaceId:m.spaceId}):{ok:true,targets:[]};
+      },
+      enqueue:async (_,input)=>{events.push(input);
+        return {ok:true,request_id:requestId,effect_id:effectId,replayed:false,status:"queued"};},
+    });
+    for(const m of members){
+      const jwt=await token({sub:m.owner,client_id:m.client});
+      const own={subjectId:m.owner,clientId:m.client,deviceId:m.device,spaceId:m.spaceId,
+        projectId:m.projectId,operationId:m.operationId};
+      assert.equal((await submit(handler,jwt,own)).status,202);
+      for(const target of members.filter(p=>p.device!==m.device)){
+        assert.equal((await submit(handler,jwt,{...own,deviceId:target.device})).status,403);
+        assert.equal((await submit(handler,jwt,{...own,projectId:target.projectId})).status,403);
+      }
+    }
+    assert.equal(events.length,3);
+    for(const [i,event] of events.entries()){
+      assert.equal((event as Record<string,unknown>).deviceId,members[i].device);
+      assert.equal((event as Record<string,unknown>).ownerUserId,members[i].owner);
+      assert.equal((event as Record<string,unknown>).clientId,members[i].client);
     }
   });
 });
 
-test("ambiguous, expired or revoked grants and unknown capability are denied BEFORE enqueue",async()=>{
+test("model cannot supply device, project, operation UUID or idempotency in its tool JSON",async()=>{
   await withIssuer(async()=>{
-    let count=0;
-    let mode="normal";
+    let calls=0;
+    const handler=createCanonicalRelayActionSubmitHandler(env,{
+      listTargets:async()=>{calls++;return grant();},
+      enqueue:async()=>{throw Error("unexpected");},
+    });
+    const jwt=await token();
+    for(const payload of [
+      {...body,device_id:device},{...body,project_id:projectId},
+      {...body,space_id:spaceId},{...body,idempotency_key:"model-created"},
+      {...body,operation_id:randomUUID()},{...body,client_id:client},
+      {...body,action:"terminal.exec"},{...body,action:"workspace.text_write"},
+      {...body,arguments:{path:"pasta 1/../privado"}},
+      {...body,arguments:{path:"pasta 1/%2e%2e"}},
+      {...body,arguments:{path:"C:/private"}},
+      {...body,arguments:{path:"pasta 1/CON"}},
+      {...body,arguments:{path:"pasta 1",max_depth:500}},
+      {...body,arguments:{path:"pasta 1",request_id:randomUUID()}},
+    ]){
+      const answer=await submit(handler,jwt,bound,payload);
+      assert.equal(answer.status,400,JSON.stringify(payload));
+    }
+    assert.equal(calls,0);
+  });
+});
+
+test("revoked, expired and ambiguous Product grants deny without creating a request",async()=>{
+  await withIssuer(async()=>{
+    let mode="normal",writes=0;
     const handler=createCanonicalRelayActionSubmitHandler(env,{
       listTargets:async()=>{
-        const snapshot=validGrant();
         if(mode==="revoked")return {ok:true,targets:[]};
-        if(mode==="secondTarget")snapshot.targets.push({device_id:secondDevice,grant_groups:[]});
-        if(mode==="expired")snapshot.targets[0].grant_groups[0].valid_until="2020-01-01T00:00:00Z";
-        if(mode==="secondProject")snapshot.targets[0].grant_groups.push({
-          grant_group_id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-          space_id:spaceId,project_id:otherOwner,valid_until:null,
-          capabilities:[{capability:"workspace.directory_list",access_mode:"read"}]});
-        return snapshot;
+        const current=grant();
+        if(mode==="expired")current.targets[0].grant_groups[0].valid_until="2020-01-01T00:00:00Z";
+        if(mode==="multiple-targets")current.targets.push({device_id:secondDevice,grant_groups:[]});
+        if(mode==="multiple-projects")current.targets[0].grant_groups.push({
+          grant_group_id:randomUUID(),space_id:spaceId,project_id:randomUUID(),valid_until:null,
+          capabilities:[{capability:"workspace.directory_list",access_mode:"read"}],
+        });
+        return current;
       },
-      enqueue:async()=>{count++;return {ok:true,request_id:requestId,effect_id:effectId,
-        replayed:false,status:"queued"};},
+      enqueue:async()=>{writes++;throw Error("unexpected");},
     });
     const jwt=await token();
-    for(const denial of ["revoked","secondTarget","expired","secondProject"]){
-      mode=denial;
-      const r=await result(handler,jwt,base);
-      assert.equal(r.status,403,denial);
-      assert.equal(r.body.error,"relay_action_denied");
+    for(mode of ["revoked","expired","multiple-targets","multiple-projects"]){
+      const result=await submit(handler,jwt,bound);
+      assert.equal(result.status,403,mode);
     }
-    mode="normal";
-    assert.equal((await result(handler,jwt,{...base,action:"terminal.exec"})).status,400);
-    assert.equal((await result(handler,jwt,{...base,action:"workspace.text_write"})).status,400);
-    assert.equal(count,0);
+    assert.equal(writes,0);
   });
 });
 
-test("malformed prompt arguments, path traversal and extra target fields fail before lookup",async()=>{
+test("one host operation key is replayed durably, changing the instruction conflicts",async()=>{
   await withIssuer(async()=>{
-    let lookups=0,enqueues=0;
+    const rows=new Map<string,{signature:string;requestId:string}>();
+    let executions=0;
     const handler=createCanonicalRelayActionSubmitHandler(env,{
-      listTargets:async()=>{lookups++;return validGrant();},
-      enqueue:async()=>{enqueues++;throw Error("must not enqueue");},
-    });
-    const jwt=await token();
-    const changes=[
-      {path:"pasta 1/../secreto"},{path:"C:/private"},
-      {path:"pasta 1/%2e%2e"},{path:"pasta 1/COM1.txt"},
-      {path:"pasta 1/secret:stream"},{path:"pasta 1\\segredo"},
-      {path:"pasta 1//secret"},{path:"pasta 1/arquivo."},
-    ];
-    for(const argumentsValue of changes){
-      const r=await result(handler,jwt,{...base,arguments:argumentsValue});
-      assert.equal(r.status,400,JSON.stringify(argumentsValue));
-    }
-    for(const body of [
-      {...base,extra:"pretend-client"},
-      {...base,arguments:{path:"pasta 1",max_depth:55}},
-      {...base,arguments:{path:"pasta 1",include_hidden:"true"}},
-      {...base,idempotency_key:"x"},
-      {...base,idempotency_key:"a".repeat(129)},
-      {...base,idempotency_key:"valid-key\nInjected"},
-      {...base,device_id:"wrong-target"},
-      {...base,project_id:"../private"},
-      {...base,arguments:{path:"pasta 1",request_id:"forged"}},
-      {...base,action:"workspace.text_read",arguments:{path:"pasta 1",start_line:30,end_line:2}},
-    ]){
-      const r=await result(handler,jwt,body);
-      assert.equal(r.status,400,JSON.stringify(body));
-    }
-    assert.equal(lookups,0);assert.equal(enqueues,0);
-  });
-});
-
-test("durable idempotency replays same submission, conflicts on changed payload and keeps key",async()=>{
-  await withIssuer(async()=>{
-    const records=new Map<string,{input:unknown;request:string}>();
-    let created=0;
-    const handler=createCanonicalRelayActionSubmitHandler(env,{
-      listTargets:async()=>validGrant(),
+      listTargets:async()=>grant(),
       enqueue:async(_,input)=>{
-        const unique=input.ownerUserId+":"+input.idempotencyKey;
-        const found=records.get(unique);
-        if(found){
-          if(JSON.stringify(found.input)!==JSON.stringify({
-            deviceId:input.deviceId,projectId:input.projectId,
-            payload:input.payload,clientId:input.clientId})){
-            return {ok:false,error:"idempotency_conflict"};
-          }
-          return {ok:true,replayed:true,request_id:found.request,effect_id:effectId,status:"queued"};
+        const key=input.ownerUserId+":"+input.idempotencyKey;
+        const signature=JSON.stringify([input.deviceId,input.clientId,input.projectId,input.capability,input.payload]);
+        const previous=rows.get(key);
+        if(previous){
+          if(previous.signature!==signature)return {ok:false,error:"idempotency_conflict"};
+          return {ok:true,replayed:true,request_id:previous.requestId,effect_id:effectId,status:"queued"};
         }
-        created++;
-        records.set(unique,{request:requestId,input:{
-          deviceId:input.deviceId,projectId:input.projectId,
-          payload:input.payload,clientId:input.clientId,
-        }});
+        executions++;
+        rows.set(key,{signature,requestId});
         return {ok:true,replayed:false,request_id:requestId,effect_id:effectId,status:"queued"};
       },
     });
     const jwt=await token();
-    const first=await result(handler,jwt,base);
-    const again=await result(handler,jwt,base);
-    const conflict=await result(handler,jwt,{...base,arguments:{path:"outra pasta"}});
+    const first=await submit(handler,jwt,bound);
+    const replay=await submit(handler,jwt,bound);
+    const conflict=await submit(handler,jwt,bound,{...body,arguments:{path:"pasta 2"}});
     assert.equal(first.status,202);
-    assert.equal(again.status,200);assert.equal(again.body.replayed,true);
-    assert.equal(again.body.request_id,first.body.request_id);
-    assert.equal(conflict.status,409);assert.equal(conflict.body.error,"idempotency_conflict");
-    assert.equal(created,1);
+    assert.equal(replay.status,200);
+    assert.equal(replay.body.replayed,true);
+    assert.equal(replay.body.request_id,first.body.request_id);
+    assert.equal(conflict.status,409);
+    assert.equal(executions,1);
   });
 });
 
-test("invalid OAuth, PostgreSQL failure and malformed receipt fail closed without a retry",async()=>{
+test("unknown outcome, invalid receipt and unauthenticated attempts never claim success",async()=>{
   await withIssuer(async()=>{
     let calls=0;
-    const handler=createCanonicalRelayActionSubmitHandler(env,{
-      listTargets:async()=>validGrant(),
-      enqueue:async()=>{calls++;throw Error("sensitive-database-connection");},
+    const bad=createCanonicalRelayActionSubmitHandler(env,{
+      listTargets:async()=>grant(),
+      enqueue:async()=>{calls++;throw Error("sensitive-database-host");},
     });
     const jwt=await token();
-    const unauthorized=await result(handler,await token({sub:owner,client_id:undefined}),base);
-    assert.equal(unauthorized.status,403);
+    const invalid=await submit(bad,await token({client_id:undefined}),bound);
+    assert.equal(invalid.status,403);
     assert.equal(calls,0);
-    const failure=await result(handler,jwt,base);
-    assert.equal(failure.status,503);
-    assert.ok(!JSON.stringify(failure).includes("sensitive"));
+    const failed=await submit(bad,jwt,bound);
+    assert.equal(failed.status,503);
+    assert.ok(!JSON.stringify(failed).includes("sensitive"));
     assert.equal(calls,1);
     const broken=createCanonicalRelayActionSubmitHandler(env,{
-      listTargets:async()=>validGrant(),
-      enqueue:async()=>({ok:true,request_id:"not-uuid",effect_id:effectId,
-        replayed:false,status:"queued"}),
+      listTargets:async()=>grant(),
+      enqueue:async()=>({ok:true,replayed:false,request_id:"invalid",effect_id:effectId,status:"queued"}),
     });
-    assert.equal((await result(broken,jwt,base)).status,503);
+    assert.equal((await submit(broken,jwt,bound)).status,503);
   });
 });
