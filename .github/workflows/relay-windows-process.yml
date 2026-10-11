@@ -1,0 +1,35 @@
+name: ORDAX Relay Windows Process Proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - control-plane/labs/relay/spoke-process.mjs
+      - control-plane/labs/relay/spoke-process.e2e.test.mts
+      - control-plane/labs/relay/relay.mjs
+      - control-plane/labs/relay/scoped-mcp.ts
+      - .github/workflows/relay-windows-process.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-three-processes:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Exercise 3 independent Windows processes and real MCP request binding
+        shell: pwsh
+        run: |
+          node --version
+          node --test control-plane/labs/relay/spoke-process.e2e.test.mts
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Relay process isolation proof failed.' }
