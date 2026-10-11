@@ -63,6 +63,7 @@ jobs:
           node --test control-plane/labs/relay/relay.test.mjs
           node --test control-plane/labs/relay/scoped-mcp.test.mts
           node --test control-plane/labs/relay/relay-mcp.e2e.test.mts
+          node --test control-plane/labs/relay/spoke-process.e2e.test.mts
           python -m unittest tests.test_device_transport_contract
           python -m unittest tests.test_product_action_scope_contract tests.test_cloudflare_device_scope_wiring tests.test_owner_device_computer_grants_contract tests.test_owner_device_intelligence_grants_contract tests.test_mcp_owner_grant_hint_contract tests.test_product_auth_contract tests.test_product_oauth_metadata tests.test_product_device_pairing_contract tests.test_product_link_aware_grants tests.test_openai_plugin_annotation_evidence tests.test_openai_review_grant_workflow tests.test_cloudflare_account_resolution tests.test_cloudflare_deploy_gate tests.test_cloudflare_deploy_source_freshness tests.test_least_privilege_production_deploy tests.test_secure_secret_cutover_script tests.test_product_postgres_authority tests.test_product_postgres_device_identity tests.test_repository_namespace_migration
 
