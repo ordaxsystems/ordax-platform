@@ -11,7 +11,7 @@ import {
   listCanonicalProductTargets, getProductAction,
   type ProductPostgresEnv,
 } from "../../cloudflare/src/product_postgres_store.ts";
-import { isCanonicalUuid } from "../../cloudflare/src/product_remote_grant_contract.ts";
+import { selectCanonicalRelayProjectScope } from "../../cloudflare/src/product_relay_scope.ts";
 import { createCanonicalRelayReceiptVerifier } from "../../cloudflare/src/product_relay_receipt.ts";
 import { scopeRelayMcp } from "./scoped-mcp.ts";
 import type { OrdaxMcpHandlers } from "../../cloudflare/src/mcp_http.ts";
@@ -21,7 +21,6 @@ type Dependencies = Readonly<{
   listTargets?: typeof listCanonicalProductTargets;
   getAction?: typeof getProductAction;
 }>;
-const READ_ACTIONS = new Set(["workspace.directory_list", "workspace.file_stat", "workspace.text_read"]);
 
 /**
  * Deliberately rejects clients with ambiguous entitlements. A signed Product
@@ -51,47 +50,17 @@ export function createCanonicalRelayReadOnlyHandlers(
         clientKind: identity.clientKind,
         clientId: identity.clientId,
       });
-      if (!catalog || catalog.ok !== true || !Array.isArray(catalog.targets)
-        || catalog.targets.length !== 1) return null;
-      const target = catalog.targets[0] as Record<string,unknown>;
-      if (!target || !isCanonicalUuid(target.device_id)
-        || !Array.isArray(target.grant_groups)) return null;
-
-      const grants = target.grant_groups.filter(grant => {
-        if (!grant || typeof grant !== "object" || Array.isArray(grant)) return false;
-        const g = grant as Record<string,unknown>;
-        // The RPC is authoritative for active grants. Expiration is also
-        // checked here to fail closed if an outdated projection is returned.
-        if (g.valid_until !== undefined && g.valid_until !== null
-          && (typeof g.valid_until !== "string"
-            || !Number.isFinite(Date.parse(g.valid_until))
-            || Date.parse(g.valid_until) <= Date.now())) return false;
-        return isCanonicalUuid(g.project_id) && isCanonicalUuid(g.space_id)
-          && Array.isArray(g.capabilities)
-          && g.capabilities.some(item => {
-            if (!item || typeof item !== "object" || Array.isArray(item)) return false;
-            const p = item as Record<string,unknown>;
-            return READ_ACTIONS.has(p.capability as string) && p.access_mode === "read";
-          });
-      }) as Record<string,unknown>[];
-
-      // Deny ambiguous multi-project scopes. No silent picking by order.
-      if (grants.length !== 1) return null;
-      const grant = grants[0];
-      const available = (grant.capabilities as Record<string,unknown>[])
-        .filter(item => item && typeof item === "object"
-          && READ_ACTIONS.has(item.capability as string) && item.access_mode === "read")
-        .map(item => item.capability as string);
-      if (!available.length || new Set(available).size !== available.length) return null;
+      const target = selectCanonicalRelayProjectScope(catalog);
+      if (!target) return null;
       return Object.freeze({
-        deviceId: target.device_id as string,
+        deviceId: target.deviceId,
         subjectId: identity.ownerUserId,
         clientId: identity.clientId,
-        spaceId: grant.space_id as string,
+        spaceId: target.spaceId,
         project: "canonical",
-        projectId: grant.project_id as string,
+        projectId: target.projectId,
         rootPath: "canonical",
-        actions: available,
+        actions: target.allowedActions,
       });
     } catch { return null; }
   };
