@@ -222,3 +222,56 @@ test('central status is read-only and requires distinct operator credentials', a
   assert.equal(lab.revokeDevice(devices[0].id),true);
   assert.equal((await (await fetch(url,{headers:{authorization:'Bearer '+adminToken}})).json()).acceptingClients,2);
 });
+
+test('16 clientes simultâneos preservam resultados em 80 solicitações sem cruzamento',async t=>{
+  const virtual=Array.from({length:16},(_,i)=>({
+    id:'stress-pc-'+i,secret:randomBytes(32).toString('hex')
+  }));
+  let calls=0;
+  const lab=await startRelayLab({
+    devices:virtual,maxReceipts:100,
+    inference:async ({deviceId,requestId,prompt})=>{
+      calls++;
+      return {deviceId,requestId,result:deviceId+'::'+prompt};
+    }
+  });
+  t.after(()=>lab.close());
+  for(let round=0;round<5;round++){
+    const sameId=randomUUID();
+    const replies=await Promise.all(virtual.map(async d=>{
+      const response=await post(lab.url,d,{request_id:sameId,prompt:'rodada-'+round});
+      assert.equal(response.status,200);
+      return response.json();
+    }));
+    for(let i=0;i<virtual.length;i++){
+      assert.equal(replies[i].result,virtual[i].id+'::rodada-'+round);
+      assert.equal(replies[i].request_id,sameId);
+      assert.equal(replies[i].replayed,false);
+    }
+  }
+  assert.equal(calls,80);
+});
+
+test('backpressure é por cliente, sem bloquear outra identidade independente',async t=>{
+  let resolveFirst,signalStart;
+  const started=new Promise(resolve=>{signalStart=resolve;});
+  const blocked=new Promise(resolve=>{resolveFirst=resolve;});
+  const lab=await startRelayLab({
+    devices,
+    inference:async ({deviceId,requestId})=>{
+      if(deviceId===devices[0].id){ signalStart(); await blocked; }
+      return {deviceId,requestId,result:deviceId};
+    },
+  });
+  t.after(()=>lab.close());
+  const first=post(lab.url,devices[0],{request_id:randomUUID(),prompt:'primeiro'});
+  await started;
+  const sameClient=await post(lab.url,devices[0],{request_id:randomUUID(),prompt:'segundo'});
+  assert.equal(sameClient.status,429);
+  assert.equal((await sameClient.json()).error,'device_busy');
+  const independent=await post(lab.url,devices[1],{request_id:randomUUID(),prompt:'outro cliente'});
+  assert.equal(independent.status,200);
+  assert.equal((await independent.json()).result,devices[1].id);
+  resolveFirst();
+  assert.equal((await first).status,200);
+});
