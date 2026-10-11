@@ -1,0 +1,25 @@
+{
+  "schema": "ordax.product-chatgpt-plugin/1",
+  "name": "ordax-product-canary",
+  "version": "0.1.0",
+  "status": "private-canary",
+  "display_name": "OrdaX Product — Validação",
+  "description": "MCP OrdaX Product canônico, somente leitura, para validação OAuth e PostgreSQL antes da migração definitiva.",
+  "short_description": "Conexão MCP canônica em teste, com acesso somente de leitura.",
+  "long_description": "Versão privada de validação do Control Plane OrdaX. Usa OAuth da conta oficial, PostgreSQL via Hyperdrive e apenas as ferramentas de leitura de sessão, perfil, dispositivos autorizados e estado de ações anteriores. Não fornece acesso ao computador, execução de comandos, inferência por IA, transferência de arquivos nem Relay multiusuário. Não substitui o OrdaX Studio de produção.",
+  "worker_role": "read-only-canary",
+  "allowed_tools": [
+    "ordax_session",
+    "ordax_profile",
+    "ordax_targets",
+    "ordax_action_status"
+  ],
+  "keywords": [
+    "ordax",
+    "product",
+    "mcp",
+    "oauth",
+    "postgresql",
+    "canary"
+  ]
+}
