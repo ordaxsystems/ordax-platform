@@ -154,14 +154,23 @@ export function createCanonicalCentralSessionMcpGateway(
   const denied=()=>Response.json({ok:false,error:"central_admission_denied"},{
     status:403,headers:{"cache-control":"no-store"},
   });
-  const admit=async(request:Request)=>
-    (await matchesCentralMcpSession(request,trusted))
-    && (await verify(request,trusted)).ok===true;
+  // handleOrdaxMcp intentionally creates internal GET Requests for session,
+  // targets and receipts, without the incoming JSON-RPC body. Keep the
+  // provider _meta check at the ORIGINAL /mcp HTTP boundary, not inside
+  // the handler that receives only the authenticated internal projection.
+  const admit=async(request:Request)=> (await verify(request,trusted)).ok===true;
   const guarded:OrdaxMcpHandlers={
     session:async req=>(await admit(req))?reads.session(req):denied(),
     targets:async req=>(await admit(req))?reads.targets(req):denied(),
     getAction:async(req,id)=>(await admit(req))?reads.getAction(req,id):denied(),
     createAction:async()=>denied(),
   };
-  return createCanonicalProductMcpGateway(env,guarded,discoveryFetch);
+  const gateway=createCanonicalProductMcpGateway(env,guarded,discoveryFetch);
+  return async (request:Request):Promise<Response>=>{
+    // Correlate before the canonical gateway consumes/clones the tool body.
+    // GET metadata/discovery paths have no model action to correlate.
+    if(request.method==="POST" && new URL(request.url).pathname==="/mcp"
+      && !(await matchesCentralMcpSession(request,trusted)))return denied();
+    return gateway(request);
+  };
 }
