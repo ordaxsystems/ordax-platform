@@ -35,11 +35,17 @@ jobs:
           rm -rf "$outdir"
           npx --yes wrangler@4.141.0 deploy --dry-run --cwd control-plane/cloudflare --outdir "$outdir"
           find "$outdir" -maxdepth 2 -type f -print
-          bundle="$(find "$outdir" -maxdepth 2 -type f ! -name 'README.md' -print -quit)"
-          test -n "$bundle"
-          grep -q 'app_intelligence_catalog' "$bundle"
-          grep -q 'app_intelligence_detail' "$bundle"
-          printf 'WORKER_BUNDLE=%s\\n' "$bundle"
+          # Inspect executable JS, never the sourcemap or a random first file.
+          bundle="$outdir/index.js"
+          test -s "$bundle"
+          grep -q 'legacy_mcp_retired' "$bundle"
+          grep -q 'legacy_product_action_retired' "$bundle"
+          if grep -q 'app_intelligence_catalog' "$bundle" ||
+             grep -q 'app_intelligence_detail' "$bundle"; then
+            echo "::error::Retired D1 Product action dispatch remains in the Worker bundle."
+            exit 1
+          fi
+          printf 'WORKER_BUNDLE=%s\n' "$bundle"
       - name: Publish exact tested Worker bundle
         uses: actions/upload-artifact@v4
         with:
