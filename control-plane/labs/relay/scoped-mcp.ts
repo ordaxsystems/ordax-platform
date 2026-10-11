@@ -2,8 +2,8 @@
 // Product resolver supplies immutable per-request scopes. No extra identity/store.
 import type { OrdaxMcpHandlers } from "../../cloudflare/src/mcp_http.ts";
 
-type Action = "workspace.directory_list" | "workspace.file_stat" | "workspace.text_read";
-const ALLOWED = new Set<Action>(["workspace.directory_list", "workspace.file_stat", "workspace.text_read"]);
+type Action = "project.text_read" | "workspace.directory_list" | "workspace.file_stat" | "workspace.text_read";
+const ALLOWED = new Set<Action>(["project.text_read", "workspace.directory_list", "workspace.file_stat", "workspace.text_read"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PROJECT = /^[a-zA-Z0-9_-]{1,100}$/;
 type Scope = Readonly<{
