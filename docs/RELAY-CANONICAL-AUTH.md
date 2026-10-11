@@ -51,3 +51,9 @@ O teste `control-plane/tests/product_relay_submit.test.mts` cobre OAuth, três c
 ## Auditoria de permissões do PostgreSQL real
 
 A infraestrutura Product foi conferida em modo **somente leitura**, com catálogo SQL do projeto canônico: os três RPCs necessários existem, seus `EXECUTE` estão concedidos ao `ordax_edge_executor` e negados aos papéis públicos, e o ledger aplicado corresponde às versões `applied_version` do registro oficial. As tabelas de fila/audit permanecem sob RLS e sem `SELECT` direto aos papéis públicos. Evidências, políticas consultadas e limites dessa conferência: [RELAY-PRODUCT-LIVE-AUDIT.md](RELAY-PRODUCT-LIVE-AUDIT.md). **Isso não conclui o cutover da issue #42 nem ativa o Relay remoto.**
+
+## Observação de compatibilidade do plugin público
+
+Uma verificação real, somente leitura, usando o plugin MCP atualmente conectado (`mcp_tool_surface_revision=2026-10-07.1`, 87 ferramentas) enviou `projects.list` ao único computador autorizado, e o recibo terminou com `status=succeeded`. Porém, a projeção **pública desse recibo não incluiu `device_id`**, mesmo sendo um campo já contemplado no código canônico de resultados. Sem esse vínculo, **não há prova verificável do PC de execução** na resposta da rota pública atualmente conectada. Não interpretar essa operação como validação E2E de roteamento multi-PC.
+
+O candidato Relay recusa resultados sem `device_id` e o teste de regressão em `scoped-mcp.test.mts` exige recusa explícita. A migração #42 e o rollout coordenado deverão assegurar que o novo caminho MCP devolva `device_id` e `project_id` validados pela autoridade Product PostgreSQL. A ausência de um deles não pode ser suprida pelo GPT, pela interface ou por uma suposição de "PC selecionado". O plugin atual permanece funcional para os casos existentes, mas **não é transportador multiusuário pronto**.
