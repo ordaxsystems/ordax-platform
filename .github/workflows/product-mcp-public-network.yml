@@ -1,0 +1,43 @@
+# External, secret-free, READ-ONLY probes. Not a production deploy.
+# This check must not be reported as ChatGPT MCP/E2E even if green.
+name: Product MCP Public Network Probe
+
+on:
+  pull_request:
+    paths:
+      - "scripts/cloudflare/probe_live_product_mcp.py"
+      - "scripts/cloudflare/verify_product_oauth_server.py"
+      - "tests/test_live_product_mcp_probe.py"
+      - ".github/workflows/product-mcp-public-network.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/cloudflare/probe_live_product_mcp.py"
+      - "scripts/cloudflare/verify_product_oauth_server.py"
+      - "tests/test_live_product_mcp_probe.py"
+      - ".github/workflows/product-mcp-public-network.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-network-probe:
+    name: Real HTTPS Cloudflare + Supabase, no auth secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate read-only probe classifications and canonical origin
+        run: python -m unittest tests.test_live_product_mcp_probe
+      - name: Query actual Cloudflare Canary and Supabase OAuth discovery over HTTPS
+        run: python -m scripts.cloudflare.probe_live_product_mcp
+      - name: Disallow false success labels
+        run: |
+          echo "CI_RESULT=HTTP_PROBE_EXECUTED_NOT_MCP_PROVIDER_E2E"
+          echo "There are no device tokens, OAuth clients, real users, or remote actions in this job."
