@@ -253,7 +253,11 @@ test("one OAuth client with TWO PCs reads ONLY the PC attested by this ChatGPT s
     assert.equal(own.status,200,JSON.stringify(own));
     assert.equal(own.body.result.structuredContent.action.result.windows,"FIRST-PC-SAFE");
     const foreign=await tool("ordax_action_status",{request_id:secondRequest});
-    assert.notEqual(foreign.status,200);
+    // A valid MCP JSON-RPC envelope MAY use HTTP 200 for a denied tool.
+    // Reject by the actual tool result, not only its transport status.
+    assert.ok(foreign.status!==200
+      || foreign.body?.result?.structuredContent?.ok===false
+      || foreign.body?.result?.isError===true,JSON.stringify(foreign));
     assert.doesNotMatch(JSON.stringify(foreign),/SECOND-PC-PRIVATE/);
     const spoof=await tool("ordax_targets",{device_id:secondDevice});
     assert.equal(spoof.status,200);
@@ -261,8 +265,14 @@ test("one OAuth client with TWO PCs reads ONLY the PC attested by this ChatGPT s
     const wrongSession=await tool("ordax_targets",{},"different-chatgpt-session-0001");
     assert.notEqual(wrongSession.status,200);
     revoked=true;
-    assert.notEqual((await tool("ordax_targets")).status,200);
-    assert.notEqual((await tool("ordax_action_status",{request_id:requestId})).status,200);
+    const goneTargets=await tool("ordax_targets");
+    const goneReceipt=await tool("ordax_action_status",{request_id:requestId});
+    for(const result of [goneTargets,goneReceipt]){
+      assert.ok(result.status!==200
+        || result.body?.result?.structuredContent?.ok===false
+        || result.body?.result?.isError===true,JSON.stringify(result));
+      assert.doesNotMatch(JSON.stringify(result),/FIRST-PC-SAFE/);
+    }
   });
 });
 
