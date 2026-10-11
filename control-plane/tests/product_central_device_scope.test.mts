@@ -206,3 +206,92 @@ test("MCP Product session marker is required for a device-bound read turn",async
     assert.equal((await yes.json()).result.structuredContent.targets[0].device_id,device);
   });
 });
+
+test("one OAuth client with TWO PCs reads ONLY the PC attested by this ChatGPT session",async()=>{
+  await withIssuer(async()=>{
+    const foreignSecret="SECOND-PC-PRIVATE-DO-NOT-DISCLOSE";
+    let revoked=false;
+    const secondRequest=randomUUID();
+    const gateway=createCanonicalCentralSessionMcpGateway(env,base,{
+      listTargets:async()=>revoked?{ok:true,targets:[]}:
+        {ok:true,targets:[
+          ...catalog([group()]).targets,
+          ...catalog([group()],secondDevice).targets,
+        ]},
+      verifySession:async(info,claim)=>info.ownerUserId===owner
+        && info.clientId===client && claim.clientId===client
+        && claim.deviceId===device && claim.sessionId===sessionId
+        && claim.requestId===requestId,
+      getAction:async(_env,input)=>{
+        if(input.requestId===requestId)return actionRecord({
+          project_id:null,capability:"computer.windows",status:"succeeded",
+          result:{ok:true,windows:"FIRST-PC-SAFE"},
+        });
+        if(input.requestId===secondRequest)return actionRecord({
+          request_id:secondRequest,device_id:secondDevice,project_id:null,
+          capability:"computer.windows",status:"succeeded",
+          result:{ok:true,windows:foreignSecret},
+        });
+        return null;
+      },
+    });
+    const jwt=await token();
+    async function tool(name:string,args:object={},marker:string=sessionId){
+      const response=await gateway(new Request("https://central.example/mcp",{
+        method:"POST",headers:{authorization:"Bearer "+jwt,"content-type":"application/json",
+          "x-ordax-device-id":secondDevice},
+        body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",
+          params:{name,arguments:args,_meta:{"openai/session":marker}}}),
+      }));
+      return {status:response.status,body:await response.json()};
+    }
+    const targets=await tool("ordax_targets");
+    assert.equal(targets.status,200,JSON.stringify(targets));
+    assert.deepEqual(targets.body.result.structuredContent.targets.map((x:any)=>x.device_id),[device]);
+    assert.doesNotMatch(JSON.stringify(targets),new RegExp(secondDevice,"i"));
+    const own=await tool("ordax_action_status",{request_id:requestId});
+    assert.equal(own.status,200,JSON.stringify(own));
+    assert.equal(own.body.result.structuredContent.action.result.windows,"FIRST-PC-SAFE");
+    const foreign=await tool("ordax_action_status",{request_id:secondRequest});
+    assert.notEqual(foreign.status,200);
+    assert.doesNotMatch(JSON.stringify(foreign),/SECOND-PC-PRIVATE/);
+    const spoof=await tool("ordax_targets",{device_id:secondDevice});
+    assert.equal(spoof.status,200);
+    assert.deepEqual(spoof.body.result.structuredContent.targets.map((x:any)=>x.device_id),[device]);
+    const wrongSession=await tool("ordax_targets",{},"different-chatgpt-session-0001");
+    assert.notEqual(wrongSession.status,200);
+    revoked=true;
+    assert.notEqual((await tool("ordax_targets")).status,200);
+    assert.notEqual((await tool("ordax_action_status",{request_id:requestId})).status,200);
+  });
+});
+
+test("a trusted project session can select one project grant beside other PC/device grants",async()=>{
+  await withIssuer(async()=>{
+    const trusted={...base,spaceId,projectId};
+    const gateway=createCanonicalCentralSessionMcpGateway(env,trusted,{
+      listTargets:async()=>({ok:true,targets:[
+        ...catalog([group(),projectGroup()]).targets,
+        ...catalog([group()],secondDevice).targets,
+      ]}),
+      verifySession:async(info,claim)=>info.ownerUserId===owner
+        && info.clientId===client && claim.projectId===projectId
+        && claim.spaceId===spaceId && claim.deviceId===device
+        && claim.sessionId===sessionId,
+      getAction:async()=>actionRecord({
+        project_id:projectId,capability:"workspace.text_read",
+        result:{ok:true,content:"AUTHORIZED-PROJECT"},
+      }),
+    });
+    const response=await gateway(new Request("https://central.example/mcp",{
+      method:"POST",headers:{authorization:"Bearer "+await token(),
+        "content-type":"application/json"},
+      body:JSON.stringify({jsonrpc:"2.0",id:1,method:"tools/call",
+        params:{name:"ordax_targets",arguments:{device_id:secondDevice},
+          _meta:{"openai/session":sessionId}}}),
+    }));
+    assert.equal(response.status,200,JSON.stringify(await response.clone().json()));
+    const body=await response.json();
+    assert.deepEqual(body.result.structuredContent.targets.map((x:any)=>x.device_id),[device]);
+  });
+});
