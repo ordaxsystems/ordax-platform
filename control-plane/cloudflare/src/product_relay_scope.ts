@@ -48,7 +48,7 @@ export function selectCanonicalRelayProjectScope(
       || String((target as Record<string,unknown>).device_id).toLowerCase() === trustedDeviceId.toLowerCase());
   if (matching.length !== 1 || !record(matching[0])) return null;
   const target = matching[0];
-  if (!Array.isArray(target.grant_groups)
+  if (!isCanonicalUuid(target.device_id) || !Array.isArray(target.grant_groups)
     || target.grant_groups.length < 1 || target.grant_groups.length > 128) return null;
 
   const eligible: ProductRelayProjectScope[] = [];
