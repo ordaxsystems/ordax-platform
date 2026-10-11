@@ -7,6 +7,8 @@ declare
   v_new_rpc regprocedure;
   v_old_resolver regprocedure;
   v_new_resolver regprocedure;
+  v_resolver_source text;
+  v_enqueue_source text;
 begin
   v_old_rpc := pg_catalog.to_regprocedure(
     'public.ordax_enqueue_product_action_v1(uuid,uuid,uuid,uuid,text,text,text,jsonb,text,timestamptz)'
@@ -41,15 +43,34 @@ begin
     raise exception 'product_client_contract_acl_mismatch';
   end if;
 
+  v_resolver_source := pg_catalog.pg_get_functiondef(v_new_resolver::oid);
+  v_enqueue_source := pg_catalog.pg_get_functiondef(v_new_rpc::oid);
+
+  if pg_catalog.strpos(v_resolver_source, 'and g.client_id = p_client_id') = 0
+     or pg_catalog.strpos(v_enqueue_source, 'v_existing.client_id = p_client_id') = 0 then
+    raise exception 'product_client_contract_missing_client_match';
+  end if;
+
+  -- P0 #118: the actual, installed PostgreSQL function must compare an
+  -- explicitly supplied Space EXACTLY. A NULL/global grant must not be
+  -- usable when the caller supplied another UUID. Check pg_get_functiondef,
+  -- NOT only the migration file or a test copy of the SQL.
   if pg_catalog.strpos(
-       pg_catalog.pg_get_functiondef(v_new_resolver::oid),
-       'and g.client_id = p_client_id'
+       v_resolver_source, 'g.space_id is not distinct from p_space_id'
      ) = 0
      or pg_catalog.strpos(
-       pg_catalog.pg_get_functiondef(v_new_rpc::oid),
-       'v_existing.client_id = p_client_id'
+       v_enqueue_source, 'v_existing.space_id is not distinct from p_space_id'
+     ) = 0
+     or pg_catalog.strpos(
+       v_resolver_source, 'g.state = ''active'''
+     ) = 0
+     or pg_catalog.strpos(
+       v_resolver_source, 'g.valid_until > pg_catalog.clock_timestamp()'
+     ) = 0
+     or pg_catalog.strpos(
+       v_resolver_source, 'd.state = ''active'''
      ) = 0 then
-    raise exception 'product_client_contract_missing_client_match';
+    raise exception 'product_space_contract_wildcard_or_revocation_regression';
   end if;
 
   if not exists (

@@ -110,6 +110,22 @@ class ProductLiveSpaceSqlContract(unittest.TestCase):
         self.assertEqual(self.resolve(SPACE_1), [])
         self.assertEqual([x["id"] for x in self.resolve(None)], ["global"])
 
+    def test_live_postflight_checks_installed_resolver_not_just_migration_text(self) -> None:
+        postflight = (
+            ROOT / "control-plane/supabase/tests/"
+            "product_client_grant_isolation_postflight.sql"
+        ).read_text(encoding="utf-8")
+        self.assertIn("pg_catalog.pg_get_functiondef(v_new_resolver::oid)", postflight)
+        self.assertIn("pg_catalog.pg_get_functiondef(v_new_rpc::oid)", postflight)
+        self.assertIn("g.space_id is not distinct from p_space_id", postflight)
+        self.assertIn("v_existing.space_id is not distinct from p_space_id", postflight)
+        self.assertIn("and g.client_id = p_client_id", postflight)
+        self.assertIn("v_existing.client_id = p_client_id", postflight)
+        self.assertIn("g.valid_until > pg_catalog.clock_timestamp()", postflight)
+        self.assertIn("product_space_contract_wildcard_or_revocation_regression", postflight)
+        self.assertIn("g.state = ''active''", postflight)
+        self.assertIn("d.state = ''active''", postflight)
+
     def test_source_grant_query_uses_same_scope_as_mcp_input_without_silent_fallback(self) -> None:
         # Keep the actual Worker SELECT and actual MCP command transport linked.
         # A test of copied SQL would miss a future regression in either one.
