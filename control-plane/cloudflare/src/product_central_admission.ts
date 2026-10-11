@@ -69,6 +69,9 @@ function validBinding(value: unknown): value is TrustedCentralConversation {
     && CLIENT.test(b.clientId)
     && typeof b.conversationId==="string" && CONVERSATION.test(b.conversationId);
 }
+const sameScopeId=(observed:string|null, expected:string|null)=>
+  observed===null ? expected===null
+    : isCanonicalUuid(expected) && observed.toLowerCase()===expected.toLowerCase();
 const deny=()=>Object.freeze({ok:false as const,error:"central_admission_denied" as const});
 const unavailable=()=>Object.freeze({ok:false as const,error:"central_admission_unavailable" as const});
 export type CentralAdmissionResult = VerifiedCentralAdmission & {ok:true} |
@@ -110,8 +113,8 @@ export function createCanonicalCentralAdmissionVerifier(env: Env, deps: Dependen
         ? selectCanonicalRelayDeviceScope(catalog,trusted.deviceId)
         : selectCanonicalRelayProjectScope(catalog,trusted.deviceId);
       if(!scope || scope.deviceId.toLowerCase()!==trusted.deviceId.toLowerCase()
-        || scope.spaceId !== trusted.spaceId
-        || scope.projectId !== trusted.projectId)return deny();
+        || !sameScopeId(scope.spaceId,trusted.spaceId)
+        || !sameScopeId(scope.projectId,trusted.projectId))return deny();
       return Object.freeze({
         ok:true as const,
         subjectId:identity.ownerUserId, clientId:identity.clientId,
