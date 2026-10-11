@@ -54,7 +54,7 @@ const KEYS="clientId,conversationId,deviceId,projectId,requestId,spaceId,subject
 const KEYS_WITH_SESSION="clientId,conversationId,deviceId,projectId,requestId,sessionId,spaceId,subjectId";
 export const validChatGptSessionMarker=(value:unknown):value is string=>
   typeof value==="string" && value.length>=8 && value.length<=256
-  && !/[\\x00-\\x20\\x7f]/u.test(value);
+  && !/[\x00-\x20\x7f]/u.test(value);
 function validBinding(value: unknown): value is TrustedCentralConversation {
   if(!value || typeof value!=="object" || Array.isArray(value))return false;
   const b=value as Record<string,unknown>;
