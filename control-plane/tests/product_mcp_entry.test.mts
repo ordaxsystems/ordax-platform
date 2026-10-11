@@ -9,8 +9,8 @@ const ENV = Object.freeze({
   PRODUCT_AUTH_JWKS_URL: "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1/.well-known/jwks.json",
   POSTGRES: { connectionString: "postgresql://localhost:6543/example" },
 });
-const URL = "https://canary.example/mcp";
-const request = (name: string, args: Record<string, unknown> = {}) => new Request(URL, {
+const MCP_URL = "https://canary.example/mcp";
+const request = (name: string, args: Record<string, unknown> = {}) => new Request(MCP_URL, {
   method: "POST", headers: { "content-type": "application/json" },
   body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
 });
@@ -55,7 +55,7 @@ test("OAuth protected resource metadata references the actual MCP origin and sin
 test("MCP discovery advertises only four canonical read-only tools, not computer or terminal actions", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
-  const response = await run(new Request(URL, {
+  const response = await run(new Request(MCP_URL, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
   }));
