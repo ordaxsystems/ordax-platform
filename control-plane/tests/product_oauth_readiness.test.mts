@@ -52,14 +52,14 @@ test("ready uses canonical discovery URL with 5s deadline and rejects redirects"
 test("disabled Supabase OAuth 2.1 server does not turn configured variables into working OAuth", async () => {
   const unavailable = (async () => response({ code: 404, error_code: "feature_disabled" }, 404)) as typeof fetch;
   assert.deepEqual(await checkCanonicalProductOAuthDiscovery(ISSUER, unavailable), {
-    ok: false, error: "oauth_discovery_unavailable",
+    ok: false, error: "oauth_discovery_unavailable", upstream_http_status: 404,
   });
   const run = createCanonicalProductMcpGateway(env, handlers, unavailable);
   const status = await run(new Request("https://platform.example/ready"));
   assert.equal(status.status, 503);
   assert.deepEqual(await status.json(), {
     ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
-    supports_remote_actions: false, error: "oauth_discovery_unavailable",
+    supports_remote_actions: false, error: "oauth_discovery_unavailable", upstream_http_status: 404,
   });
   assert.equal(status.headers.get("cache-control"), "no-store");
   const health = await run(new Request("https://platform.example/health"));

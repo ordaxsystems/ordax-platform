@@ -11,6 +11,7 @@ const CANONICAL_ISSUER = /^https:\/\/[a-z0-9]{20}\.supabase\.co\/auth\/v1$/;
 export type ProductOAuthDiscovery = Readonly<{
   ok: boolean;
   error: "oauth_issuer_invalid" | "oauth_discovery_unavailable" | "oauth_discovery_invalid" | null;
+  upstream_http_status?: number;
 }>;
 
 function validEndpoint(value: unknown, issuer: string): boolean {
@@ -94,7 +95,8 @@ export async function checkCanonicalProductOAuthDiscovery(
       signal: AbortSignal.timeout(5000),
     });
     if (response.status !== 200 || !response.ok) {
-      return { ok: false, error: "oauth_discovery_unavailable" };
+      // HTTP status is safe to report. Never expose upstream body or headers.
+      return { ok: false, error: "oauth_discovery_unavailable", upstream_http_status: response.status };
     }
     const metadata = await boundedMetadata(response);
     if (!validMetadata(metadata, issuer)) {
