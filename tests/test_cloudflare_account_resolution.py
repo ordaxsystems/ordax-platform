@@ -238,11 +238,12 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("if (!client || client.p_client_id === null)", adapter)
         worker = WORKER_SOURCE.read_text(encoding="utf-8")
-        legacy_handler = worker.split(
-            "async function createProductAction(", 1
-        )[1].split("async function getProductAction(", 1)[0]
-        self.assertIn("env.DB", legacy_handler)
-        self.assertNotIn("enqueueProductAction(", legacy_handler)
+        # The legacy D1 product action writer has been DELETED rather than
+        # masked by a model-facing route or silently moved to another file.
+        self.assertNotIn("async function createProductAction(", worker)
+        self.assertNotIn("handleOrdaxMcp(request", worker)
+        self.assertIn('error: "legacy_mcp_retired"', worker)
+        self.assertIn('error: "legacy_product_action_retired"', worker)
 
     def test_d1_callsite_count_can_only_shrink(self):
         cutover = json.loads(D1_CUTOVER_MAP.read_text(encoding="utf-8"))
