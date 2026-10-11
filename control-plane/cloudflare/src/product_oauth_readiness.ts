@@ -95,7 +95,8 @@ export async function checkCanonicalProductOAuthDiscovery(
   try {
     response = await fetchDiscovery(url, {
       method: "GET",
-      redirect: "error",
+      // workerd only accepts follow/manual. Inspect status ourselves and reject every redirect.
+      redirect: "manual",
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(5000),
     });
