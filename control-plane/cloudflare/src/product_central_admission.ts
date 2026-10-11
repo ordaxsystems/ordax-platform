@@ -12,7 +12,7 @@
  */
 import { authenticateProductMcpClientRequest, type ProductAuthEnv } from "./product_auth.ts";
 import { listCanonicalProductTargets, type ProductPostgresEnv } from "./product_postgres_store.ts";
-import { selectCanonicalRelayProjectScope } from "./product_relay_scope.ts";
+import { selectCanonicalRelayProjectScope, selectCanonicalRelayDeviceScope } from "./product_relay_scope.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
@@ -21,8 +21,8 @@ export type TrustedCentralConversation = Readonly<{
   subjectId: string;
   clientId: string;
   deviceId: string;
-  spaceId: string;
-  projectId: string;
+  spaceId: string | null;
+  projectId: string | null;
   requestId: string;
   /** Stable, host-observed provider conversation identifier, not a grant. */
   conversationId: string;
@@ -33,8 +33,8 @@ export type VerifiedCentralAdmission = Readonly<{
   subjectId: string;
   clientId: string;
   deviceId: string;
-  spaceId: string;
-  projectId: string;
+  spaceId: string | null;
+  projectId: string | null;
   requestId: string;
   conversationId: string;
   allowedActions: readonly string[];
@@ -62,7 +62,8 @@ function validBinding(value: unknown): value is TrustedCentralConversation {
       || Object.keys(b).sort().join(",")===KEYS_WITH_SESSION)
     && (b.sessionId===undefined || validChatGptSessionMarker(b.sessionId))
     && isCanonicalUuid(b.subjectId) && isCanonicalUuid(b.deviceId)
-    && isCanonicalUuid(b.spaceId) && isCanonicalUuid(b.projectId)
+    && ((b.spaceId === null && b.projectId === null)
+      || (isCanonicalUuid(b.spaceId) && isCanonicalUuid(b.projectId)))
     && isCanonicalUuid(b.requestId) && typeof b.clientId==="string"
     && b.clientId.length>=8 && b.clientId.length<=160
     && CLIENT.test(b.clientId)
@@ -78,8 +79,10 @@ export type CentralAdmissionResult = VerifiedCentralAdmission & {ok:true} |
  * independent check that the conversation mapping actually exists in the
  * trusted owner. Without a real verifySession provider, construction fails.
  *
- * The OAuth client MUST have exactly one eligible device and project; there
- * is no "pick the device ID from the prompt" fallback. Any grant revocation,
+ * A server-attested binding can select ONE exact PC from multiple OAuth-client
+ * grants. Without durable session attestation, all access is denied. Device
+ * grants must carry BOTH null Space and null project, never either alone.
+ * There is no "pick the device ID from the prompt" fallback. Any revocation,
  * invalid OAuth client or missing/stale mapping fails closed.
  */
 export function createCanonicalCentralAdmissionVerifier(env: Env, deps: Dependencies) {
@@ -97,16 +100,18 @@ export function createCanonicalCentralAdmissionVerifier(env: Env, deps: Dependen
         ownerUserId:identity.ownerUserId, clientKind:identity.clientKind,
         clientId:identity.clientId,
       });
-      const catalog=await targets(env,client);
-      // No trusted-device hint here: a single OAuth client with multiple
-      // PCs is ambiguous for ChatGPT Web and must never choose by prompt.
-      const scope=selectCanonicalRelayProjectScope(catalog);
-      if(!scope || scope.deviceId.toLowerCase()!==trusted.deviceId.toLowerCase()
-        || scope.spaceId.toLowerCase()!==trusted.spaceId.toLowerCase()
-        || scope.projectId.toLowerCase()!==trusted.projectId.toLowerCase())return deny();
-      // The callback must consult an authoritative durable owner; its boolean
-      // is NOT inferred from the URL, JavaScript state or a model argument.
+      // First prove this binding came from a durable Product request/session
+      // owner. Only after that proof may its PC UUID select from multiple
+      // exact-client grants. No model-selected hint ever reaches this resolver.
       if((await deps.verifySession(client,trusted))!==true)return deny();
+      const catalog=await targets(env,client);
+      const deviceOnly=trusted.spaceId===null && trusted.projectId===null;
+      const scope=deviceOnly
+        ? selectCanonicalRelayDeviceScope(catalog,trusted.deviceId)
+        : selectCanonicalRelayProjectScope(catalog,trusted.deviceId);
+      if(!scope || scope.deviceId.toLowerCase()!==trusted.deviceId.toLowerCase()
+        || scope.spaceId !== trusted.spaceId
+        || scope.projectId !== trusted.projectId)return deny();
       return Object.freeze({
         ok:true as const,
         subjectId:identity.ownerUserId, clientId:identity.clientId,
