@@ -62,7 +62,7 @@ class CentralDurableContract(unittest.TestCase):
             "to ordax_edge_executor;",
         ):
             self.assertIn(x, self.sql)
-        self.assertIn("has_function_privilege('authenticated'", self.probe)
+        self.assertIn("'anon','authenticated','service_role','ordax_edge_runtime'", self.probe)
         self.assertIn("central_session_table_acl_exposed", self.probe)
 
     def test_web_transport_never_mints_authorization_implicitly(self):
