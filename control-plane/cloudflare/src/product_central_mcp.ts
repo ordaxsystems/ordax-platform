@@ -16,7 +16,7 @@ import { createCanonicalRelayReceiptVerifier } from "./product_relay_receipt.ts"
 import { scopeRelayMcp } from "./product_mcp_scoped.ts";
 import type { OrdaxMcpHandlers } from "./mcp_http.ts";
 import { createCanonicalProductMcpGateway } from "./product_mcp_entry.ts";
-import { createCanonicalCentralAdmissionVerifier, validChatGptSessionMarker, type TrustedCentralConversation } from "./product_central_admission.ts";
+import { createCanonicalCentralAdmissionVerifier, createPostgresCentralSessionVerifier, validChatGptSessionMarker, type TrustedCentralConversation } from "./product_central_admission.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 type Dependencies = Readonly<{
@@ -202,4 +202,28 @@ export function createCanonicalCentralSessionMcpGateway(
       && !(await matchesCentralMcpSession(request,trusted)))return denied();
     return gateway(request);
   };
+}
+
+/**
+ * Production-candidate composition with the REAL durable session verifier.
+ *
+ * This is the single canonical path from the Product PostgreSQL association
+ * to the existing scoped MCP read gateway. A caller must still supply a
+ * TRUSTED binding from its authenticated Central host; constructing this
+ * gateway does not attest the ChatGPT provider marker. No route is mounted
+ * in the public Worker until such an independent host attestation exists.
+ *
+ * Unlike test-only construction, there is no optional verifySession callback
+ * that can be replaced by a model-provided boolean or header.
+ */
+export function createPersistedCentralSessionMcpGateway(
+  env: Env,
+  trusted: TrustedCentralConversation | null,
+  deps: Dependencies = {},
+  discoveryFetch: typeof fetch = fetch,
+) {
+  return createCanonicalCentralSessionMcpGateway(
+    env,trusted,{...deps,verifySession:createPostgresCentralSessionVerifier(env)},
+    discoveryFetch,
+  );
 }
