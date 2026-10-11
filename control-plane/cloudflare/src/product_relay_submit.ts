@@ -120,7 +120,7 @@ export function createCanonicalRelayActionSubmitHandler(env: Env, deps: Dependen
         clientKind: identity.clientKind,
         clientId: identity.clientId,
       });
-      const scope = selectCanonicalRelayProjectScope(catalog);
+      const scope = selectCanonicalRelayProjectScope(catalog, trustedOperation.deviceId);
       if (!scope
         || scope.deviceId.toLowerCase() !== trustedOperation.deviceId.toLowerCase()
         || scope.spaceId.toLowerCase() !== trustedOperation.spaceId.toLowerCase()
