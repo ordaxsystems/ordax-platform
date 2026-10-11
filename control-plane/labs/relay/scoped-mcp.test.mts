@@ -170,3 +170,34 @@ test("mesmo PC e pasta não bastam: status de outro cliente é recusado", async 
   assert.equal(someoneElse.ok,false);
   assert.ok(!JSON.stringify(someoneElse).includes(devices[0].privateFile));
 });
+
+test("dois clientes do mesmo PC e projeto não compartilham recibos",async () => {
+  const id=randomUUID();
+  const {secret:_,privateFile:__, ...scopeA}=devices[0];
+  const scopeB={...scopeA,subjectId:devices[1].subjectId,clientId:devices[1].clientId};
+  const handlers=scopeRelayMcp({
+    session:async()=>Response.json({ok:true}),
+    targets:async()=>Response.json({ok:true,targets:[]}),
+    createAction:async()=>{throw Error("somente leitura");},
+    getAction:async()=>Response.json({ok:true,action:{
+      request_id:id,device_id:scopeA.deviceId,project:scopeA.project,
+      action:"workspace.directory_list",status:"succeeded",result:{files:["PRIVADO_CLIENTE_A"]}
+    }})
+  }, async request => request.headers.get("authorization")==="Bearer "+devices[0].secret ? scopeA :
+      request.headers.get("authorization")==="Bearer "+devices[1].secret ? scopeB : null,
+  async (_request,requestId,scope) => requestId===id && scope.subjectId===scopeA.subjectId && scope.clientId===scopeA.clientId);
+  async function status(secret) {
+    const response=await handleOrdaxMcp(new Request("https://lab.example/mcp",{
+      method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+secret},
+      body:JSON.stringify({jsonrpc:"2.0",id:2,method:"tools/call",
+        params:{name:"ordax_action_status",arguments:{request_id:id}}})
+    }),handlers);
+    return (await response.json()).result;
+  }
+  const denied=await status(devices[1].secret);
+  assert.equal(denied.isError,true);
+  assert.ok(!JSON.stringify(denied).includes("PRIVADO_CLIENTE_A"));
+  const allowed=await status(devices[0].secret);
+  assert.equal(allowed.isError,false);
+  assert.ok(JSON.stringify(allowed).includes("PRIVADO_CLIENTE_A"));
+});
