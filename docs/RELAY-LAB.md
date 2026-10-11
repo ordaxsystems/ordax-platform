@@ -104,3 +104,7 @@ O teste Windows prova comportamento do protocolo e da leitura de pastas na plata
 ## Dependência de migração Product
 
 O cutover da autoridade canônica PostgreSQL no Control Plane permanece acompanhado pela issue [#42](https://github.com/ordaxsystems/ordax-platform/issues/42). Não conectar clientes Relay reais aos handlers D1 antigos, nem criar gateway/memória paralelos para contornar o cutover. A integração definitiva precisa consultar o dono canônico de identidade/grants, obter o destino imutável do cliente autenticado e registrar a ação/recibo com owner, client e device, egress consentido e idempotência durável antes de disponibilizar o serviço de inferência. A existência do MCP ChatGPT conectado **não** é prova de canal de inferência reverso.
+
+## Ponte de autorização canônica (somente leitura)
+
+Foi adicionado um candidato de integração com **OAuth Product assinado + RPCs PostgreSQL existentes**, sem criar outra autoridade ou expor um endpoint remoto. A implementação e os testes estão em `control-plane/cloudflare/src/product_relay_receipt.ts`, `control-plane/labs/relay/canonical-readonly.ts` e `control-plane/tests/product_relay_*.test.mts`. O contrato, seus limites e o bloqueio até o cutover #42 estão detalhados em [RELAY-CANONICAL-AUTH.md](RELAY-CANONICAL-AUTH.md). Esse caminho recusa qualquer gravação pelo executor legado e valida usuário, cliente OAuth, dispositivo e UUID do projeto antes de apresentar um recibo. Não confundir essa leitura autorizada com inferência, pareamento ou execução de ações reais pelo Relay.
