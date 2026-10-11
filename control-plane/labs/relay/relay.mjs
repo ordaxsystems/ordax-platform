@@ -58,12 +58,13 @@ function verifyClient(req, secrets) {
  */
 export async function startRelayLab({
   devices, inference, inferenceTimeoutMs = DEFAULT_TIMEOUT_MS,
-  maxReceipts = DEFAULT_RECEIPTS,
+  maxReceipts = DEFAULT_RECEIPTS, adminToken = null,
 }) {
   if (!Array.isArray(devices) || devices.length < 2 || devices.length > MAX_DEVICES
     || typeof inference !== 'function'
     || !Number.isInteger(inferenceTimeoutMs) || inferenceTimeoutMs < 25 || inferenceTimeoutMs > 60000
-    || !Number.isInteger(maxReceipts) || maxReceipts < 1 || maxReceipts > 128) {
+    || !Number.isInteger(maxReceipts) || maxReceipts < 1 || maxReceipts > 128
+    || (adminToken !== null && (typeof adminToken !== 'string' || adminToken.length < 32))) {
     throw new TypeError('invalid_lab_configuration');
   }
   const secrets = new Map();
@@ -77,9 +78,33 @@ export async function startRelayLab({
     seenTokens.add(hex);
     secrets.set(item.id, hash);
   }
+  if (adminToken !== null && seenTokens.has(digest(adminToken).toString('hex'))) {
+    throw new TypeError('admin_credential_must_be_separate');
+  }
+  const adminHash = adminToken === null ? null : digest(adminToken);
   const completed = new Map();
   const inflight = new Map();
   const server = createServer(async (req, res) => {
+    if (req.method === 'GET' && req.url === '/v1/admin/status') {
+      if (!adminHash) return send(res, 404, { ok: false, error: 'not_found' });
+      const authorization = req.headers.authorization;
+      const token = typeof authorization === 'string' && authorization.startsWith('Bearer ')
+        ? authorization.slice(7) : '';
+      if (token.length < 32 || !timingSafeEqual(digest(token), adminHash)) {
+        return send(res, 401, { ok: false, error: 'unauthorized' });
+      }
+      const all = [...completed.values()];
+      return send(res, 200, {
+        schema: 'ordax.relay-lab-status/1',
+        environment: 'loopback-laboratory',
+        acceptingClients: secrets.size,
+        activeRequests: inflight.size,
+        retainedReceipts: completed.size,
+        failedReceipts: all.filter(x => x.error).length,
+        cancelledReceipts: all.filter(x => x.error === 'request_cancelled').length,
+        timedOutReceipts: all.filter(x => x.error === 'adapter_timeout').length,
+      });
+    }
     const operation = req.method === 'POST' && req.url === '/v1/infer' ? 'infer'
       : req.method === 'POST' && req.url === '/v1/cancel' ? 'cancel' : null;
     if (!operation) return send(res, 404, { ok: false, error: 'not_found' });
