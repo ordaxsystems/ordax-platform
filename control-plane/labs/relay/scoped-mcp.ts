@@ -22,7 +22,16 @@ type VerifyReceipt = (request: Request, requestId: string, scope: Scope) => Prom
 const json = (body: unknown, status = 200) => Response.json(body, {status, headers: {"cache-control":"no-store"}});
 const denied = () => json({ok:false,error:"relay_scope_denied"},403);
 const unavailable = () => json({ok:false,error:"relay_scope_unavailable"},503);
-const validSegment = (s: string) => s !== "" && s !== "." && s !== ".." && !/[\\:\x00-\x1f]/.test(s);
+function validSegment(value: string): boolean {
+  if (!value || value === "." || value === ".." || value.endsWith(" ") || value.endsWith(".")
+    || value.normalize("NFKC") !== value
+    // Percent-encoded separators/traversal may be decoded by downstream tools.
+    // Windows stream syntax, drive separators and Unicode slash confusables
+    // must never be interpreted as a different filesystem path.
+    || /[\\:%\x00-\x1f\x7f\u2215\u2044\uFF0F]/u.test(value)
+    || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(value)) return false;
+  return true;
+}
 function pathWithin(root: string, value: unknown): boolean {
   if (typeof value !== "string" || value.length > 512 || value.startsWith("/") || value.endsWith("/")) return false;
   const segments = value.split("/");
