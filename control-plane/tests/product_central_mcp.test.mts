@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { handleOrdaxMcp } from "../cloudflare/src/mcp_http.ts";
-import { createCanonicalCentralMcpReadHandlers } from "../cloudflare/src/product_central_mcp.ts";
+import { createCanonicalCentralMcpReadHandlers, createCanonicalCentralMcpGateway } from "../cloudflare/src/product_central_mcp.ts";
 import { env, owner, otherOwner, client, otherClient, device, secondDevice,
   projectId, withIssuer, token, actionRecord } from "./product_mcp_test_fixtures.mts";
 
@@ -139,6 +139,39 @@ test("unsigned, wrong audience and missing exact client are rejected before targ
       const res=await f.call(jwt,"ordax_targets");
       assert.ok(res.status===401||res.status===403,JSON.stringify(res));
     }
+    assert.equal(f.seen.length,0);
+  });
+});
+
+test("Central MCP gateway reuses exactly four Product read-only tools and rejects remote actions",async()=>{
+  await withIssuer(async()=>{
+    const f=fixture();
+    // Gateway constructor reuses protocol, issuer metadata, and Product read-only
+    // tool allowlist, not another MCP router.
+    const gateway=createCanonicalCentralMcpGateway(env,{
+      listTargets:async (_env,input)=>({
+        ok:true,targets:[{device_id:device,device_name:"PC1",online:true,
+          grant_groups:[{space_id:spaceId,project_id:projectId,
+            capabilities:[{capability:"project.text_read",access_mode:"read"}]}],
+        }],
+      }),
+      getAction:async()=>null,
+    });
+    const jwt=await token();
+    const make=(name:string,args:Record<string,unknown>={})=>new Request("https://central.example/mcp",{
+      method:"POST",headers:{authorization:"Bearer "+jwt,"content-type":"application/json"},
+      body:JSON.stringify({jsonrpc:"2.0",id:1,method:name,params:name==="tools/call"
+        ?{name:"terminal_exec",arguments:args}:undefined}),
+    });
+    const list=await gateway(make("tools/list"));
+    assert.equal(list.status,200);
+    const payload=await list.json();
+    assert.deepEqual(payload.result.tools.map((x:{name:string})=>x.name),[
+      "ordax_session","ordax_profile","ordax_targets","ordax_action_status"
+    ]);
+    const unsupported=await gateway(make("tools/call",{device_id:device,command:"whoami"}));
+    const nope=await unsupported.json();
+    assert.equal(nope.error.code,-32601);
     assert.equal(f.seen.length,0);
   });
 });
