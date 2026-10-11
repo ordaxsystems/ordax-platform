@@ -11,9 +11,9 @@ import {
 
 const spaceId="99999999-9999-4999-8999-999999999999";
 const members=[
-  {owner,client,device,project:projectId,marker:"PRIVATE-PC-1"},
-  {owner,client:otherClient,device:secondDevice,project:randomUUID(),marker:"PRIVATE-PC-2"},
-  {owner:otherOwner,client,device:randomUUID(),project:randomUUID(),marker:"PRIVATE-PC-3"},
+  {owner,client,device,project:projectId,operationId:randomUUID(),marker:"PRIVATE-PC-1"},
+  {owner,client:otherClient,device:secondDevice,project:randomUUID(),operationId:randomUUID(),marker:"PRIVATE-PC-2"},
+  {owner:otherOwner,client,device:randomUUID(),project:randomUUID(),operationId:randomUUID(),marker:"PRIVATE-PC-3"},
 ];
 function fixture(){
   const records=new Map<string,Record<string,unknown>>();
@@ -70,17 +70,19 @@ function fixture(){
   const status=createCanonicalRelayReadOnlyHandlers(env,{
     listTargets:listTargets as never,getAction:getAction as never,
   });
-  async function doSubmit(p:typeof members[number],jwt:string,changes:Record<string,unknown>={}){
+  async function doSubmit(p:typeof members[number],jwt:string,changes:Record<string,unknown>={},bindingChanges:Record<string,unknown>={}){
     const req=new Request("https://relay.example/v3/product/actions",{
       method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+jwt},
       body:JSON.stringify({
-        device_id:p.device,space_id:spaceId,project_id:p.project,
         action:"project.text_read",arguments:{path:"pasta 1/descricao.txt"},
-        idempotency_key:"relay-"+p.owner.slice(0,8)+"-"+p.client.slice(0,8),
         ...changes,
       }),
     });
-    const response=await submit(req);
+    const trustedOperation={
+      subjectId:p.owner,clientId:p.client,deviceId:p.device,spaceId,
+      projectId:p.project,operationId:p.operationId,...bindingChanges,
+    };
+    const response=await submit(req,trustedOperation);
     return {status:response.status,body:await response.json()};
   }
   async function doStatus(jwt:string,requestId:string){
@@ -123,7 +125,10 @@ test("model-selected wrong PC never enters queue and cannot request an existing 
   await withIssuer(async()=>{
     const lab=fixture(),m=members[0],tokenA=await token({sub:m.owner,client_id:m.client});
     const attempted=await lab.doSubmit(m,tokenA,{device_id:members[1].device});
-    assert.equal(attempted.status,403);
+    assert.equal(attempted.status,400);
+    assert.equal(lab.creates,0);
+    const forgedBinding=await lab.doSubmit(m,tokenA,{}, {deviceId:members[1].device});
+    assert.equal(forgedBinding.status,403);
     assert.equal(lab.creates,0);
     const accepted=await lab.doSubmit(m,tokenA);
     assert.equal(accepted.status,202);
