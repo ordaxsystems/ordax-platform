@@ -94,3 +94,13 @@ O job deve ser interpretado como **prova de isolamento de rede entre os contêin
 Para reprodução manual em um host Docker de teste, definir os três segredos efêmeros `RELAY_TEST_SPOKE1_TOKEN`, `RELAY_TEST_SPOKE2_TOKEN`, `RELAY_TEST_SPOKE3_TOKEN` com valores diferentes de pelo menos 32 caracteres, iniciar os serviços `hub` e `sentinel1` a `sentinel3`, executar cada serviço `spokeN` e encerrar com `docker compose down --volumes --remove-orphans`. Não executar essa topologia em uma rede de produção nem publicar suas portas. Para auditoria da execução automática, consultar o workflow no GitHub Actions.
 
 O teste de processos (`control-plane/labs/relay/spoke-process.e2e.test.mts`) usa três processos separados e pastas de teste distintas, exercitando o manipulador MCP publicado e verificando bloqueios de troca de dispositivo/projeto, mas **não cria VMs ou separação de rede**. Ambos os testes são necessários; nenhum pode substituir o outro.
+
+## Prova complementar em Windows
+
+O workflow `.github/workflows/relay-windows-process.yml` executa `spoke-process.e2e.test.mts` em `windows-latest` com Node.js 22, separadamente da suíte Linux. Três processos Node independentes recebem credenciais e diretórios de teste próprios, enviam pedidos HTTP ao Relay, passam pelo manipulador MCP existente e retornam resultados com identidade vinculada ao cliente. O teste também verifica um pedido com destino deliberadamente trocado e tentativa de consultar o recibo de outra identidade.
+
+O teste Windows prova comportamento do protocolo e da leitura de pastas na plataforma de execução; não é VM, não testa firewall local entre PCs físicos e não significa que a sessão real ChatGPT do Studio seja um endpoint de inferência. O teste Docker usa redes próprias e complementa, mas não substitui, o resultado Windows. Ambos são acionáveis por `workflow_dispatch` sem credenciais de produção.
+
+## Dependência de migração Product
+
+O cutover da autoridade canônica PostgreSQL no Control Plane permanece acompanhado pela issue [#42](https://github.com/ordaxsystems/ordax-platform/issues/42). Não conectar clientes Relay reais aos handlers D1 antigos, nem criar gateway/memória paralelos para contornar o cutover. A integração definitiva precisa consultar o dono canônico de identidade/grants, obter o destino imutável do cliente autenticado e registrar a ação/recibo com owner, client e device, egress consentido e idempotência durável antes de disponibilizar o serviço de inferência. A existência do MCP ChatGPT conectado **não** é prova de canal de inferência reverso.
