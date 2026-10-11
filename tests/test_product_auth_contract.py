@@ -62,7 +62,7 @@ class ProductAuthContractTests(unittest.TestCase):
 
     def test_product_session_does_not_reuse_operator_or_device_auth(self) -> None:
         session_start = self.worker.index("async function productSession")
-        session_end = self.worker.index("async function createProductAction", session_start)
+        session_end = self.worker.index("async function getProductAction", session_start)
         session_source = self.worker[session_start:session_end]
 
         self.assertIn("authenticateProductRequest", session_source)
@@ -72,7 +72,7 @@ class ProductAuthContractTests(unittest.TestCase):
 
     def test_product_session_is_identity_only_not_execution(self) -> None:
         session_start = self.worker.index("async function productSession")
-        session_end = self.worker.index("async function createProductAction", session_start)
+        session_end = self.worker.index("async function getProductAction", session_start)
         session_source = self.worker[session_start:session_end]
 
         self.assertNotIn("enqueueJob", session_source)
