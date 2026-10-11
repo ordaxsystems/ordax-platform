@@ -1,7 +1,7 @@
 /**
  * Product MCP over the canonical PostgreSQL authority.
  *
- * Staging entrypoint for #42. Never imports the legacy D1 Worker, never
+ * Staging entrypoint for #42; OAuth discovery must be proven before activation. Never imports the legacy D1 Worker, never
  * dispatches a model-provided operation and never becomes a second grant owner.
  * Runtime enrolment, durable trusted-operation dispatch and provider inference
  * must be completed before promoting this source to the production Worker.
