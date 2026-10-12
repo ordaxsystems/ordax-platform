@@ -1,3 +1,15 @@
+import { DurableObject } from "cloudflare:workers";
+import {
+  authenticateProductRequest,
+  productAuthConfigured,
+  type ProductAuthEnv,
+} from "./product_auth";
+import {
+  APP_INTELLIGENCE_DEVICE_ACTIONS,
+  DEVICE_SCOPED_ACTIONS,
+  PROJECT_BROWSER_ACTIONS,
+  projectBindingMatchesScope,
+} from "./product_action_scope";
 import { scopeProductResult } from "./product_results";
 import { openAiAppsChallenge, publicProductPage } from "./public_pages";
 import { readBoundedJsonObject } from "./request_json";
