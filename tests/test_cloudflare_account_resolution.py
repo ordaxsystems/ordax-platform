@@ -199,6 +199,16 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         ]
         self.assertEqual(len(mapped_tables), len(set(mapped_tables)))
         self.assertEqual(set(mapped_tables), referenced_tables)
+        # Tables retired from ALL Worker source remain traceable as historical
+        # migration evidence, but MUST NOT count as active authority.
+        retired = [
+            name for domain in cutover["domains"]
+            for name in domain.get("retired_tables", [])
+        ]
+        self.assertEqual(set(retired), {"ordax_product_audit"})
+        self.assertEqual(len(retired), len(set(retired)))
+        self.assertFalse(set(retired) & referenced_tables)
+        self.assertFalse(set(retired) & set(mapped_tables))
         self.assertFalse(cutover["policy"]["allow_callsite_growth"])
         self.assertFalse(cutover["policy"]["allow_schema_copy_1_to_1"])
         self.assertFalse(cutover["policy"]["allow_dual_write"])
