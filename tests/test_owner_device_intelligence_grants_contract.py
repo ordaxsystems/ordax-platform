@@ -43,11 +43,11 @@ class OwnerDeviceIntelligenceGrantContractTests(unittest.TestCase):
         self.assertIn("stableActions()", self.handler)
         self.assertNotIn("project_id", self.handler)
 
-    def test_worker_routes_separate_owner_endpoint(self) -> None:
+    def test_worker_retires_legacy_owner_endpoint(self) -> None:
         self.assertIn('"/v3/product/device-intelligence-grants"', self.worker)
-        self.assertIn("createOwnerDeviceIntelligenceGrant", self.worker)
-        self.assertIn("listOwnerDeviceIntelligenceGrants", self.worker)
-        self.assertIn("revokeOwnerDeviceIntelligenceGrant", self.worker)
+        for handler in ("createOwnerDeviceIntelligenceGrant", "listOwnerDeviceIntelligenceGrants", "revokeOwnerDeviceIntelligenceGrant"):
+            self.assertNotIn(handler, self.worker)
+        self.assertIn('error: "legacy_product_grants_retired"', self.worker)
 
     def test_mcp_can_request_actions_but_cannot_mint_the_grant(self) -> None:
         self.assertIn('name: "app_intelligence_catalog"', self.mcp)
