@@ -403,7 +403,7 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         self.assertNotIn("deleteDevice", LEGACY_OPERATOR_HANDLER_ALLOWLIST)
         self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 47)
         self.assertEqual(sum(cutover["legacy_source_callsite_ceilings"].values()), 65)
-        self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 65)
+        self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 47)
         self.assertFalse(foundation["deployment_ready"])
         self.assertIn(
             "engineering_device_deletion_lifecycle_not_ready",
