@@ -220,9 +220,11 @@ export async function listOwnerDeviceIntelligenceGrants(
          ON l.subject_id = g.subject_id
         AND l.device_id = g.device_id
         AND l.space_id = COALESCE(g.space_id, '')
+       JOIN ordax_devices d ON d.id = l.device_id
        WHERE g.subject_id = ?1
          AND l.id = ?2
          AND l.revoked_at IS NULL
+         AND d.revoked_at IS NULL
        ORDER BY g.created_at DESC`
     : `SELECT DISTINCT g.id, g.subject_id, g.space_id, g.device_id, g.actions_json,
               g.projects_json, g.expires_at, g.created_at, g.revoked_at
@@ -231,8 +233,10 @@ export async function listOwnerDeviceIntelligenceGrants(
          ON l.subject_id = g.subject_id
         AND l.device_id = g.device_id
         AND l.space_id = COALESCE(g.space_id, '')
+       JOIN ordax_devices d ON d.id = l.device_id
        WHERE g.subject_id = ?1
          AND l.revoked_at IS NULL
+         AND d.revoked_at IS NULL
        ORDER BY g.created_at DESC`;
   const statement = env.DB.prepare(query);
   const result = linkId
@@ -263,9 +267,11 @@ export async function revokeOwnerDeviceIntelligenceGrant(
        ON l.subject_id = g.subject_id
       AND l.device_id = g.device_id
       AND l.space_id = COALESCE(g.space_id, '')
+     JOIN ordax_devices d ON d.id = l.device_id
      WHERE g.id = ?1
        AND g.subject_id = ?2
        AND l.revoked_at IS NULL
+       AND d.revoked_at IS NULL
      LIMIT 1`,
   ).bind(grantId, identity.subjectId).first<ProductGrantRow>();
 
