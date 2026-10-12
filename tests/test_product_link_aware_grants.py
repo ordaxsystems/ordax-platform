@@ -49,7 +49,7 @@ class ProductLinkAwareGrantContractTests(unittest.TestCase):
 
     def test_new_mcp_does_not_use_legacy_authority(self):
         self.assertIn('createCanonicalProductMcpReadHandlers',MCP)
-        self.assertIn('product_postgres_store',POSTGRES if False else MCP + POSTGRES)
+        self.assertIn('product_postgres_store',MCP)
         self.assertNotIn('env.DB',MCP)
         self.assertNotIn('ordax_product_grants',MCP)
         self.assertIn('trusted_operation_required',MCP)
