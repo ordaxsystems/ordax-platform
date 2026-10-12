@@ -60,25 +60,33 @@ class ProductAuthContractTests(unittest.TestCase):
         self.assertIn('typeof payload.client_id === "string"', self.auth)
         self.assertNotIn('request.headers.get("x-ordax-client-id")', self.auth)
 
-    def test_product_session_does_not_reuse_operator_or_device_auth(self) -> None:
-        session_start = self.worker.index("async function productSession")
-        session_end = self.worker.index("async function provisionDevice", session_start)
-        session_source = self.worker[session_start:session_end]
-
-        self.assertIn("authenticateProductRequest", session_source)
-        self.assertNotIn("operatorAuthorized", session_source)
-        self.assertNotIn("authenticateDevice", session_source)
+    def test_product_session_uses_one_signed_oauth_client_ssot(self) -> None:
+        self.assertNotIn("async function productSession(", self.worker)
+        self.assertIn(
+            'createCanonicalProductMcpReadHandlers(env).session(request)',
+            self.worker,
+        )
         self.assertIn('"/v3/product/session"', self.worker)
+        canonical = (
+            self.root / "control-plane" / "cloudflare" / "src" / "product_mcp_reads.ts"
+        ).read_text(encoding="utf-8")
+        self.assertIn("async session(request)", canonical)
+        self.assertIn("authenticateProductMcpClientRequest(request, env)", canonical)
+        self.assertIn("client_id: identity.clientId", canonical)
+        self.assertNotIn("operatorAuthorized", canonical)
+        self.assertNotIn("authenticateDevice(", canonical)
 
-    def test_product_session_is_identity_only_not_execution(self) -> None:
-        session_start = self.worker.index("async function productSession")
-        session_end = self.worker.index("async function provisionDevice", session_start)
-        session_source = self.worker[session_start:session_end]
-
-        self.assertNotIn("enqueueJob", session_source)
-        self.assertNotIn("resolveProductGrantForContext", session_source)
+    def test_session_cannot_submit_work_or_mint_grants(self) -> None:
+        canonical = (
+            self.root / "control-plane" / "cloudflare" / "src" / "product_mcp_reads.ts"
+        ).read_text(encoding="utf-8")
+        start = canonical.index("    async session(request)")
+        end = canonical.index("    async targets(request)", start)
+        session_source = canonical[start:end]
+        self.assertIn("subject_id: identity.ownerUserId", session_source)
+        self.assertNotIn("enqueueProductAction", session_source)
+        self.assertNotIn("createOwnerDevice", session_source)
         self.assertNotIn("wakeDeviceSession", session_source)
-        self.assertIn("subject_id", session_source)
 
 
 if __name__ == "__main__":

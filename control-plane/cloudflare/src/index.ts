@@ -478,22 +478,6 @@ function normalizedStringArray(
   return [...result].sort();
 }
 
-async function productSession(request: Request, env: Env): Promise<Response> {
-  const identity = await authenticateProductRequest(request, env);
-  if (!identity.ok) {
-    return json({ ok: false, error: identity.error }, identity.status);
-  }
-  return json({
-    ok: true,
-    session: {
-      subject_id: identity.subjectId,
-      issuer: identity.issuer,
-      audience: identity.audience,
-      expires_at_unix: identity.expiresAt,
-    },
-  });
-}
-
 async function provisionDevice(request: Request, env: Env): Promise<Response> {
   if (!await operatorAuthorized(request, env)) return json({ ok: false, error: "operator_unauthorized" }, 401);
   const body = await parseSmallJson(request, 16 * 1024);
@@ -1410,7 +1394,9 @@ export default {
       return json({ ok: false, error: "legacy_mcp_retired" }, 410);
     }
     if (request.method === "GET" && url.pathname === "/v3/product/session") {
-      return productSession(request, env);
+      // One signed OAuth-client identity for session, targets and action status.
+      // User-only JWTs cannot inherit a Product MCP client's authority.
+      return createCanonicalProductMcpReadHandlers(env).session(request);
     }
     // Deprecated D1-owned grants cannot mint, read or revoke Product authorization.
     // Canonical grants are administered exclusively by PostgreSQL Product authority.
