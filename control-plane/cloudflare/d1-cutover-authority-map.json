@@ -96,9 +96,6 @@
   ],
   "source_root": "control-plane/cloudflare/src",
   "legacy_source_callsite_ceilings": {
-    "index.ts": 47,
-    "product_device_grants.ts": 6,
-    "product_intelligence_grants.ts": 6,
-    "product_project_grants.ts": 6
+    "index.ts": 47
   }
 }

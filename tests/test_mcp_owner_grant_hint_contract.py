@@ -29,7 +29,7 @@ class McpOwnerGrantHintContractTests(unittest.TestCase):
         self.assertIn("alternative_profile_requires_local_full_access: true", self.source)
 
     def test_sensitive_actions_have_specific_profiles(self) -> None:
-        self.assertIn('from "./product_device_grants.ts"', self.source)
+        self.assertIn('from "./product_action_scope.ts"', self.source)
         self.assertIn('Object.entries(OWNER_DEVICE_COMPUTER_GRANT_PROFILES)', self.source)
         self.assertNotIn('profile: "computer-process-control"', self.source)
 
