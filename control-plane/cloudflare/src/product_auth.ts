@@ -291,3 +291,29 @@ export async function authenticateProductMcpClientRequest(
     expiresAt: identity.expiresAt,
   };
 }
+
+/**
+ * Product ACCOUNT session only: the issuer signs owner identity, not a
+ * delegation of MCP client permissions. Enrollment and Studio login consume
+ * this same verified owner boundary. MCP tools continue requiring an additional
+ * signed OAuth client_id in authenticateProductMcpClientRequest.
+ */
+export async function productOwnerAccountSession(
+  request: Request, env: ProductAuthEnv,
+): Promise<Response> {
+  const identity = await authenticateProductRequest(request, env);
+  if (!identity.ok) {
+    return Response.json({ ok: false, error: identity.error }, { status: identity.status,
+      headers: { "cache-control": "no-store" } });
+  }
+  if (identity.role !== "authenticated" || !isCanonicalUuid(identity.subjectId)) {
+    return Response.json({ ok: false, error: "product_owner_identity_invalid" },
+      { status: 403, headers: { "cache-control": "no-store" } });
+  }
+  return Response.json({ ok: true, session: {
+    subject_id: identity.subjectId,
+    issuer: identity.issuer,
+    audience: identity.audience,
+    expires_at_unix: identity.expiresAt,
+  } }, { headers: { "cache-control": "no-store" } });
+}
