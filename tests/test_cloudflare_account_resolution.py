@@ -40,11 +40,6 @@ LEGACY_D1_MIGRATION_ALLOWLIST = {
     "0008_product_device_owner.sql",
 }
 LEGACY_OPERATOR_HANDLER_ALLOWLIST = {
-    "createProductGrant",
-    "createProductGrantFromLink",
-    "listProductGrants",
-    "resolveProductGrantAdmin",
-    "revokeProductGrant",
     "provisionDevice",
     "enqueueJob",
     "getJob",
@@ -396,9 +391,9 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         self.assertNotIn("artifacts_deleted:", source)
         self.assertNotIn("multipart_uploads_aborted:", source)
         self.assertNotIn("deleteDevice", LEGACY_OPERATOR_HANDLER_ALLOWLIST)
-        self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 57)
-        self.assertEqual(sum(cutover["legacy_source_callsite_ceilings"].values()), 75)
-        self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 75)
+        self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 47)
+        self.assertEqual(sum(cutover["legacy_source_callsite_ceilings"].values()), 65)
+        self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 65)
         self.assertFalse(foundation["deployment_ready"])
         self.assertIn(
             "engineering_device_deletion_lifecycle_not_ready",
