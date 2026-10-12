@@ -108,3 +108,15 @@ O cutover da autoridade canônica PostgreSQL no Control Plane permanece acompanh
 ## Ponte de autorização canônica (somente leitura)
 
 Foi adicionado um candidato de integração com **OAuth Product assinado + RPCs PostgreSQL existentes**, sem criar outra autoridade ou expor um endpoint remoto. A implementação e os testes estão em `control-plane/cloudflare/src/product_relay_receipt.ts`, `control-plane/labs/relay/canonical-readonly.ts` e `control-plane/tests/product_relay_*.test.mts`. O contrato, seus limites e o bloqueio até o cutover #42 estão detalhados em [RELAY-CANONICAL-AUTH.md](RELAY-CANONICAL-AUTH.md). Esse caminho recusa qualquer gravação pelo executor legado e valida usuário, cliente OAuth, dispositivo e UUID do projeto antes de apresentar um recibo. Não confundir essa leitura autorizada com inferência, pareamento ou execução de ações reais pelo Relay.
+
+
+## SSOT de homologação dos três PCs emulados — 11/10/2026
+
+**A arquitetura de teste já inclui três PCs emulados**. Para não confundir os níveis de prova:
+
+- A **Platform** mantém o único Relay experimental em `control-plane/labs/relay/relay.mjs`, reutilizado pelo Apps sem outro broker ou executor.
+- O ensaio de **três contêineres** `control-plane/labs/relay/network/compose.yml` oferece três identidades com segredos próprios e **três redes Docker `internal` separadas**, com sentinelas inacessíveis aos peers. São três clientes de rede emulados, **não** três PCs físicos ou instalações completas do OrdaX OS.
+- A CI `ORDAX Relay Container Isolation` passa a executar também **em PRs**. Cada cliente tenta falsificar as identidades dos **outros dois**, totalizando seis combinações negadas; os três utilizam **o mesmo UUID de solicitação** simultaneamente e cada resposta continua segregada por cliente. A repetição do próprio pedido deve ser idempotente, e reutilizar o UUID com outro prompt deve retornar conflito, nunca sobrescrever o recibo.
+- O Apps tem outro ensaio complementar de **três processos Windows independentes** com portas HTTP e cookies distintos, sobre **um host físico**; não declarar isolamento de kernel nesse caso.
+
+Critério de evidência: logs de cada execução e SHA do GitHub devem demonstrar os três processos/contêineres, origem/credencial e isolamento. Aprovação dos ensaios **não** fornece uma sessão autenticada de ChatGPT, nem cadastro Product real: o Worker definitivo `ordax-mcp` permanece bloqueado até a homologação exigida no SSOT da Platform.
