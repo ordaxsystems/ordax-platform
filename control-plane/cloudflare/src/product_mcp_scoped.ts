@@ -1,13 +1,10 @@
 // Relay-facing, fail-closed MCP projection. Experimental until an authenticated
 // Product resolver supplies immutable per-request scopes. No extra identity/store.
 import type { OrdaxMcpHandlers } from "./mcp_http.ts";
+import { RELAY_PROJECT_READ_CAPABILITIES, RELAY_DEVICE_READ_CAPABILITIES } from "./product_relay_scope.ts";
+import { canonicalPathWithinRoot, validCanonicalReadActionArguments } from "./product_relay_read_contract.ts";
 
 type Action = "project.text_read" | "workspace.directory_list" | "workspace.file_stat" | "workspace.text_read";
-const ALLOWED = new Set<Action>(["project.text_read", "workspace.directory_list", "workspace.file_stat", "workspace.text_read"]);
-const DEVICE_RECEIPT_ONLY = new Set<string>([
-  "computer.access_status","computer.active_window","computer.processes",
-  "computer.screen_info","computer.windows",
-]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PROJECT = /^[a-zA-Z0-9_-]{1,100}$/;
 type Scope = Readonly<{
@@ -28,49 +25,15 @@ type VerifyReceipt = (request: Request, requestId: string, scope: Scope) => Prom
 const json = (body: unknown, status = 200) => Response.json(body, {status, headers: {"cache-control":"no-store"}});
 const denied = () => json({ok:false,error:"relay_scope_denied"},403);
 const unavailable = () => json({ok:false,error:"relay_scope_unavailable"},503);
-function validSegment(value: string): boolean {
-  if (!value || value === "." || value === ".." || value.endsWith(" ") || value.endsWith(".")
-    || value.normalize("NFKC") !== value
-    // Percent-encoded separators/traversal may be decoded by downstream tools.
-    // Windows stream syntax, drive separators and Unicode slash confusables
-    // must never be interpreted as a different filesystem path.
-    || /[\\:%\x00-\x1f\x7f\u2215\u2044\uFF0F]/u.test(value)
-    || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(value)) return false;
-  return true;
-}
-function pathWithin(root: string, value: unknown): boolean {
-  if (typeof value !== "string" || value.length > 512 || value.startsWith("/") || value.endsWith("/")) return false;
-  const segments = value.split("/");
-  const base = root.split("/");
-  return segments.every(validSegment) && base.every(validSegment)
-    && segments.length >= base.length && base.every((part, n) => segments[n] === part);
-}
 function validScope(scope: Scope | null): scope is Scope {
   return !!scope && UUID.test(scope.deviceId) && UUID.test(scope.subjectId)
     && typeof scope.clientId === "string" && scope.clientId.length >= 8 && scope.clientId.length <= 160
     && /^[A-Za-z0-9][A-Za-z0-9._:-]+$/.test(scope.clientId)
     && (scope.spaceId === null || UUID.test(scope.spaceId)) && PROJECT.test(scope.project)
     && (scope.projectId === undefined || scope.projectId === null || UUID.test(scope.projectId))
-    && pathWithin(scope.rootPath, scope.rootPath)
+    && canonicalPathWithinRoot(scope.rootPath, scope.rootPath)
     && Array.isArray(scope.actions) && scope.actions.length > 0
-    && scope.actions.every(item => ALLOWED.has(item as Action) || DEVICE_RECEIPT_ONLY.has(item));
-}
-function permittedArgs(action: Action, args: unknown, root: string): boolean {
-  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
-  const input = args as Record<string,unknown>;
-  const keys = action === "workspace.directory_list"
-    ? ["path","max_depth","max_entries","include_hidden"]
-    : action === "workspace.text_read" ? ["path","start_line","end_line"] : ["path"];
-  if (Object.keys(input).some(key => !keys.includes(key)) || !pathWithin(root,input.path)) return false;
-  for (const [key,value] of Object.entries(input)) {
-    if (key === "path") continue;
-    if (key === "include_hidden" && typeof value === "boolean") continue;
-    if (key === "max_depth" && Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 12) continue;
-    if (key === "max_entries" && Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 5000) continue;
-    if ((key === "start_line" || key === "end_line") && Number.isInteger(value) && (value as number) >= 1) continue;
-    return false;
-  }
-  return true;
+    && scope.actions.every(item => RELAY_PROJECT_READ_CAPABILITIES.has(item) || RELAY_DEVICE_READ_CAPABILITIES.has(item));
 }
 async function body(response: Response | Request): Promise<Record<string,unknown>|null> {
   try {
@@ -125,9 +88,9 @@ export function scopeRelayMcp(handlers: OrdaxMcpHandlers, resolver: Resolver, ve
       const data = await body(request.clone());
       if (!data || data.device_id !== scope.deviceId || data.space_id !== scope.spaceId
         || data.project !== scope.project || typeof data.action !== "string"
-        || !ALLOWED.has(data.action as Action)
+        || !RELAY_PROJECT_READ_CAPABILITIES.has(data.action)
         || !scope.actions.includes(data.action)
-        || !permittedArgs(data.action as Action,data.arguments,scope.rootPath)
+        || !validCanonicalReadActionArguments(data.action,data.arguments,scope.rootPath)
         || Object.keys(data).some(k => !["device_id","space_id","project","action","arguments"].includes(k))) return denied();
       return handlers.createAction(request);
     },

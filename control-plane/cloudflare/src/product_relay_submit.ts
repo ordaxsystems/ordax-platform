@@ -14,7 +14,8 @@ import {
   enqueueProductAction, listCanonicalProductTargets, type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
-import { selectCanonicalRelayProjectScope } from "./product_relay_scope.ts";
+import { selectCanonicalRelayProjectScope, RELAY_PROJECT_READ_CAPABILITIES } from "./product_relay_scope.ts";
+import { validCanonicalReadActionArguments } from "./product_relay_read_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
@@ -38,10 +39,6 @@ export type TrustedRelayOperation = Readonly<{
 
 type Json = Record<string, unknown>;
 const QUEUE_TTL_MS = 5 * 60 * 1000;
-const READ_ACTIONS = new Set([
-  "project.text_read", "workspace.directory_list",
-  "workspace.file_stat", "workspace.text_read",
-]);
 const json = (value: unknown, status = 200): Response => Response.json(value, {
   status, headers: { "cache-control": "no-store" },
 });
@@ -60,34 +57,6 @@ function validBinding(value: unknown): value is TrustedRelayOperation {
     && value.clientId.length <= 160
     && /^[A-Za-z0-9][A-Za-z0-9._:-]+$/.test(value.clientId);
 }
-function validRelativePath(value: unknown): value is string {
-  if (typeof value !== "string" || value.length < 1 || value.length > 512
-    || value.startsWith("/") || value.endsWith("/")) return false;
-  return value.split("/").every(part => part !== "" && part !== "." && part !== ".."
-    && !part.endsWith(" ") && !part.endsWith(".") && part.normalize("NFKC") === part
-    && !/[\\:%\x00-\x1f\x7f\u2215\u2044\uFF0F]/u.test(part)
-    && !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(part));
-}
-function validArguments(action: string, value: unknown): value is Json {
-  if (!isRecord(value) || !validRelativePath(value.path)) return false;
-  const extra = action === "workspace.directory_list"
-    ? ["max_depth", "max_entries", "include_hidden"]
-    : action === "workspace.text_read" ? ["start_line", "end_line"] : [];
-  if (Object.keys(value).some(key => key !== "path" && !extra.includes(key))) return false;
-  for (const [key, item] of Object.entries(value)) {
-    if (key === "path") continue;
-    if (key === "include_hidden" && typeof item === "boolean") continue;
-    if (key === "max_depth" && Number.isInteger(item) && (item as number) >= 1 && (item as number) <= 12) continue;
-    if (key === "max_entries" && Number.isInteger(item) && (item as number) >= 1 && (item as number) <= 5000) continue;
-    if ((key === "start_line" || key === "end_line") && Number.isInteger(item)
-      && (item as number) >= 1 && (item as number) <= 1000000) continue;
-    return false;
-  }
-  if (typeof value.start_line === "number" && typeof value.end_line === "number"
-    && value.start_line > value.end_line) return false;
-  return true;
-}
-
 /**
  * No route adapter is supplied here. The trusted host MUST persist operationId
  * before its first send and reuse the exact same binding for retry/recovery.
@@ -109,8 +78,8 @@ export function createCanonicalRelayActionSubmitHandler(env: Env, deps: Dependen
 
     const body = await readBoundedJsonObject(request, 16 * 1024);
     if (!body || Object.keys(body).sort().join(",") !== "action,arguments"
-      || typeof body.action !== "string" || !READ_ACTIONS.has(body.action)
-      || !validArguments(body.action, body.arguments)) {
+      || typeof body.action !== "string" || !RELAY_PROJECT_READ_CAPABILITIES.has(body.action)
+      || !validCanonicalReadActionArguments(body.action, body.arguments)) {
       return json({ ok: false, error: "relay_action_invalid" }, 400);
     }
 
