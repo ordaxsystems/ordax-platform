@@ -10,7 +10,7 @@ import {
   PROJECT_BROWSER_ACTIONS,
   projectBindingMatchesScope,
 } from "./product_action_scope";
-import { scopeProductResult } from "./product_results";
+import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads";
 import { openAiAppsChallenge, publicProductPage } from "./public_pages";
 import { readBoundedJsonObject } from "./request_json";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence";
@@ -478,93 +478,6 @@ function normalizedStringArray(
   return [...result].sort();
 }
 
-async function listProductTargets(request: Request, env: Env): Promise<Response> {
-  const identity = await authenticateProductRequest(request, env);
-  if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
-
-  const url = new URL(request.url);
-  const spaceId = url.searchParams.get("space_id");
-  if (spaceId !== null && !PRODUCT_ID_RE.test(spaceId)) {
-    return json({ ok: false, error: "space_id_invalid" }, 400);
-  }
-
-  const now = nowIso();
-  const rows = await env.DB.prepare(
-    `SELECT
-       g.id AS grant_id, g.space_id, g.device_id, g.actions_json, g.projects_json,
-       g.expires_at, g.created_at,
-       d.name AS device_name, d.last_seen_at,
-       (
-         SELECT l.id
-         FROM ordax_product_device_links l
-         WHERE l.subject_id = g.subject_id
-           AND l.device_id = g.device_id
-           AND l.revoked_at IS NULL
-           AND COALESCE(l.space_id, '') = COALESCE(g.space_id, '')
-         ORDER BY l.created_at DESC
-         LIMIT 1
-       ) AS link_id
-     FROM ordax_product_grants g
-     JOIN ordax_devices d ON d.id = g.device_id
-     WHERE g.subject_id = ?1
-       AND g.device_id IS NOT NULL
-       AND g.revoked_at IS NULL
-       AND d.revoked_at IS NULL
-       AND (g.expires_at IS NULL OR g.expires_at > ?2)
-       AND (?3 IS NULL OR g.space_id = ?3)
-     ORDER BY d.name ASC, g.created_at DESC
-     LIMIT 200`,
-  ).bind(identity.subjectId, now, spaceId).all<{
-    grant_id: string;
-    space_id: string | null;
-    device_id: string;
-    actions_json: string;
-    projects_json: string;
-    expires_at: string | null;
-    created_at: string;
-    device_name: string;
-    last_seen_at: string | null;
-    link_id: string | null;
-  }>();
-
-  const devices = new Map<string, JsonObject>();
-  for (const row of rows.results ?? []) {
-    let actions: unknown = [];
-    let projects: unknown = [];
-    try { actions = JSON.parse(row.actions_json); } catch { continue; }
-    try { projects = JSON.parse(row.projects_json); } catch { continue; }
-    if (
-      !Array.isArray(actions)
-      || !actions.every((item) => typeof item === "string")
-      || !Array.isArray(projects)
-      || !projects.every((item) => typeof item === "string")
-    ) {
-      continue;
-    }
-    let entry = devices.get(row.device_id) as (JsonObject & { grants?: unknown[] }) | undefined;
-    if (!entry) {
-      entry = {
-        device_id: row.device_id,
-        name: row.device_name,
-        last_seen_at: row.last_seen_at,
-        link_id: row.link_id,
-        grants: [],
-      };
-      devices.set(row.device_id, entry);
-    }
-    (entry.grants as unknown[]).push({
-      grant_id: row.grant_id,
-      space_id: row.space_id,
-      actions,
-      projects,
-      expires_at: row.expires_at,
-      created_at: row.created_at,
-    });
-  }
-
-  return json({ ok: true, targets: [...devices.values()] });
-}
-
 async function productSession(request: Request, env: Env): Promise<Response> {
   const identity = await authenticateProductRequest(request, env);
   if (!identity.ok) {
@@ -579,18 +492,6 @@ async function productSession(request: Request, env: Env): Promise<Response> {
       expires_at_unix: identity.expiresAt,
     },
   });
-}
-
-async function getProductAction(request: Request, env: Env, requestId: string): Promise<Response> {
-  const identity = await authenticateProductRequest(request, env);
-  if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
-  if (!UUID_RE.test(requestId)) return json({ ok: false, error: "product_request_id_invalid" }, 400);
-  const row = await env.DB.prepare(`SELECT r.request_id, r.device_id, r.action, r.project, r.created_at, j.status, j.result_json, j.error_code, j.started_at, j.finished_at, g.projects_json FROM ordax_product_action_requests r JOIN ordax_jobs j ON j.id = r.job_id LEFT JOIN ordax_product_grants g ON g.id = r.grant_id WHERE r.request_id = ?1 AND r.subject_id = ?2`).bind(requestId, identity.subjectId).first<Record<string, unknown>>();
-  if (!row) return json({ ok: false, error: "product_action_not_found" }, 404);
-  let result: unknown = null;
-  if (typeof row.result_json === "string" && row.result_json) { try { result = JSON.parse(row.result_json); } catch { result = null; } }
-  result = scopeProductResult(row.action, result, row.projects_json);
-  return json({ ok: true, action: { request_id: row.request_id, device_id: row.device_id, action: row.action, project: row.project, status: row.status, result, error_code: row.error_code, created_at: row.created_at, started_at: row.started_at, finished_at: row.finished_at } });
 }
 
 async function provisionDevice(request: Request, env: Env): Promise<Response> {
@@ -1530,14 +1431,16 @@ export default {
       return json({ ok: false, error: "legacy_product_pairing_retired" }, 410);
     }
     if (request.method === "GET" && url.pathname === "/v3/product/targets") {
-      return listProductTargets(request, env);
+      // Read through the exact OAuth-client PostgreSQL authority; no D1 fallback.
+      return createCanonicalProductMcpReadHandlers(env).targets(request);
     }
     if (request.method === "POST" && url.pathname === "/v3/product/actions") {
       // No D1-based remote action enqueue remains reachable from this source.
       return json({ ok: false, error: "legacy_product_action_retired" }, 410);
     }
     if (request.method === "GET" && parts[0] === "v3" && parts[1] === "product" && parts[2] === "actions" && parts.length === 4) {
-      return getProductAction(request, env, parts[3]);
+      // The canonical RPC scopes results to the signed owner and OAuth client.
+      return createCanonicalProductMcpReadHandlers(env).getAction(request, parts[3]);
     }
     // Legacy Product administrative D1 grants/audit have been retired.
     // No model/header or operator token can mint or revoke a grant here.
