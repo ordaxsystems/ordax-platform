@@ -13,7 +13,6 @@
       "id": "product_remote_authority",
       "legacy_tables": [
         "ordax_product_grants",
-        "ordax_product_audit",
         "ordax_product_action_requests"
       ],
       "target_authority": "postgresql",
@@ -29,6 +28,9 @@
       "cutover_blockers": [
         "validated_client_identity_not_propagated_to_product_rpc",
         "product_mcp_consumers_and_route_contracts_not_cut_over"
+      ],
+      "retired_tables": [
+        "ordax_product_audit"
       ]
     },
     {
