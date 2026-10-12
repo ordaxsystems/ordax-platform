@@ -329,9 +329,11 @@ export async function revokeOwnerProjectGrant(
        ON l.subject_id = g.subject_id
       AND l.device_id = g.device_id
       AND l.space_id = COALESCE(g.space_id, '')
+     JOIN ordax_devices d ON d.id = l.device_id
      WHERE g.id = ?1
        AND g.subject_id = ?2
        AND l.revoked_at IS NULL
+       AND d.revoked_at IS NULL
      LIMIT 1`,
   ).bind(grantId, identity.subjectId).first<ProductGrantRow>();
 
