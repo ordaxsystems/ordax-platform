@@ -205,7 +205,7 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
             name for domain in cutover["domains"]
             for name in domain.get("retired_tables", [])
         ]
-        self.assertEqual(set(retired), {"ordax_product_audit"})
+        self.assertEqual(set(retired), {"ordax_product_audit", "ordax_product_device_pairings"})
         self.assertEqual(len(retired), len(set(retired)))
         self.assertFalse(set(retired) & referenced_tables)
         self.assertFalse(set(retired) & set(mapped_tables))
@@ -401,7 +401,7 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         self.assertNotIn("artifacts_deleted:", source)
         self.assertNotIn("multipart_uploads_aborted:", source)
         self.assertNotIn("deleteDevice", LEGACY_OPERATOR_HANDLER_ALLOWLIST)
-        self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 47)
+        self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 37)
         self.assertEqual(sum(cutover["legacy_source_callsite_ceilings"].values()), 37)
         self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 37)
         self.assertFalse(foundation["deployment_ready"])
