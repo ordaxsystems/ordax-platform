@@ -10,21 +10,6 @@ import {
   PROJECT_BROWSER_ACTIONS,
   projectBindingMatchesScope,
 } from "./product_action_scope";
-import {
-  createOwnerDeviceComputerGrant,
-  listOwnerDeviceComputerGrants,
-  revokeOwnerDeviceComputerGrant,
-} from "./product_device_grants";
-import {
-  createOwnerProjectGrant,
-  listOwnerProjectGrants,
-  revokeOwnerProjectGrant,
-} from "./product_project_grants";
-import {
-  createOwnerDeviceIntelligenceGrant,
-  listOwnerDeviceIntelligenceGrants,
-  revokeOwnerDeviceIntelligenceGrant,
-} from "./product_intelligence_grants";
 import { scopeProductResult } from "./product_results";
 import { openAiAppsChallenge, publicProductPage } from "./public_pages";
 import { readBoundedJsonObject } from "./request_json";
@@ -1792,50 +1777,17 @@ export default {
     if (request.method === "GET" && url.pathname === "/v3/product/session") {
       return productSession(request, env);
     }
-    if (request.method === "POST" && url.pathname === "/v3/product/device-intelligence-grants") {
-      return createOwnerDeviceIntelligenceGrant(request, env);
-    }
-    if (request.method === "GET" && url.pathname === "/v3/product/device-intelligence-grants") {
-      return listOwnerDeviceIntelligenceGrants(request, env);
-    }
+    // Deprecated D1-owned grants cannot mint, read or revoke Product authorization.
+    // Canonical grants are administered exclusively by PostgreSQL Product authority.
+    // No silent translation from these device/profile routes to remote grant groups.
     if (
-      request.method === "DELETE"
-      && parts[0] === "v3"
-      && parts[1] === "product"
-      && parts[2] === "device-intelligence-grants"
-      && parts.length === 4
+      ["/v3/product/device-intelligence-grants", "/v3/product/device-computer-grants",
+       "/v3/product/project-capability-grants"].includes(url.pathname)
+      || (parts.length === 4 && parts[0] === "v3" && parts[1] === "product"
+        && ["device-intelligence-grants", "device-computer-grants",
+            "project-capability-grants"].includes(parts[2]))
     ) {
-      return revokeOwnerDeviceIntelligenceGrant(request, env, parts[3]);
-    }
-    if (request.method === "POST" && url.pathname === "/v3/product/device-computer-grants") {
-      return createOwnerDeviceComputerGrant(request, env);
-    }
-    if (request.method === "GET" && url.pathname === "/v3/product/device-computer-grants") {
-      return listOwnerDeviceComputerGrants(request, env);
-    }
-    if (
-      request.method === "DELETE"
-      && parts[0] === "v3"
-      && parts[1] === "product"
-      && parts[2] === "device-computer-grants"
-      && parts.length === 4
-    ) {
-      return revokeOwnerDeviceComputerGrant(request, env, parts[3]);
-    }
-    if (request.method === "POST" && url.pathname === "/v3/product/project-capability-grants") {
-      return createOwnerProjectGrant(request, env);
-    }
-    if (request.method === "GET" && url.pathname === "/v3/product/project-capability-grants") {
-      return listOwnerProjectGrants(request, env);
-    }
-    if (
-      request.method === "DELETE"
-      && parts[0] === "v3"
-      && parts[1] === "product"
-      && parts[2] === "project-capability-grants"
-      && parts.length === 4
-    ) {
-      return revokeOwnerProjectGrant(request, env, parts[3]);
+      return json({ ok: false, error: "legacy_product_grants_retired" }, 410);
     }
     if (request.method === "POST" && url.pathname === "/v3/product/device-links") {
       return claimProductDevicePairing(request, env);
