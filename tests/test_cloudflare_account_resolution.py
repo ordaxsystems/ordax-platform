@@ -40,11 +40,6 @@ LEGACY_D1_MIGRATION_ALLOWLIST = {
     "0008_product_device_owner.sql",
 }
 LEGACY_OPERATOR_HANDLER_ALLOWLIST = {
-    "createProductGrant",
-    "createProductGrantFromLink",
-    "listProductGrants",
-    "resolveProductGrantAdmin",
-    "revokeProductGrant",
     "provisionDevice",
     "enqueueJob",
     "getJob",
@@ -204,6 +199,16 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         ]
         self.assertEqual(len(mapped_tables), len(set(mapped_tables)))
         self.assertEqual(set(mapped_tables), referenced_tables)
+        # Tables retired from ALL Worker source remain traceable as historical
+        # migration evidence, but MUST NOT count as active authority.
+        retired = [
+            name for domain in cutover["domains"]
+            for name in domain.get("retired_tables", [])
+        ]
+        self.assertEqual(set(retired), {"ordax_product_audit"})
+        self.assertEqual(len(retired), len(set(retired)))
+        self.assertFalse(set(retired) & referenced_tables)
+        self.assertFalse(set(retired) & set(mapped_tables))
         self.assertFalse(cutover["policy"]["allow_callsite_growth"])
         self.assertFalse(cutover["policy"]["allow_schema_copy_1_to_1"])
         self.assertFalse(cutover["policy"]["allow_dual_write"])
@@ -396,9 +401,9 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         self.assertNotIn("artifacts_deleted:", source)
         self.assertNotIn("multipart_uploads_aborted:", source)
         self.assertNotIn("deleteDevice", LEGACY_OPERATOR_HANDLER_ALLOWLIST)
-        self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 57)
-        self.assertEqual(sum(cutover["legacy_source_callsite_ceilings"].values()), 75)
-        self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 75)
+        self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 47)
+        self.assertEqual(sum(cutover["legacy_source_callsite_ceilings"].values()), 65)
+        self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 65)
         self.assertFalse(foundation["deployment_ready"])
         self.assertIn(
             "engineering_device_deletion_lifecycle_not_ready",

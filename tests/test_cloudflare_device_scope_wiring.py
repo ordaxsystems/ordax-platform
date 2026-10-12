@@ -95,16 +95,14 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
         )
         self.assertIn("projectBindingMatchesScope", self.worker)
 
-    def test_device_scope_rejects_legacy_project_bound_grant(self) -> None:
-        self.assertIn("DEVICE_SCOPED_ACTIONS.has(context.action)", self.worker)
-        self.assertRegex(
-            self.worker,
-            r"DEVICE_SCOPED_ACTIONS\.has\(context\.action\)[\s\S]{0,260}projects\.length\s*!==\s*0",
+    def test_device_scope_uses_distinct_product_postgres_grants(self) -> None:
+        canonical = (ROOT / "control-plane/cloudflare/src/product_relay_scope.ts").read_text(
+            encoding="utf-8"
         )
-        self.assertRegex(
-            self.worker,
-            r"DEVICE_SCOPED_ACTIONS\.has\(context\.action\)[\s\S]{0,260}context\.project\s*!==\s*null",
-        )
+        self.assertIn("selectCanonicalRelayDeviceScope", canonical)
+        self.assertIn("selectCanonicalRelayProjectScope", canonical)
+        self.assertIn("group.space_id !== null", canonical)
+        self.assertIn("group.project_id !== null", canonical)
 
     def test_owner_grant_stays_server_derived(self) -> None:
         self.assertIn("authenticateProductRequest(request, env)", self.owner_grants)

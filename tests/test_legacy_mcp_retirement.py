@@ -25,7 +25,7 @@ class RetiredLegacyMcp(unittest.TestCase):
         self.assertNotIn('async function createProductAction(',LEGACY)
         self.assertNotIn('return createProductAction(',LEGACY)
         self.assertIn('error: "legacy_product_action_retired"',LEGACY)
-        self.assertEqual(D1_MAP['legacy_source_callsite_ceilings']['index.ts'],57)
+        self.assertEqual(D1_MAP['legacy_source_callsite_ceilings']['index.ts'],47)
 
     def test_new_source_is_disjoint_and_denies_mutation(self):
         self.assertNotIn('src/index.ts',NEW)

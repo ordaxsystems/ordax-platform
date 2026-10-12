@@ -87,13 +87,20 @@ class DeviceTransportContractTests(unittest.TestCase):
             / "0005_product_grants_audit.sql"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('"product_grant_store_v1"', worker)
-        self.assertIn('"product_grant_resolution_v1"', worker)
-        self.assertIn("createProductGrant", worker)
-        self.assertIn("resolveProductGrantForContext", worker)
-        self.assertIn("resolveProductGrantAdmin", worker)
-        self.assertIn("listProductGrants", worker)
-        self.assertIn("revokeProductGrant", worker)
+        # The historical D1 migrations stay as evidence, but the old
+        # runtime must neither advertise nor execute D1 Product grant CRUD.
+        self.assertNotIn('"product_grant_store_v1"', worker)
+        self.assertNotIn('"product_grant_resolution_v1"', worker)
+        for obsolete in (
+            "async function createProductGrant(",
+            "async function createProductGrantFromLink(",
+            "async function resolveProductGrantForContext(",
+            "async function resolveProductGrantAdmin(",
+            "async function listProductGrants(",
+            "async function revokeProductGrant(",
+            "async function recordProductAudit(",
+        ):
+            self.assertNotIn(obsolete, worker)
         product_block = worker.split(
             "const PRODUCT_READ_ONLY_ACTIONS = new Set([", 1
         )[1].split("]);", 1)[0]
@@ -150,13 +157,11 @@ class DeviceTransportContractTests(unittest.TestCase):
         self.assertIn("CREATE TABLE IF NOT EXISTS ordax_product_audit", migration)
         self.assertIn("revoked_at TEXT", migration)
         self.assertIn("payload_fields_json TEXT", migration)
-        self.assertIn("/v3/product-grants/resolve", worker)
+        self.assertIn('url.pathname === "/v3/product-grants/resolve"', worker)
+        self.assertIn('error: "legacy_product_grants_retired"', worker)
         self.assertNotIn("/v3/product-execute", worker)
         self.assertNotIn("/v3/product-actions", worker)
-        revocation = worker.split("async function revokeProductGrant(", 1)[1].split(
-            "async function", 1)[0]
-        self.assertIn("operatorAuthorized(request, env)", revocation)
-        self.assertIn("UPDATE ordax_product_grants SET revoked_at", revocation)
+        self.assertNotIn("UPDATE ordax_product_grants SET revoked_at", worker)
 
 
     def test_product_project_scope_distinguishes_global_project_creation(self) -> None:
