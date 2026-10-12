@@ -89,3 +89,49 @@ export function projectBindingMatchesScope(
   const scope = productActionScope(action, projectScopedActions);
   return scope === "device" ? project === null : project !== null;
 }
+
+/** MCP authorization profile hints; not grant writers or an authorization authority. */
+export const INTERACTIVE_COMPUTER_CONTROL_MODE = "interactive-computer-control";
+export const FILESYSTEM_COMPUTER_CONTROL_MODE = "computer-filesystem";
+export const CLIPBOARD_COMPUTER_CONTROL_MODE = "computer-clipboard";
+export const PROCESS_COMPUTER_CONTROL_MODE = "computer-process-control";
+const MAX_BODY_BYTES = 16 * 1024;
+
+export const OWNER_DEVICE_COMPUTER_GRANT_PROFILES: Readonly<Record<string, readonly string[]>> = {
+  [INTERACTIVE_COMPUTER_CONTROL_MODE]: [
+    "computer.access_status",
+    "computer.active_window",
+    "computer.click",
+    "computer.drag",
+    "computer.focus_window",
+    "computer.hotkey",
+    "computer.launch_app",
+    "computer.mouse_move",
+    "computer.processes",
+    "computer.screen_info",
+    "computer.screenshot",
+    "computer.scroll",
+    "computer.type",
+    "computer.windows",
+  ],
+  [FILESYSTEM_COMPUTER_CONTROL_MODE]: [
+    "computer.access_status",
+    "computer.directory_create",
+    "computer.directory_list",
+    "computer.file_stat",
+    "computer.path_move",
+    "computer.path_remove",
+    "computer.search",
+    "computer.text_patch",
+    "computer.text_read",
+    "computer.text_write",
+  ],
+  [CLIPBOARD_COMPUTER_CONTROL_MODE]: [
+    "computer.clipboard_read",
+    "computer.clipboard_write",
+  ],
+  [PROCESS_COMPUTER_CONTROL_MODE]: [
+    "computer.processes",
+    "computer.terminate_process",
+  ],
+};

@@ -1,4 +1,4 @@
-import { OWNER_DEVICE_COMPUTER_GRANT_PROFILES } from "./product_device_grants.ts";
+import { OWNER_DEVICE_COMPUTER_GRANT_PROFILES } from "./product_action_scope.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 
