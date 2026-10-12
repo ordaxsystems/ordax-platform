@@ -2,6 +2,10 @@ name: ORDAX Relay Container Isolation
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - control-plane/labs/relay/network/**
+      - .github/workflows/relay-container-isolation.yml
   push:
     branches: [main]
     paths:
@@ -54,3 +58,8 @@ jobs:
           grep -q 'RELAY_ISOLATED_CONTAINER=spoke-1 PASS' "$RUNNER_TEMP/spoke1.log"
           grep -q 'RELAY_ISOLATED_CONTAINER=spoke-2 PASS' "$RUNNER_TEMP/spoke2.log"
           grep -q 'RELAY_ISOLATED_CONTAINER=spoke-3 PASS' "$RUNNER_TEMP/spoke3.log"
+          for n in 1 2 3; do
+            grep -q "EMULATED_PC_IDENTITY=spoke-$n FOREIGN_TOKENS_DENIED=2 REPLAY_EXACT=PASS REPLAY_CONFLICT=DENIED SHARED_REQUEST_UUID=ISOLATED" "$RUNNER_TEMP/spoke$n.log"
+          done
+          echo "RELAY_EMULATED_PCS=3 INTERNAL_NETWORKS=3 CROSS_IDENTITY_MATRIX=6/6" >> "$GITHUB_STEP_SUMMARY"
+          echo "One GitHub Actions host; three Docker-isolated clients, not three physical PCs or complete OS VMs." >> "$GITHUB_STEP_SUMMARY"
