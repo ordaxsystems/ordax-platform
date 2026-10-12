@@ -9,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "control-plane" / "cloudflare" / "src" / "index.ts"
 MCP = ROOT / "control-plane" / "cloudflare" / "src" / "mcp_http.ts"
 SCOPE = ROOT / "control-plane" / "cloudflare" / "src" / "product_action_scope.ts"
-OWNER_GRANTS = ROOT / "control-plane" / "cloudflare" / "src" / "product_device_grants.ts"
 
 
 def _quoted_actions(text: str) -> set[str]:
@@ -27,7 +26,6 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
         cls.worker = WORKER.read_text(encoding="utf-8")
         cls.mcp = MCP.read_text(encoding="utf-8")
         cls.scope = SCOPE.read_text(encoding="utf-8")
-        cls.owner_grants = OWNER_GRANTS.read_text(encoding="utf-8")
         cls.computer_device_actions = _quoted_actions(
             _set_body(cls.scope, "export const COMPUTER_DEVICE_ACTIONS = new Set<string>([")
         )
@@ -103,13 +101,9 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
         self.assertIn("group.space_id !== null", canonical)
         self.assertIn("group.project_id !== null", canonical)
 
-    def test_owner_grant_stays_server_derived(self) -> None:
-        self.assertIn("authenticateProductRequest(request, env)", self.owner_grants)
-        self.assertIn("linkedDeviceForOwner(env, identity.subjectId, linkId)", self.owner_grants)
-        self.assertNotIn("body.subject_id", self.owner_grants)
-        self.assertNotIn("body.device_id", self.owner_grants)
-        self.assertNotIn("body.actions", self.owner_grants)
-        self.assertNotIn("body.projects", self.owner_grants)
+    def test_legacy_d1_owner_grant_module_is_unmounted(self) -> None:
+        self.assertNotIn('from "./product_device_grants"', self.worker)
+        self.assertIn('error: "legacy_product_grants_retired"', self.worker)
 
 
 if __name__ == "__main__":
