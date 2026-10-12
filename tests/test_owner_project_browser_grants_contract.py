@@ -79,10 +79,14 @@ class OwnerProjectBrowserGrantContractTests(unittest.TestCase):
         ):
             self.assertNotIn(name, self.mcp)
 
-    def test_browser_actions_remain_project_scoped_in_product_resolution(self) -> None:
-        self.assertIn("...PROJECT_BROWSER_ACTIONS", self.worker)
-        self.assertIn("projectBindingMatchesScope", self.worker)
-        self.assertIn("context.project === null || !projects.includes(context.project)", self.worker)
+    def test_browser_project_grants_remain_explicitly_scoped(self) -> None:
+        canonical = (ROOT / "control-plane/cloudflare/src/product_relay_scope.ts").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("selectCanonicalRelayProjectScope", canonical)
+        self.assertIn("isCanonicalUuid(group.project_id)", canonical)
+        self.assertIn("isCanonicalUuid(group.space_id)", canonical)
+        self.assertNotIn("async function createProductGrant(", self.worker)
 
     def test_revoke_cannot_touch_unrecognized_project_grants(self) -> None:
         self.assertIn("rowIsOwnerProjectGrant(row)", self.handler)
