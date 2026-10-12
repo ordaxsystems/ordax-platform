@@ -61,14 +61,13 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
         overlap = sorted(self.device_actions & project_actions)
         self.assertEqual(overlap, [], f"device actions still project-scoped: {overlap}")
 
-    def test_owner_device_grant_handlers_are_routed_but_not_exposed_to_mcp(self) -> None:
-        self.assertIn('from "./product_device_grants"', self.worker)
-        self.assertIn("createOwnerDeviceComputerGrant(request, env)", self.worker)
-        self.assertIn("listOwnerDeviceComputerGrants(request, env)", self.worker)
-        self.assertIn("revokeOwnerDeviceComputerGrant(request, env", self.worker)
-        self.assertNotIn("createOwnerDeviceComputerGrant", self.mcp)
-        self.assertNotIn("listOwnerDeviceComputerGrants", self.mcp)
-        self.assertNotIn("revokeOwnerDeviceComputerGrant", self.mcp)
+    def test_legacy_owner_device_grants_are_retired_not_exposed_to_mcp(self) -> None:
+        self.assertNotIn('from "./product_device_grants"', self.worker)
+        for handler in ("createOwnerDeviceComputerGrant", "listOwnerDeviceComputerGrants", "revokeOwnerDeviceComputerGrant"):
+            self.assertNotIn(handler, self.worker)
+            self.assertNotIn(handler, self.mcp)
+        self.assertIn('"/v3/product/device-computer-grants"', self.worker)
+        self.assertIn('error: "legacy_product_grants_retired"', self.worker)
 
     def test_cloudflare_mcp_device_actions_do_not_require_project(self) -> None:
         for action in sorted(self.device_actions):
