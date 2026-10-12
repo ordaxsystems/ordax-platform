@@ -36,7 +36,6 @@
     {
       "id": "product_pairing_and_links",
       "legacy_tables": [
-        "ordax_product_device_pairings",
         "ordax_product_device_links"
       ],
       "target_authority": "postgresql",
@@ -47,6 +46,9 @@
         "private.ordax_product_device_credentials",
         "public.ordax_space_devices",
         "public.ordax_device_project_bindings"
+      ],
+      "retired_tables": [
+        "ordax_product_device_pairings"
       ]
     },
     {
@@ -96,6 +98,6 @@
   ],
   "source_root": "control-plane/cloudflare/src",
   "legacy_source_callsite_ceilings": {
-    "index.ts": 47
+    "index.ts": 37
   }
 }
