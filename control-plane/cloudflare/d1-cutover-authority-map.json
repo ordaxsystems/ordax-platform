@@ -11,10 +11,7 @@
   "domains": [
     {
       "id": "product_remote_authority",
-      "legacy_tables": [
-        "ordax_product_grants",
-        "ordax_product_action_requests"
-      ],
+      "legacy_tables": [],
       "target_authority": "postgresql",
       "authority_state": "partial",
       "cutover_strategy": "replace_d1_calls_with_hyperdrive_rpc_boundary",
@@ -30,14 +27,14 @@
         "product_mcp_consumers_and_route_contracts_not_cut_over"
       ],
       "retired_tables": [
-        "ordax_product_audit"
+        "ordax_product_audit",
+        "ordax_product_grants",
+        "ordax_product_action_requests"
       ]
     },
     {
       "id": "product_pairing_and_links",
-      "legacy_tables": [
-        "ordax_product_device_links"
-      ],
+      "legacy_tables": [],
       "target_authority": "postgresql",
       "authority_state": "redesign_required",
       "cutover_strategy": "retire_legacy_pairing_link_model_and_reuse_canonical_product_identity_bindings",
@@ -48,7 +45,8 @@
         "public.ordax_device_project_bindings"
       ],
       "retired_tables": [
-        "ordax_product_device_pairings"
+        "ordax_product_device_pairings",
+        "ordax_product_device_links"
       ]
     },
     {
@@ -98,6 +96,6 @@
   ],
   "source_root": "control-plane/cloudflare/src",
   "legacy_source_callsite_ceilings": {
-    "index.ts": 37
+    "index.ts": 35
   }
 }
