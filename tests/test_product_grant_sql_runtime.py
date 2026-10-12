@@ -32,7 +32,7 @@ class ProductCanonicalGrantContract(unittest.TestCase):
             "and g.client_id = p_client_id",
             "and g.space_id is not distinct from p_space_id",
             "and g.device_id = p_device_id",
-            "and g.owner_user_id = p_owner_user_id",
+            "g.owner_user_id = p_owner_user_id",
             "and g.client_kind = p_client_kind",
             "and g.access_mode = p_access_mode",
         ):
