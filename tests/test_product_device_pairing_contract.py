@@ -3,45 +3,29 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+WORKER = ROOT / "control-plane/cloudflare/src/index.ts"
+HISTORICAL_MIGRATION = ROOT / "control-plane/cloudflare/migrations/0007_product_device_pairing.sql"
 
-class ProductDevicePairingContractTests(unittest.TestCase):
-    def setUp(self):
-        root = Path(__file__).resolve().parents[1]
-        self.worker = (
-            root / "control-plane" / "cloudflare" / "src" / "index.ts"
-        ).read_text(encoding="utf-8")
-        self.migration = (
-            root / "control-plane" / "cloudflare" / "migrations" / "0007_product_device_pairing.sql"
-        ).read_text(encoding="utf-8")
+class ProductDevicePairingRetirementTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.worker = WORKER.read_text(encoding="utf-8")
 
-    def test_pairing_is_device_initiated_and_product_claimed(self):
+    def test_old_device_pairing_and_owner_links_are_retired(self):
         self.assertIn('"/v3/device/product-pairings"', self.worker)
-        self.assertIn("authenticateDevice(env, deviceId, token)", self.worker)
         self.assertIn('"/v3/product/device-links"', self.worker)
-        self.assertIn("authenticateProductRequest(request, env)", self.worker)
-        self.assertIn("10 * 60 * 1000", self.worker)
-        self.assertIn("randomHex(32)", self.worker)
+        self.assertIn('error: "legacy_product_pairing_retired"', self.worker)
+        for handler in ("createProductDevicePairing", "claimProductDevicePairing",
+                        "listProductDeviceLinks", "revokeProductDeviceLink"):
+            self.assertNotIn(handler, self.worker)
 
-    def test_pairing_persistence_is_separate_from_grants(self):
-        self.assertIn("ordax_product_device_pairings", self.migration)
-        self.assertIn("ordax_product_device_links", self.migration)
-        self.assertIn("secret_sha256", self.migration)
-        self.assertNotIn("ordax_product_grants", self.migration)
-
-    def test_claim_does_not_create_product_grant(self):
-        start = self.worker.index("async function claimProductDevicePairing")
-        end = self.worker.index("async function listProductDeviceLinks", start)
-        claim_body = self.worker[start:end]
-        self.assertIn("ordax_product_device_links", claim_body)
-        self.assertNotIn("ordax_product_grants", claim_body)
-
-    def test_pairing_secret_is_one_time_server_side(self):
-        start = self.worker.index("async function claimProductDevicePairing")
-        end = self.worker.index("async function listProductDeviceLinks", start)
-        claim_body = self.worker[start:end]
-        self.assertIn("product_pairing_already_claimed", claim_body)
-        self.assertIn("replayed: true", claim_body)
-
+    def test_historical_schema_is_preserved_for_migration_evidence(self):
+        migration = HISTORICAL_MIGRATION.read_text(encoding="utf-8")
+        self.assertIn("ordax_product_device_pairings", migration)
+        self.assertIn("ordax_product_device_links", migration)
+        self.assertIn("secret_sha256", migration)
+        self.assertNotIn("ordax_product_grants", migration)
 
 if __name__ == "__main__":
     unittest.main()
