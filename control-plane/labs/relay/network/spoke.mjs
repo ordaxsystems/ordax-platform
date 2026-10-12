@@ -36,7 +36,9 @@ for(const peer of [1,2,3].filter(n=>String(n)!==ownSentinel)){
   try{await lookup('sentinel'+peer);dnsVisible=true;}catch{}
   if(dnsVisible) throw Error('PEER_DISCOVERY_VISIBLE');
 }
-const requestId=randomUUID();
+// Same request UUID on three distinct simulated PCs must be namespaced by
+// the authenticated device, never globally reused or sent to another spoke.
+const requestId='11111111-1111-4111-8111-111111111111';
 const response=await fetch('http://hub:8900/v1/infer',{
   method:'POST',headers:{
     'content-type':'application/json','authorization':'Bearer '+token,
@@ -51,19 +53,40 @@ if(response.status!==200 || data.ok!==true || data.request_id!==requestId
 for(const peer of [1,2,3].filter(n=>'spoke-'+n!==id)){
   if(data.result.includes('spoke-'+peer)) throw Error('PEER_CONTENT_LEAK');
 }
-// A real network-level attempt to impersonate the other spoke must not
-// reach the adapter even though all three clients talk to the same hub.
-const foreign='spoke-'+([1,2,3].find(n=>'spoke-'+n!==id));
-const impersonated=await fetch('http://hub:8900/v1/infer',{
+// Both foreign identities must reject this credential. This exercises six
+// impossible client→peer pairings across three independently networked PCs.
+for (const n of [1,2,3].filter(n=>'spoke-'+n!==id)) {
+  const foreign='spoke-'+n;
+  const impersonated=await fetch('http://hub:8900/v1/infer',{
+    method:'POST',headers:{
+      'content-type':'application/json','authorization':'Bearer '+token,
+      'x-ordax-lab-device-id':foreign,
+    },
+    body:JSON.stringify({request_id:randomUUID(),prompt:'tentar agir por outro pc'}),
+    signal:AbortSignal.timeout(8000),
+  });
+  if(impersonated.status!==401) throw Error('OTHER_DEVICE_IMPERSONATION_ACCEPTED');
+  if(JSON.stringify(await impersonated.json()).includes('isolated:')) throw Error('OTHER_DEVICE_RESULT_EXPOSED');
+}
+
+// Replay is scoped to authenticated device+request ID, never request ID
+// alone. A conflicting payload fails 409 without rewriting the receipt.
+const retry=async prompt=>fetch('http://hub:8900/v1/infer',{
   method:'POST',headers:{
     'content-type':'application/json','authorization':'Bearer '+token,
-    'x-ordax-lab-device-id':foreign,
+    'x-ordax-lab-device-id':id,
   },
-  body:JSON.stringify({request_id:randomUUID(),prompt:'tentar agir por outro pc'}),
+  body:JSON.stringify({request_id:requestId,prompt}),
   signal:AbortSignal.timeout(8000),
 });
-if(impersonated.status!==401) throw Error('OTHER_DEVICE_IMPERSONATION_ACCEPTED');
-if(JSON.stringify(await impersonated.json()).includes('isolated:')) throw Error('OTHER_DEVICE_RESULT_EXPOSED');
+const repeated=await retry('analise a pasta 1');
+if(repeated.status!==200) throw Error('EMULATED_PC_REPLAY_FAILED');
+const replayResult=await repeated.json();
+if(replayResult.replayed!==true || replayResult.result!=='isolated:'+id+':analise a pasta 1')
+  throw Error('CROSS_PC_REPLAY_LEAK');
+const conflicting=await retry('mudar conteudo apos o primeiro envio');
+if(conflicting.status!==409) throw Error('EMULATED_PC_REPLAY_CONFLICT_ALLOWED');
+if((await conflicting.json()).error!=='request_conflict') throw Error('REPLAY_CONFLICT_NOT_RECORDED');
 
 // Three independent conversation-like turns per spoke, interleaved across the
 // three real container clients. This proves receipt routing, NOT GPT memory.
@@ -95,3 +118,4 @@ const discovery=await fetch('http://hub:8900/v1/devices',{
 });
 if(discovery.status!==404) throw Error('DEVICE_DISCOVERY_AVAILABLE');
 console.log('RELAY_ISOLATED_CONTAINER='+id+' PASS');
+console.log('EMULATED_PC_IDENTITY='+id+' FOREIGN_TOKENS_DENIED=2 REPLAY_EXACT=PASS REPLAY_CONFLICT=DENIED SHARED_REQUEST_UUID=ISOLATED');
