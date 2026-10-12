@@ -96,6 +96,6 @@
   ],
   "source_root": "control-plane/cloudflare/src",
   "legacy_source_callsite_ceilings": {
-    "index.ts": 47
+    "index.ts": 37
   }
 }
