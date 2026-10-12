@@ -4,6 +4,7 @@ import { webcrypto } from "node:crypto";
 import {
   authenticateProductMcpClientRequest,
   authenticateProductRequest,
+  productOwnerAccountSession,
 } from "../cloudflare/src/product_auth.ts";
 
 const issuer = "https://canonical-project.supabase.co/auth/v1";
@@ -149,6 +150,33 @@ test("invalid issuer/audience and unauthenticated token still fail at JWT bounda
       const result = await authenticateProductMcpClientRequest(request(await signedJwt(key, claims)), config);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.status, 401);
+    }
+  });
+});
+
+test("owner account JWT without OAuth client authenticates session but cannot access MCP", async () => {
+  await verifyWithMockIssuer(async key => {
+    const token = await signedJwt(key, { ...baseClaims(), client_id: undefined });
+    const owner = await productOwnerAccountSession(request(token), config);
+    const body = await owner.json();
+    assert.equal(owner.status, 200);
+    assert.equal(body.session.subject_id, subjectId);
+    assert.equal(body.session.client_id, undefined);
+    assert.equal(owner.headers.get("cache-control"), "no-store");
+    const mcp = await authenticateProductMcpClientRequest(request(token), config);
+    assert.deepEqual(mcp, { ok: false, error: "product_mcp_oauth_client_required", status: 403 });
+  });
+});
+
+test("owner session refuses non-owner role and unverifiable subject", async () => {
+  await verifyWithMockIssuer(async key => {
+    for (const claims of [
+      { ...baseClaims(), role: "anon", client_id: undefined },
+      { ...baseClaims(), sub: "legacy-identifier", client_id: undefined },
+    ]) {
+      const res = await productOwnerAccountSession(request(await signedJwt(key, claims)), config);
+      assert.equal(res.status, 403);
+      assert.equal((await res.json()).error, "product_owner_identity_invalid");
     }
   });
 });

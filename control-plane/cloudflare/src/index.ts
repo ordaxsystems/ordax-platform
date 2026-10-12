@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   authenticateProductRequest,
+  productOwnerAccountSession,
   productAuthConfigured,
   type ProductAuthEnv,
 } from "./product_auth";
@@ -1394,9 +1395,8 @@ export default {
       return json({ ok: false, error: "legacy_mcp_retired" }, 410);
     }
     if (request.method === "GET" && url.pathname === "/v3/product/session") {
-      // One signed OAuth-client identity for session, targets and action status.
-      // User-only JWTs cannot inherit a Product MCP client's authority.
-      return createCanonicalProductMcpReadHandlers(env).session(request);
+      // Owner/account session is distinct from MCP delegated-client permission.
+      return productOwnerAccountSession(request, env);
     }
     // Deprecated D1-owned grants cannot mint, read or revoke Product authorization.
     // Canonical grants are administered exclusively by PostgreSQL Product authority.
