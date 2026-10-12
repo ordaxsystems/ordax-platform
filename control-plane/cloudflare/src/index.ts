@@ -56,8 +56,6 @@ const MULTIPART_MAX_PARTS = 10_000;
 const CONTROL_PLANE_CAPABILITIES = [
   "artifact_multipart_v1",
   "terminal_report_recovery_v1",
-  "product_grant_store_v1",
-  "product_grant_resolution_v1",
   "product_subject_auth_jwks_v1",
   "product_readonly_actions_v1",
   "product_typed_actions_v2",
