@@ -20,7 +20,7 @@ class OrdaxChatGptConnectorPackageTests(unittest.TestCase):
         self.assertEqual(manifest["repository"], "https://github.com/ordaxsystems/ordax-platform")
         self.assertEqual(
             manifest["extensions"]["com.openai"]["interface"]["displayName"],
-            "ORDAX for ChatGPT",
+            "ORDAX Studio",
         )
         interface = manifest["extensions"]["com.openai"]["interface"]
         self.assertIn("Computer Control", interface["capabilities"])

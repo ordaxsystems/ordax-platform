@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ordax-chatgpt",
-  "version": "0.4.6",
+  "version": "0.4.8",
   "description": "Connect ChatGPT to an authorized ORDAX device for grant-scoped projects, typed Computer Control, files, Git and specialized adapters.",
   "author": {
     "name": "ORDAX",
@@ -23,8 +23,8 @@
   "extensions": {
     "com.openai": {
       "interface": {
-        "displayName": "ORDAX for ChatGPT",
-        "shortDescription": "Use ORDAX from ChatGPT",
+        "displayName": "ORDAX Studio",
+        "shortDescription": "Projects and computer tools",
         "longDescription": "Connect ChatGPT to the ORDAX device you explicitly authorize. This ChatGPT connector exposes grant-scoped typed tools for screens and windows, desktop interaction, applications, processes, computer files and Git, managed browser tooling, and durable project continuity. Owners may optionally authorize the full Computer Control profile from ORDAX Studio; that profile still requires Full Access to be enabled locally on the device and remains bounded by Windows/UAC. Blender and Unity are specialized project adapters. The connector does not own ORDAX Studio or the Runtime, cannot mint its own grants, and cannot silently bypass local permissions.",
         "developerName": "ORDAX",
         "category": "Developer Tools",
@@ -120,17 +120,17 @@
               "prompt": "Terminate the Notepad process."
             },
             {
-              "description": "Do not select ORDAX for ChatGPT for unrelated financial actions.",
+              "description": "Do not select ORDAX Studio for unrelated financial actions.",
               "prompt": "Transfer $100 to another bank account for me."
             }
           ]
         },
         "commerce": false,
-        "commerce_description": "ORDAX for ChatGPT does not sell products or process payments."
+        "commerce_description": "ORDAX Studio does not sell products or process payments."
       },
       "publication": {
         "countries": [],
-        "release_notes": "Aligns the isolated ChatGPT connector review write scenario with the Device Agent's approved project documentation paths. No grant, OAuth, or MCP endpoint changes.",
+        "release_notes": "Delivers bounded authorized screenshot and artifact pixels as MCP images, supports native OAuth reconnection, preserves queued action identifiers and reports Runtime failures accurately. Requires the corresponding Runtime screenshot transport update for desktop pixels. No grant or local access policy changes.",
         "translations": {
           "pt-BR": {
             "subtitle": "Use o ORDAX no ChatGPT",

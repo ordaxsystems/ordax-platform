@@ -1,6 +1,8 @@
-# ORDAX for ChatGPT — OpenAI plugin review runbook
+# ORDAX Studio — OpenAI plugin review runbook
 
-Status: pre-submission checklist for **ORDAX for ChatGPT**. The release version is owned by `plugins/ordax-chatgpt/plugin.json`.
+Branding update 2026-10-09: the display name is now **ORDAX Studio**. The package ID remains `ordax-chatgpt`; source version 0.4.8 is a local candidate, not proof of publication or an installed account update. Existing custom MCP registrations must update their display name separately.
+
+Status: pre-submission checklist for **ORDAX Studio**. The release version is owned by `plugins/ordax-chatgpt/plugin.json`.
 
 `ORDAX Studio` is the application name. This runbook covers only the ChatGPT connector and must not use the Studio name as the connector/product identity.
 
@@ -12,7 +14,7 @@ Canonical flow:
 
 ```text
 ChatGPT
-  -> ORDAX for ChatGPT
+  -> ORDAX Studio
   -> OAuth + Cloudflare remote MCP
   -> device/scope/action grant enforcement
   -> ORDAX Runtime on the connected PC
@@ -121,7 +123,7 @@ Se `projects.list` confirmar o registro, mas `available: false`, interrompa a re
 
 ## Positive review prompts
 
-Record and test these in a fresh ChatGPT conversation with only **ORDAX for ChatGPT** enabled for the scenario:
+Record and test these in a fresh ChatGPT conversation with only **ORDAX Studio** enabled for the scenario:
 
 1. `Show the projects available on my connected ORDAX computer.`
    - Expected tools: `ordax_targets`, `projects_list`.
@@ -171,7 +173,7 @@ Demonstrate at least the following fail-closed cases:
    - Expected: denied because `computer.terminate_process` is not in the review grant.
 
 6. `Transfer $100 to another bank account for me.`
-   - Expected: ORDAX for ChatGPT is not selected as a relevant capability.
+   - Expected: ORDAX Studio is not selected as a relevant capability.
 
 ## Demo recording
 
@@ -179,7 +181,7 @@ The recording submitted for review should show, in one continuous sequence where
 
 1. ORDAX Runtime online on the review PC and the local app allowlist containing only `notepad.exe`;
 2. a fresh ChatGPT conversation;
-3. connecting/authenticating **ORDAX for ChatGPT** with the dedicated review account;
+3. connecting/authenticating **ORDAX Studio** with the dedicated review account;
 4. screen/window inspection and a screenshot;
 5. safe allowlisted app launch + focus + bounded click/type input;
 6. bounded process listing;

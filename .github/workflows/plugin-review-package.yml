@@ -1,4 +1,4 @@
-name: ORDAX for ChatGPT Review Package
+name: ORDAX Studio Review Package
 
 on:
   workflow_dispatch:
@@ -48,7 +48,7 @@ jobs:
           python scripts/build_ordax_plugin.py --output-dir dist/plugins
           zip_path="$(find dist/plugins -maxdepth 1 -type f -name 'ordax-chatgpt-plugin-*.zip' -print)"
           count="$(printf '%s\n' "$zip_path" | sed '/^$/d' | wc -l)"
-          test "$count" -eq 1 || { echo "Expected exactly one ORDAX for ChatGPT connector ZIP, got $count"; exit 1; }
+          test "$count" -eq 1 || { echo "Expected exactly one ORDAX Studio connector ZIP, got $count"; exit 1; }
           test -f "${zip_path}.sha256"
           (
             cd dist/plugins
@@ -80,7 +80,7 @@ jobs:
               .get("interface", {})
               .get("displayName")
           )
-          if display_name != "ORDAX for ChatGPT":
+          if display_name != "ORDAX Studio":
               raise SystemExit("ChatGPT connector display name mismatch")
           servers = mcp.get("mcpServers")
           ordax = servers.get("ordax") if isinstance(servers, dict) else None
