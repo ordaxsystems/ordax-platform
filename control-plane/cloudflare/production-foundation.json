@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 18,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -113,6 +113,34 @@
       "direct_table_mutation": false
     }
   },
+  "connection_modes": {
+    "direct_user_chatgpt_mcp": {
+      "conversation_owner": "user_chatgpt_account",
+      "model_relay": false,
+      "mcp_contract": "ordax",
+      "windows_delivery": "studio_plus_runtime",
+      "ordax_os_delivery": "native_runtime",
+      "current_validation_endpoint": "https://mcp.ordax.com.br/mcp",
+      "device_tunnel_transport": "allowed_future_direct_transport",
+      "central_ai_relay_required": false
+    },
+    "central_ai_relay": {
+      "conversation_owner": "ordax_central",
+      "model_relay": true,
+      "mcp_contract_reuse": true,
+      "multi_client_correlation_required": true,
+      "required_correlation": [
+        "user_id",
+        "device_id",
+        "session_id",
+        "conversation_id",
+        "request_id"
+      ],
+      "client_transport": "outbound_https_or_websocket",
+      "central_tunnel": "optional_when_central_host_is_private",
+      "status": "planned_separate_conversation_path"
+    }
+  },
   "mcp_release": {
     "worker_name": "ordax-mcp",
     "hostname": "mcp.ordax.com.br",
@@ -126,6 +154,8 @@
     "workers_dev": false,
     "deployment_ready": false,
     "supports_remote_actions": false,
+    "conversation_topology": "user_chatgpt_direct",
+    "model_relay": false,
     "readiness_blockers": [
       "chatgpt_oauth_client_consent_not_verified",
       "product_device_enrollment_and_grants_missing",
