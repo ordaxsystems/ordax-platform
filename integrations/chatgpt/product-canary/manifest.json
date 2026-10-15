@@ -6,7 +6,7 @@
   "display_name": "OrdaX Product — Validação OAuth",
   "description": "Pacote privado para validar OAuth do ChatGPT contra o MCP canônico OrdaX Product, somente leitura.",
   "short_description": "Validação OAuth do MCP OrdaX.",
-  "long_description": "Pacote privado de validação do OAuth do ChatGPT contra o mesmo endpoint canônico de produção do OrdaX Product. Usa OAuth da conta oficial, PostgreSQL via Hyperdrive e apenas as ferramentas de leitura de sessão, perfil, dispositivos autorizados e estado de ações anteriores. Não publica Worker alternativo, não usa workers.dev, não fornece acesso ao computador, execução de comandos, inferência por IA, transferência de arquivos nem Relay multiusuário. Não substitui o conector ORDAX Studio de produção.",
+  "long_description": "Pacote privado de validação do OAuth do ChatGPT contra o mesmo endpoint canônico de produção do OrdaX Product. Usa OAuth da conta oficial, PostgreSQL via Hyperdrive e apenas as ferramentas de leitura de sessão, perfil, dispositivos autorizados e estado de ações anteriores. Não publica Worker alternativo, não fornece acesso ao computador, execução de comandos, inferência por IA, transferência de arquivos nem Relay multiusuário. Não substitui o conector ORDAX Studio de produção.",
   "worker_role": "read-only-canary",
   "allowed_tools": [
     "ordax_session",
