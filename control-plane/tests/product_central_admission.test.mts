@@ -30,6 +30,7 @@ function fixture(){
     grant_groups:[{space_id:b.spaceId,project_id:b.projectId,valid_until:mode==="expired"?"2020-01-01T00:00:00Z":null,
       capabilities:[{capability:"workspace.text_read",access_mode:"read"}]}]});
   const deps={
+    ensureDiscovery:async()=>({ok:true,devices_granted:1}),
     listTargets:async(_env:unknown,clientInfo:{clientId:string})=>{
       calls.push({kind:"catalog",clientId:clientInfo.clientId});
       const b=rows.get(clientInfo.clientId);
