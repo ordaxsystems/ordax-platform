@@ -16,6 +16,10 @@ import {
   openCentralSessionFromMcp,
   PRODUCT_DEVICE_CENTRAL_SESSION_PATH,
 } from "./product_central_device_session.ts";
+import {
+  handleProductDeviceSetup,
+  PRODUCT_DEVICE_SETUP_PATH,
+} from "./product_device_setup.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
@@ -90,6 +94,9 @@ export function createCanonicalProductMcpGateway(
     if (request.method === "GET" && metadata) {
       if (!productAuthConfigured(env)) return respond({ ok: false, error: "product_auth_unconfigured" }, 503);
       return respond(resourceMetadata(url.origin, String(env.PRODUCT_AUTH_ISSUER)));
+    }
+    if (url.pathname === PRODUCT_DEVICE_SETUP_PATH) {
+      return handleProductDeviceSetup(request, env);
     }
     if (url.pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH) {
       return handleProductDeviceCentralSession(request, env);
