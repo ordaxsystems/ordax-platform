@@ -1,10 +1,15 @@
 /**
  * Product MCP over the canonical PostgreSQL authority.
  *
- * Staging entrypoint for #42; OAuth discovery must be proven before activation.
+ * This is the direct-user ChatGPT MCP path. It may coordinate OAuth, device
+ * identity, grants and short-lived session attestation, but it MUST NOT relay
+ * the user's prompt to a model provider. Historical `product_central_*` names
+ * in this entrypoint refer to session/attestation machinery, not to the OrdaX
+ * Central multi-client inference relay.
+ *
  * Never imports the legacy D1 Worker and never makes model arguments an
- * authorization source. Device-attested Central session bootstrap is allowed,
- * but remote action dispatch remains blocked until that bootstrap is proven E2E.
+ * authorization source. Device-attested session bootstrap is allowed, but
+ * remote action dispatch remains blocked until that bootstrap is proven E2E.
  */
 import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
@@ -72,6 +77,8 @@ export function createCanonicalProductMcpGateway(
       return respond({
         ok: true, service: "ordax-platform-mcp",
         mode: "read-only-canary",
+        conversation_topology: "user_chatgpt_direct",
+        model_relay: false,
         auth_configured: productAuthConfigured(env),
         postgres_configured: productPostgresConfigured(env),
         supports_remote_actions: false,
@@ -79,13 +86,19 @@ export function createCanonicalProductMcpGateway(
     }
     if (request.method === "GET" && url.pathname === "/ready") {
       if (!productAuthConfigured(env) || !productPostgresConfigured(env)) {
-        return respond({ ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
-          supports_remote_actions: false, error: "platform_mcp_unconfigured" }, 503);
+        return respond({
+          ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
+          conversation_topology: "user_chatgpt_direct", model_relay: false,
+          supports_remote_actions: false, error: "platform_mcp_unconfigured",
+        }, 503);
       }
       const discovery = await checkCanonicalProductOAuthDiscovery(String(env.PRODUCT_AUTH_ISSUER), discoveryFetch);
       return respond({
         ok: discovery.ok, service: "ordax-platform-mcp",
-        oauth_discovery_ready: discovery.ok, supports_remote_actions: false,
+        oauth_discovery_ready: discovery.ok,
+        conversation_topology: "user_chatgpt_direct",
+        model_relay: false,
+        supports_remote_actions: false,
         ...(discovery.error ? { error: discovery.error } : {}),
         ...(discovery.upstream_http_status !== undefined ? { upstream_http_status: discovery.upstream_http_status } : {}),
         ...(discovery.failure_stage ? { failure_stage: discovery.failure_stage } : {}),
@@ -104,9 +117,10 @@ export function createCanonicalProductMcpGateway(
     if (url.pathname === "/mcp") {
       // ordax_session is already a safe authenticated read tool. Its only new
       // side effect is opening/renewing a short-lived, server-selected device
-      // challenge from the hidden provider correlation marker. Failure to
-      // open the challenge never fabricates a binding and does not weaken the
-      // existing session-auth result.
+      // challenge from the hidden provider correlation marker. This is session
+      // coordination for the direct MCP path; it is not Central model relay.
+      // Failure to open the challenge never fabricates a binding and does not
+      // weaken the existing session-auth result.
       if (await mcpToolName(request) === "ordax_session") {
         try { await openCentralSessionFromMcp(request.clone(), env); } catch { /* fail closed */ }
       }

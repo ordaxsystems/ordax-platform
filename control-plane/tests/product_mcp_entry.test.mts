@@ -32,16 +32,27 @@ test("published canary entry cannot accidentally import legacy D1 Worker or conf
   assert.match(config, /binding = "POSTGRES"/);
   assert.match(config, /id = "4b601ec5815f43259bd8040053825d2a"/);
 });
-test("health is honest about read-only operation, Product authority and readiness", async () => {
+test("health is honest about direct ChatGPT topology, read-only operation and Product authority", async () => {
   const run = createCanonicalProductMcpGateway(ENV);
   const response = await run(new Request("https://canary.example/health"));
   const status = await response.json();
   assert.equal(response.status, 200);
   assert.equal(status.service, "ordax-platform-mcp");
   assert.deepEqual({
-    mode: status.mode, supports_remote_actions: status.supports_remote_actions,
-    auth: status.auth_configured, postgres: status.postgres_configured,
-  }, { mode: "read-only-canary", supports_remote_actions: false, auth: true, postgres: true });
+    mode: status.mode,
+    topology: status.conversation_topology,
+    model_relay: status.model_relay,
+    supports_remote_actions: status.supports_remote_actions,
+    auth: status.auth_configured,
+    postgres: status.postgres_configured,
+  }, {
+    mode: "read-only-canary",
+    topology: "user_chatgpt_direct",
+    model_relay: false,
+    supports_remote_actions: false,
+    auth: true,
+    postgres: true,
+  });
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
 test("OAuth protected resource metadata references the actual MCP origin and single issuer", async () => {
