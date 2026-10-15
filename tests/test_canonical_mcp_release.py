@@ -1,4 +1,4 @@
-"""Canonical MCP target is NOT the legacy v3 Worker and cannot deploy yet."""
+"""Canonical production release stays blocked; read-only validation is separate."""
 import copy
 import json
 import tomllib
@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 
 from scripts.cloudflare.check_mcp_release import (
-    ROOT,FOUNDATION,CONFIG,McpReleaseError,validate,REQUIRED_PROOFS
+    ROOT,FOUNDATION,CONFIG,McpReleaseError,validate,validate_read_only_validation,
+    REQUIRED_PROOFS,READ_ONLY_EVIDENCE
 )
 
 class McpReleaseContract(unittest.TestCase):
@@ -26,7 +27,7 @@ class McpReleaseContract(unittest.TestCase):
         self.assertNotIn("r2_buckets",c)
         self.assertEqual(c["hyperdrive"][0]["binding"],"POSTGRES")
 
-    def test_real_state_is_blocked_not_faked_ready(self):
+    def test_real_production_state_is_blocked_not_faked_ready(self):
         self.assertFalse(validate(self.foundation,self.config))
         release=self.foundation["mcp_release"]
         self.assertFalse(release["deployment_ready"])
@@ -51,6 +52,44 @@ class McpReleaseContract(unittest.TestCase):
         )
         self.assertFalse(self.config["workers_dev"])
         self.assertFalse(self.config["preview_urls"])
+
+    def test_read_only_validation_is_eligible_while_production_remains_blocked(self):
+        self.assertFalse(validate(self.foundation,self.config))
+        self.assertTrue(validate_read_only_validation(self.foundation,self.config))
+        release=self.foundation["mcp_release"]
+        self.assertEqual(release["validation_mode"],"read-only-canary")
+        self.assertTrue(release["validation_deployment_ready"])
+        self.assertFalse(release["supports_remote_actions"])
+        evidence=release["read_only_validation_evidence"]
+        self.assertEqual(set(evidence),READ_ONLY_EVIDENCE)
+        self.assertEqual(evidence["chatgpt_oauth_client_id"],"95d41a8f-0fb8-4c4b-9757-83ba6345062d")
+
+    def test_read_only_validation_cannot_enable_remote_actions(self):
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["supports_remote_actions"]=True
+        with self.assertRaisesRegex(McpReleaseError,"read_only_remote_actions_must_be_disabled|remote_actions"):
+            validate_read_only_validation(f,self.config)
+
+    def test_read_only_validation_requires_exact_independent_evidence(self):
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["read_only_validation_evidence"]={}
+        with self.assertRaisesRegex(McpReleaseError,"evidence_incomplete"):
+            validate_read_only_validation(f,self.config)
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["read_only_validation_evidence"]["candidate_run_url"]="https://evil.example/run/1"
+        with self.assertRaisesRegex(McpReleaseError,"evidence_invalid_candidate_run_url"):
+            validate_read_only_validation(f,self.config)
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["read_only_validation_evidence"]["chatgpt_oauth_client_id"]="11111111-1111-4111-8111-111111111111"
+        with self.assertRaisesRegex(McpReleaseError,"chatgpt_client_invalid"):
+            validate_read_only_validation(f,self.config)
+
+    def test_read_only_validation_flag_cannot_replace_production_readiness(self):
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["validation_deployment_ready"]=False
+        self.assertFalse(validate(f,self.config))
+        with self.assertRaisesRegex(McpReleaseError,"read_only_validation_not_ready"):
+            validate_read_only_validation(f,self.config)
 
     def test_bogus_enablement_without_proofs_is_rejected(self):
         f=copy.deepcopy(self.foundation)
@@ -94,6 +133,8 @@ class McpReleaseContract(unittest.TestCase):
                 c=copy.deepcopy(self.config);c.update(change)
                 with self.assertRaises(McpReleaseError):
                     validate(self.foundation,c)
+                with self.assertRaises(McpReleaseError):
+                    validate_read_only_validation(self.foundation,c)
 
     def test_alias_or_duplicate_name_is_rejected(self):
         for field,value in (
@@ -107,6 +148,8 @@ class McpReleaseContract(unittest.TestCase):
                 f["mcp_release"][field]=value
                 with self.assertRaises(McpReleaseError):
                     validate(f,self.config)
+                with self.assertRaises(McpReleaseError):
+                    validate_read_only_validation(f,self.config)
 
     def test_no_route_to_old_worker_is_published_by_new_source(self):
         entry=(ROOT/"control-plane/cloudflare/src/product_mcp_entry.ts").read_text("utf-8")
@@ -118,6 +161,7 @@ class McpReleaseContract(unittest.TestCase):
         self.assertIn('supports_remote_actions: false',entry)
         self.assertIn('trusted_operation_required',entry)
         self.assertIn('createCanonicalProductMcpReadHandlers',entry)
+        self.assertIn('READ_ONLY_TOOLS',entry)
 
 if __name__=="__main__":
     unittest.main()
