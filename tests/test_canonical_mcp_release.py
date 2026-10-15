@@ -32,7 +32,6 @@ class McpReleaseContract(unittest.TestCase):
         self.assertFalse(release["deployment_ready"])
         self.assertFalse(release["supports_remote_actions"])
         required_blockers={
-            "canonical_custom_domain_not_verified",
             "chatgpt_oauth_client_consent_not_verified",
             "product_device_enrollment_and_grants_missing",
             "central_trusted_session_attestor_not_provisioned",
@@ -41,6 +40,15 @@ class McpReleaseContract(unittest.TestCase):
             "end_to_end_chatgpt_to_device_not_verified",
         }
         self.assertTrue(required_blockers.issubset(set(release["readiness_blockers"])))
+        evidence=release.get("verified_evidence") or {}
+        self.assertRegex(
+            evidence.get("custom_domain_tls_run_url", ""),
+            r"^https://github\.com/ordaxsystems/ordax-platform/actions/runs/[0-9]+$",
+        )
+        self.assertEqual(
+            evidence.get("worker_version_id"),
+            "95c5b0cd-3f65-4cee-8d02-46f6bc1a91bb",
+        )
         self.assertFalse(self.config["workers_dev"])
         self.assertFalse(self.config["preview_urls"])
 
