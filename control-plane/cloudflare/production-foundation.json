@@ -1,5 +1,5 @@
 {
-  "version": 15,
+  "version": 16,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -126,11 +126,13 @@
     "custom_domain_required": true,
     "workers_dev": false,
     "deployment_ready": false,
+    "supports_remote_actions": false,
     "readiness_blockers": [
       "canonical_custom_domain_not_verified",
       "chatgpt_oauth_client_consent_not_verified",
       "product_device_enrollment_and_grants_missing",
       "central_trusted_session_attestor_not_provisioned",
+      "canonical_remote_actions_not_ready",
       "legacy_control_plane_v3_runtime_not_retired",
       "end_to_end_chatgpt_to_device_not_verified"
     ],

@@ -3,7 +3,7 @@
   "mcpServers": {
     "ordax": {
       "type": "streamable-http",
-      "url": "https://ordax-control-plane-v3.ordax-ac1ca1b50d09.workers.dev/mcp"
+      "url": "https://mcp.ordax.com.br/mcp"
     }
   }
 }

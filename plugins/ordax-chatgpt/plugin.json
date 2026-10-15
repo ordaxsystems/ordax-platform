@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ordax-chatgpt",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Connect ChatGPT to an authorized ORDAX device for grant-scoped projects, typed Computer Control, files, Git and specialized adapters.",
   "author": {
     "name": "ORDAX",
@@ -130,7 +130,7 @@
       },
       "publication": {
         "countries": [],
-        "release_notes": "Uses ORDAX Studio as the connector display name while retaining its stable ordax-chatgpt identity and independent versioning. Documents the canonical OS Intelligence integration boundary; no grant, OAuth, MCP endpoint or model-access activation.",
+        "release_notes": "0.4.8 binds the connector to the canonical PostgreSQL MCP release endpoint and fails closed before producing an installable package until canonical remote actions, trusted session admission, OAuth/domain readiness and end-to-end ChatGPT-to-device verification are complete. The retired legacy D1 MCP endpoint is no longer distributable.",
         "translations": {
           "pt-BR": {
             "subtitle": "Use o ORDAX no ChatGPT",
