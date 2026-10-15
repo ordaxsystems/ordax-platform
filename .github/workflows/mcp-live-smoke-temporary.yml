@@ -24,10 +24,14 @@ jobs:
           cat /tmp/mcp-health.json
           echo "HTTP_STATUS=$status"
           test "$status" = "200"
+          grep -q '"mode":"read-only-canary"' /tmp/mcp-health.json
+          grep -q '"supports_remote_actions":false' /tmp/mcp-health.json
       - name: Prove device bootstrap fails closed without Product auth
         run: |
           set -euo pipefail
-          status="$(curl -sS --connect-timeout 10 --max-time 20 -X POST -H 'Content-Type: application/json' -d '{}' -o /tmp/mcp-setup.json -w '%{http_code}' https://mcp.ordax.com.br/v3/device/setup)"
+          body='{"operation":"enroll","machine_binding_sha256":"0000000000000000000000000000000000000000000000000000000000000000","token_sha256":"1111111111111111111111111111111111111111111111111111111111111111","device_name":"external-smoke","device_kind":"desktop","channel":"development"}'
+          status="$(curl -sS --connect-timeout 10 --max-time 20 -X POST -H 'Content-Type: application/json' -d "$body" -o /tmp/mcp-setup.json -w '%{http_code}' https://mcp.ordax.com.br/v3/device/setup)"
           cat /tmp/mcp-setup.json
           echo "HTTP_STATUS=$status"
           test "$status" = "401"
+          grep -q 'product_auth_required' /tmp/mcp-setup.json
