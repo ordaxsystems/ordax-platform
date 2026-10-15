@@ -68,6 +68,7 @@ function fixture(){
     listTargets:listTargets as never,enqueue:enqueue as never,
   });
   const status=createCanonicalRelayReadOnlyHandlers(env,{
+    ensureDiscovery:async()=>({ok:true,devices_granted:1}),
     listTargets:listTargets as never,getAction:getAction as never,
   });
   async function doSubmit(p:typeof members[number],jwt:string,changes:Record<string,unknown>={},bindingChanges:Record<string,unknown>={}){

@@ -4,14 +4,26 @@ import { createCanonicalProductMcpReadHandlers } from "../cloudflare/src/product
 import { handleOrdaxMcp } from "../cloudflare/src/mcp_http.ts";
 import { env, owner, otherOwner, client, otherClient, device, token, withIssuer, request, catalog } from "./product_mcp_test_fixtures.mts";
 
-test("signed owner and exact OAuth client reach canonical discovery, ignoring caller-selected identity", async () => {
+const allowDiscovery = async (_env: unknown, ownerUserId: string, clientId: string) => ({
+  ok: true, ownerUserId, clientId, devices_granted: 0,
+});
+
+test("signed owner and exact OAuth client materialize discovery then reach canonical targets", async () => {
   await withIssuer(async () => {
     const calls: unknown[] = [];
-    const handlers = createCanonicalProductMcpReadHandlers(env, { listTargets: async (receivedEnv, identity) => {
-      assert.equal(receivedEnv, env);
-      calls.push(identity);
-      return catalog();
-    } });
+    const grants: unknown[] = [];
+    const handlers = createCanonicalProductMcpReadHandlers(env, {
+      ensureDiscovery: async (receivedEnv, ownerUserId, clientId) => {
+        assert.equal(receivedEnv, env);
+        grants.push({ ownerUserId, clientId });
+        return { ok: true, devices_granted: 1 };
+      },
+      listTargets: async (receivedEnv, identity) => {
+        assert.equal(receivedEnv, env);
+        calls.push(identity);
+        return catalog();
+      },
+    });
     for (const signedClient of [client, otherClient]) {
       const response = await handlers.targets(request(await token({ client_id: signedClient }),
         "/v3/product/targets?owner_user_id=" + otherOwner + "&client_id=" + otherClient));
@@ -23,6 +35,10 @@ test("signed owner and exact OAuth client reach canonical discovery, ignoring ca
       assert.equal(JSON.stringify(body).includes("private-device-token"), false);
       assert.equal(JSON.stringify(body).includes("internal-group"), false);
     }
+    assert.deepEqual(grants, [
+      { ownerUserId: owner, clientId: client },
+      { ownerUserId: owner, clientId: otherClient },
+    ]);
     assert.deepEqual(calls, [
       { ownerUserId: owner, clientKind: "product-mcp", clientId: client },
       { ownerUserId: owner, clientKind: "product-mcp", clientId: otherClient },
@@ -32,7 +48,10 @@ test("signed owner and exact OAuth client reach canonical discovery, ignoring ca
 
 test("session identifies OAuth owner without interpreting login as a device grant", async () => {
   await withIssuer(async () => {
-    const handlers = createCanonicalProductMcpReadHandlers(env, { listTargets: async () => { assert.fail("session must not read grants"); } });
+    const handlers = createCanonicalProductMcpReadHandlers(env, {
+      ensureDiscovery: async () => { assert.fail("session must not grant discovery"); },
+      listTargets: async () => { assert.fail("session must not read grants"); },
+    });
     const response = await handlers.session(request(await token(), "/v3/product/session"));
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store");
@@ -45,9 +64,12 @@ test("session identifies OAuth owner without interpreting login as a device gran
   });
 });
 
-test("plain user login, invalid OAuth role and expired token cannot call the target authority", async () => {
+test("plain user login, invalid OAuth role and expired token cannot materialize target authority", async () => {
   await withIssuer(async () => {
-    const handlers = createCanonicalProductMcpReadHandlers(env, { listTargets: async () => { assert.fail("unauthorized RPC call"); } });
+    const handlers = createCanonicalProductMcpReadHandlers(env, {
+      ensureDiscovery: async () => { assert.fail("unauthorized grant call"); },
+      listTargets: async () => { assert.fail("unauthorized RPC call"); },
+    });
     for (const [claims, status] of [
       [{ client_id: undefined, user_metadata: { client_id: client } }, 403],
       [{ role: "anon" }, 403],
@@ -61,15 +83,31 @@ test("plain user login, invalid OAuth role and expired token cannot call the tar
   });
 });
 
-test("each discovery re-reads authority; empty grants and ineligible account remain distinct", async () => {
+test("revoked OAuth consent fails closed before target enumeration", async () => {
+  await withIssuer(async () => {
+    const handlers = createCanonicalProductMcpReadHandlers(env, {
+      ensureDiscovery: async () => ({ ok: false, error: "product_mcp_oauth_consent_required" }),
+      listTargets: async () => { assert.fail("revoked consent must not enumerate targets"); },
+    });
+    const denied = await handlers.targets(request(await token()));
+    assert.equal(denied.status, 403);
+    assert.deepEqual(await denied.json(), { ok: false, error: "product_mcp_oauth_consent_required" });
+  });
+});
+
+test("each discovery re-materializes minimal authority then re-reads target eligibility", async () => {
   await withIssuer(async () => {
     let calls = 0;
-    const handlers = createCanonicalProductMcpReadHandlers(env, { listTargets: async () => {
-      calls++;
-      if (calls === 1) return catalog();
-      if (calls === 2) return { ok: true, targets: [] };
-      return { ok: false, error: "product_owner_auth_ineligible", private_detail: "never-export" };
-    } });
+    let grants = 0;
+    const handlers = createCanonicalProductMcpReadHandlers(env, {
+      ensureDiscovery: async () => { grants++; return { ok: true, devices_granted: 0 }; },
+      listTargets: async () => {
+        calls++;
+        if (calls === 1) return catalog();
+        if (calls === 2) return { ok: true, targets: [] };
+        return { ok: false, error: "product_owner_auth_ineligible", private_detail: "never-export" };
+      },
+    });
     const req = request(await token());
     assert.equal((await (await handlers.targets(req)).json()).targets.length, 2);
     assert.deepEqual(await (await handlers.targets(req)).json(), { ok: true, targets: [] });
@@ -77,6 +115,7 @@ test("each discovery re-reads authority; empty grants and ineligible account rem
     assert.equal(denied.status, 403);
     assert.deepEqual(await denied.json(), { ok: false, error: "product_owner_auth_ineligible" });
     assert.equal(calls, 3);
+    assert.equal(grants, 3);
   });
 });
 
@@ -86,9 +125,10 @@ test("unconfigured PostgreSQL and transport failure cannot fall back to legacy a
     const unconfigured = await createCanonicalProductMcpReadHandlers(env).targets(req);
     assert.equal(unconfigured.status, 503);
     assert.deepEqual(await unconfigured.json(), { ok: false, error: "product_postgres_unconfigured" });
-    const unavailable = await createCanonicalProductMcpReadHandlers(env, { listTargets: async () => {
-      throw new Error("postgres://private-secret@internal-db SQL private details");
-    } }).targets(req);
+    const unavailable = await createCanonicalProductMcpReadHandlers(env, {
+      ensureDiscovery: allowDiscovery as any,
+      listTargets: async () => { throw new Error("postgres://private-secret@internal-db SQL private details"); },
+    }).targets(req);
     assert.equal(unavailable.status, 503);
     assert.deepEqual(await unavailable.json(), { ok: false, error: "product_targets_unavailable" });
     assert.equal(unavailable.headers.get("cache-control"), "no-store");
@@ -102,7 +142,10 @@ test("malformed canonical catalogs fail rather than fabricating an empty availab
       { ok: true, targets: [{ device_id: device }, { device_id: device.toUpperCase() }] },
       { ok: false, error: "private-server-details" },
     ]) {
-      const handlers = createCanonicalProductMcpReadHandlers(env, { listTargets: async () => result as any });
+      const handlers = createCanonicalProductMcpReadHandlers(env, {
+        ensureDiscovery: allowDiscovery as any,
+        listTargets: async () => result as any,
+      });
       const response = await handlers.targets(request(await token()));
       assert.equal(response.status, 502);
       assert.deepEqual(await response.json(), { ok: false, error: "product_postgres_invalid_response" });
@@ -110,14 +153,23 @@ test("malformed canonical catalogs fail rather than fabricating an empty availab
   });
 });
 
-test("MCP request through signed session, canonical reader and public projection preserves offline devices", async () => {
+test("MCP request uses signed session for read-only discovery and never enqueues work", async () => {
   await withIssuer(async () => {
     let reads = 0;
-    const handlers = createCanonicalProductMcpReadHandlers(env, { listTargets: async (_, identity) => {
-      reads++;
-      assert.deepEqual(identity, { ownerUserId: owner, clientKind: "product-mcp", clientId: client });
-      return catalog();
-    } });
+    let grants = 0;
+    const handlers = createCanonicalProductMcpReadHandlers(env, {
+      ensureDiscovery: async (_, ownerUserId, clientId) => {
+        grants++;
+        assert.equal(ownerUserId, owner);
+        assert.equal(clientId, client);
+        return { ok: true, devices_granted: 1 };
+      },
+      listTargets: async (_, identity) => {
+        reads++;
+        assert.deepEqual(identity, { ownerUserId: owner, clientKind: "product-mcp", clientId: client });
+        return catalog();
+      },
+    });
     const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
       method: "POST", headers: { authorization: "Bearer " + await token(), "content-type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {
@@ -133,6 +185,7 @@ test("MCP request through signed session, canonical reader and public projection
     assert.equal(body.result.isError, false);
     assert.equal(body.result.structuredContent.targets[1].online, false);
     assert.equal(reads, 1);
+    assert.equal(grants, 1);
     assert.equal(JSON.stringify(body).includes("private-device-token"), false);
   });
 });

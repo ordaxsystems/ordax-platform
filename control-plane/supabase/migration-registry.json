@@ -549,6 +549,28 @@
         "path": "control-plane/supabase/migrations/20261015133000_central_device_attested_session_v1.sql",
         "blob_sha": "4f3ecfd7ca89baeb3f8605a17241b9679c0b0088"
       }
+    },
+    {
+      "name": "20261015193000_product_mcp_target_discovery_grant_v1",
+      "applied_version": "20261015214336",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261015193000_product_mcp_target_discovery_grant_v1.sql",
+        "blob_sha": "db74174fbf8f1b76f36bc260b59654ed58c67acc"
+      }
+    },
+    {
+      "name": "20261015194500_product_mcp_target_discovery_auto_v1",
+      "applied_version": "20261015214634",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261015194500_product_mcp_target_discovery_auto_v1.sql",
+        "blob_sha": "5148c11540a2512548326b8f38ed12a6607a61dd"
+      }
     }
   ]
 }

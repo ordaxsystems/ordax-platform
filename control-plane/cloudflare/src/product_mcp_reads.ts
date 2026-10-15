@@ -6,6 +6,7 @@ import {
   ProductPostgresError,
   type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
+import { ensureProductMcpTargetDiscovery } from "./product_mcp_discovery_store.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 
 type ReadEnv = ProductAuthEnv & ProductPostgresEnv;
@@ -13,6 +14,7 @@ type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction">;
 type ReadDependencies = {
   listTargets?: typeof listCanonicalProductTargets;
   getAction?: typeof getProductAction;
+  ensureDiscovery?: typeof ensureProductMcpTargetDiscovery;
 };
 
 function json(value: unknown, status = 200): Response {
@@ -60,20 +62,17 @@ function validAction(value: unknown, requestId: string): value is Record<string,
 }
 
 function unavailable(error: unknown, code: string): Response {
-  // Do not publish database messages, connection strings or SQL details.
   const unconfigured = error instanceof ProductPostgresError
     && error.code === "product_postgres_unconfigured";
   return json({ ok: false, error: unconfigured ? "product_postgres_unconfigured" : code }, 503);
 }
 
 /**
- * Read handlers for the coordinated Product MCP cutover (#42).
- * Not wired into index.ts while action/grant/status routes still use D1.
- * The signed OAuth identity selects the existing canonical RPC; no caller
- * header/body, registry scan, legacy fallback or local grant decision is used.
- * Dependencies are transport-test seams, never request input. Status reads do
- * not enumerate targets or enqueue/replay work: accepted action history is
- * scoped by the existing RPC to its owner and exact client, including offline.
+ * Read handlers for the canonical Product MCP boundary. The signed OAuth
+ * identity selects both the owner and exact MCP client. On target reads, that
+ * already-consented identity may materialize only product.target.read/read
+ * grants for active devices owned by the same subject; PostgreSQL independently
+ * verifies consent and ownership before any authority changes.
  */
 export function createCanonicalProductMcpReadHandlers(
   env: ReadEnv,
@@ -81,6 +80,7 @@ export function createCanonicalProductMcpReadHandlers(
 ): ReadHandlers {
   const readTargets = dependencies.listTargets ?? listCanonicalProductTargets;
   const readAction = dependencies.getAction ?? getProductAction;
+  const ensureDiscovery = dependencies.ensureDiscovery ?? ensureProductMcpTargetDiscovery;
   return {
     async session(request) {
       const identity = await authenticateProductMcpClientRequest(request, env);
@@ -99,12 +99,18 @@ export function createCanonicalProductMcpReadHandlers(
       const identity = await authenticateProductMcpClientRequest(request, env);
       if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
       try {
+        const discovery = await ensureDiscovery(env, identity.ownerUserId, identity.clientId);
+        if (!discovery.ok) {
+          if (discovery.error === "product_mcp_oauth_consent_required") {
+            return json({ ok: false, error: discovery.error }, 403);
+          }
+          return json({ ok: false, error: "product_target_discovery_grant_failed" }, 403);
+        }
         const result = await readTargets(env, {
           ownerUserId: identity.ownerUserId,
           clientKind: identity.clientKind,
           clientId: identity.clientId,
         });
-        // Eligibility and exact-client grant resolution remain in PostgreSQL.
         if (result?.ok === false && result.error === "product_owner_auth_ineligible") {
           return json({ ok: false, error: "product_owner_auth_ineligible" }, 403);
         }
@@ -134,9 +140,6 @@ export function createCanonicalProductMcpReadHandlers(
         if (!validAction(result, requestId)) {
           return json({ ok: false, error: "product_postgres_invalid_response" }, 502);
         }
-        // Preserve the canonical project UUID, never invent a legacy slug.
-        // The authorized RPC result is a Runtime-owned Product result; HTTP
-        // exposes only the published action fields, not arbitrary DB columns.
         return json({ ok: true, action: {
           request_id: result.request_id,
           device_id: result.device_id,

@@ -9,6 +9,7 @@ import { env, owner, otherOwner, client, otherClient, device, secondDevice,
 const spaceId="99999999-9999-4999-8999-999999999999";
 const thirdDevice="ffffffff-ffff-4fff-8fff-ffffffffffff";
 const clientWithPunctuation="OAuth.client:central-3";
+const allowDiscovery=async()=>({ok:true,devices_granted:1});
 const people=[
   {owner,client,device,project:projectId,receipt:randomUUID(),private:"PC1-STRICT"},
   {owner,client:otherClient,device:secondDevice,project:randomUUID(),receipt:randomUUID(),private:"PC2-STRICT"},
@@ -21,6 +22,7 @@ function fixture() {
   const member=(input:{ownerUserId:string,clientId:string})=>
     people.find(p=>p.owner===input.ownerUserId&&p.client===input.clientId);
   const handlers=createCanonicalCentralMcpReadHandlers(env,{
+    ensureDiscovery:allowDiscovery,
     listTargets:async (_,input)=>{
       seen.push({type:"list",...input});
       const p=member(input);
@@ -149,6 +151,7 @@ test("Central MCP gateway reuses exactly four Product read-only tools and reject
     // Gateway constructor reuses protocol, issuer metadata, and Product read-only
     // tool allowlist, not another MCP router.
     const gateway=createCanonicalCentralMcpGateway(env,{
+      ensureDiscovery:allowDiscovery,
       listTargets:async (_env,input)=>({
         ok:true,targets:[{device_id:device,device_name:"PC1",online:true,
           grant_groups:[{space_id:spaceId,project_id:projectId,
