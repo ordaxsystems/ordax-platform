@@ -44,7 +44,12 @@ test("ready uses canonical discovery URL with 5s deadline and rejects redirects"
   const result = await run(new Request("https://platform.example/ready"));
   assert.equal(result.status, 200);
   assert.deepEqual(await result.json(), {
-    ok: true, service: "ordax-platform-mcp", oauth_discovery_ready: true, supports_remote_actions: false,
+    ok: true,
+    service: "ordax-platform-mcp",
+    oauth_discovery_ready: true,
+    conversation_topology: "user_chatgpt_direct",
+    model_relay: false,
+    supports_remote_actions: false,
   });
   assert.equal(calls, 2);
 });
@@ -58,8 +63,14 @@ test("disabled Supabase OAuth 2.1 server does not turn configured variables into
   const status = await run(new Request("https://platform.example/ready"));
   assert.equal(status.status, 503);
   assert.deepEqual(await status.json(), {
-    ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
-    supports_remote_actions: false, error: "oauth_discovery_unavailable", upstream_http_status: 404,
+    ok: false,
+    service: "ordax-platform-mcp",
+    oauth_discovery_ready: false,
+    conversation_topology: "user_chatgpt_direct",
+    model_relay: false,
+    supports_remote_actions: false,
+    error: "oauth_discovery_unavailable",
+    upstream_http_status: 404,
   });
   assert.equal(status.headers.get("cache-control"), "no-store");
   const health = await run(new Request("https://platform.example/health"));
