@@ -79,3 +79,10 @@ jobs:
           print('ORDAX_CANONICAL_MCP_BUNDLE_D1_FREE=PASS')
           print('ORDAX_CANONICAL_MCP_DEPLOY=BLOCKED_UNTIL_E2E')
           PY
+      - name: Retain the exact verified canonical MCP bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ordax-mcp-candidate-${{ github.sha }}
+          path: control-plane/cloudflare/.mcp-candidate-bundle/
+          if-no-files-found: error
+          retention-days: 3
