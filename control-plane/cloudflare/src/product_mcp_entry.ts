@@ -67,25 +67,21 @@ export function createCanonicalProductMcpGateway(
     if (request.method === "GET" && url.pathname === "/health") {
       return respond({
         ok: true, service: "ordax-platform-mcp",
-        mode: "device-attested-session-canary",
+        mode: "read-only-canary",
         auth_configured: productAuthConfigured(env),
         postgres_configured: productPostgresConfigured(env),
-        supports_device_attested_sessions: true,
         supports_remote_actions: false,
       });
     }
     if (request.method === "GET" && url.pathname === "/ready") {
       if (!productAuthConfigured(env) || !productPostgresConfigured(env)) {
         return respond({ ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
-          supports_device_attested_sessions: true, supports_remote_actions: false,
-          error: "platform_mcp_unconfigured" }, 503);
+          supports_remote_actions: false, error: "platform_mcp_unconfigured" }, 503);
       }
       const discovery = await checkCanonicalProductOAuthDiscovery(String(env.PRODUCT_AUTH_ISSUER), discoveryFetch);
       return respond({
         ok: discovery.ok, service: "ordax-platform-mcp",
-        oauth_discovery_ready: discovery.ok,
-        supports_device_attested_sessions: true,
-        supports_remote_actions: false,
+        oauth_discovery_ready: discovery.ok, supports_remote_actions: false,
         ...(discovery.error ? { error: discovery.error } : {}),
         ...(discovery.upstream_http_status !== undefined ? { upstream_http_status: discovery.upstream_http_status } : {}),
         ...(discovery.failure_stage ? { failure_stage: discovery.failure_stage } : {}),
