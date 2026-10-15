@@ -85,4 +85,5 @@ jobs:
           name: ordax-mcp-candidate-${{ github.sha }}
           path: control-plane/cloudflare/.mcp-candidate-bundle/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 3
