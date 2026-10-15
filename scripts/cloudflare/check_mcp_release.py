@@ -19,13 +19,14 @@ CONFIG=ROOT/"control-plane/cloudflare/wrangler.mcp.toml"
 class McpReleaseError(ValueError):
     pass
 
-# These six proofs must be provided by independent service/CI evidence before
-# production cutover. Source flags alone do not constitute readiness.
+# Independent proofs required before production cutover. Source flags alone do
+# not constitute readiness, and remote-action capability needs its own proof.
 REQUIRED_PROOFS=frozenset({
     "custom_domain_tls_run_url",
     "oauth_chatgpt_consent_run_url",
     "paired_device_and_grants_run_url",
     "trusted_host_attestation_run_url",
+    "remote_actions_contract_run_url",
     "multi_device_end_to_end_run_url",
     "legacy_worker_retirement_run_url",
 })
@@ -80,14 +81,19 @@ def validate(foundation:dict,config:dict)->bool:
 
     blocked=release.get("readiness_blockers")
     ready=release.get("deployment_ready")
-    if not isinstance(ready,bool) or not isinstance(blocked,list) or any(
+    remote_actions=release.get("supports_remote_actions")
+    if not isinstance(ready,bool) or not isinstance(remote_actions,bool) or not isinstance(blocked,list) or any(
         not isinstance(x,str) or not re.fullmatch("[a-z0-9_]{8,120}",x) for x in blocked
     ) or len(set(blocked))!=len(blocked):
         raise McpReleaseError("mcp_release_status_invalid")
     if ready==bool(blocked):
         raise McpReleaseError("mcp_release_status_inconsistent")
     if not ready:
+        if not remote_actions and "canonical_remote_actions_not_ready" not in blocked:
+            raise McpReleaseError("mcp_remote_actions_blocker_missing")
         return False
+    if remote_actions is not True:
+        raise McpReleaseError("mcp_remote_actions_not_ready")
 
     proofs=release.get("release_evidence")
     if not isinstance(proofs,dict) or set(proofs)!=REQUIRED_PROOFS:
