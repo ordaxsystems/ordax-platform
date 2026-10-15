@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Release guard for OrdaX's ONE public MCP endpoint, independent of old D1.
+"""Release guards for OrdaX's ONE public MCP endpoint, independent of old D1.
 
-The legacy Control Plane config is NEVER a fallback or deployment target.
-Blocked state is an expected green result only in CI inspection mode.
+The production/remote-actions release remains fail-closed until its full E2E
+proof set exists. A separate read-only validation mode can authorize updating
+the public canary while remote actions remain explicitly disabled.
 """
 from __future__ import annotations
 import argparse
@@ -10,11 +11,14 @@ import json
 import re
 import sys
 import tomllib
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[2]
 FOUNDATION=ROOT/"control-plane/cloudflare/production-foundation.json"
 CONFIG=ROOT/"control-plane/cloudflare/wrangler.mcp.toml"
+ENTRY=ROOT/"control-plane/cloudflare/src/product_mcp_entry.ts"
 
 class McpReleaseError(ValueError):
     pass
@@ -30,6 +34,16 @@ REQUIRED_PROOFS=frozenset({
     "multi_device_end_to_end_run_url",
     "legacy_worker_retirement_run_url",
 })
+READ_ONLY_EVIDENCE=frozenset({
+    "candidate_run_url",
+    "control_plane_ci_run_url",
+    "canary_run_url",
+    "chatgpt_oauth_client_id",
+    "chatgpt_oauth_consent_granted_at",
+})
+CHATGPT_OAUTH_CLIENT_ID="95d41a8f-0fb8-4c4b-9757-83ba6345062d"
+RUN_URL_RE=re.compile(r"https://github\.com/ordaxsystems/ordax-platform/actions/runs/[0-9]+")
+
 
 def validate(foundation:dict,config:dict)->bool:
     release=foundation.get("mcp_release")
@@ -109,15 +123,72 @@ def validate(foundation:dict,config:dict)->bool:
         raise McpReleaseError("mcp_device_dispatch_not_verified")
     return True
 
+
+def validate_read_only_validation(foundation:dict,config:dict)->bool:
+    """Authorize only the already-public read-only canary, never remote dispatch."""
+    production_ready=validate(foundation,config)
+    if production_ready:
+        raise McpReleaseError("read_only_gate_cannot_authorize_production_release")
+    release=foundation["mcp_release"]
+    if release.get("validation_mode")!="read-only-canary":
+        raise McpReleaseError("mcp_read_only_validation_mode_invalid")
+    if release.get("validation_deployment_ready") is not True:
+        raise McpReleaseError("mcp_read_only_validation_not_ready")
+    if release.get("supports_remote_actions") is not False:
+        raise McpReleaseError("mcp_read_only_remote_actions_must_be_disabled")
+    if release.get("conversation_topology")!="user_chatgpt_direct" or release.get("model_relay") is not False:
+        raise McpReleaseError("mcp_read_only_topology_invalid")
+
+    evidence=release.get("read_only_validation_evidence")
+    if not isinstance(evidence,dict) or set(evidence)!=READ_ONLY_EVIDENCE:
+        raise McpReleaseError("mcp_read_only_evidence_incomplete")
+    for key in ("candidate_run_url","control_plane_ci_run_url","canary_run_url"):
+        value=evidence.get(key)
+        if not isinstance(value,str) or RUN_URL_RE.fullmatch(value) is None:
+            raise McpReleaseError(f"mcp_read_only_evidence_invalid_{key}")
+    client_id=evidence.get("chatgpt_oauth_client_id")
+    try:
+        canonical=str(uuid.UUID(str(client_id)))
+    except (ValueError,AttributeError,TypeError):
+        raise McpReleaseError("mcp_read_only_chatgpt_client_invalid") from None
+    if canonical!=CHATGPT_OAUTH_CLIENT_ID or client_id!=canonical:
+        raise McpReleaseError("mcp_read_only_chatgpt_client_invalid")
+    consent=evidence.get("chatgpt_oauth_consent_granted_at")
+    if not isinstance(consent,str) or not consent.endswith("Z"):
+        raise McpReleaseError("mcp_read_only_consent_timestamp_invalid")
+    try:
+        when=datetime.fromisoformat(consent[:-1]+"+00:00")
+    except ValueError:
+        raise McpReleaseError("mcp_read_only_consent_timestamp_invalid") from None
+    if when.tzinfo is None or when.astimezone(timezone.utc).isoformat().endswith("+00:00") is False:
+        raise McpReleaseError("mcp_read_only_consent_timestamp_invalid")
+
+    code=ENTRY.read_text("utf-8")
+    required=("READ_ONLY_TOOLS","supports_remote_actions: false","trusted_operation_required","createCanonicalProductMcpReadHandlers")
+    if any(item not in code for item in required):
+        raise McpReleaseError("mcp_read_only_entry_contract_missing")
+    forbidden=("D1Database","env.DB.prepare","ordax-control-plane-v3","operatorAuthorized(")
+    if any(item in code for item in forbidden):
+        raise McpReleaseError("mcp_read_only_legacy_authority_detected")
+    return True
+
+
 def main()->int:
     parser=argparse.ArgumentParser()
     parser.add_argument("--inspect",action="store_true",
-        help="Allow the blocked candidate for CI/audit; NEVER authorizes deploy.")
+        help="Allow the blocked production candidate for CI/audit; NEVER authorizes deploy.")
+    parser.add_argument("--read-only-validation",action="store_true",
+        help="Authorize only the canonical read-only validation canary; remote actions remain blocked.")
     opt=parser.parse_args()
     try:
         data=json.loads(FOUNDATION.read_text("utf-8"))
         with CONFIG.open("rb") as stream:
             config=tomllib.load(stream)
+        if opt.read_only_validation:
+            if not validate_read_only_validation(data,config):
+                raise McpReleaseError("mcp_read_only_validation_not_ready")
+            print("ORDAX_MCP_READ_ONLY_VALIDATION=ELIGIBLE")
+            return 0
         ready=validate(data,config)
     except (ValueError,KeyError,TypeError,OSError) as error:
         print(f"ORDAX_MCP_RELEASE_GUARD=INVALID {error}",file=sys.stderr)

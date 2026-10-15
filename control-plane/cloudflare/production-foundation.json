@@ -1,5 +1,5 @@
 {
-  "version": 18,
+  "version": 19,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -156,6 +156,15 @@
     "supports_remote_actions": false,
     "conversation_topology": "user_chatgpt_direct",
     "model_relay": false,
+    "validation_mode": "read-only-canary",
+    "validation_deployment_ready": true,
+    "read_only_validation_evidence": {
+      "candidate_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38813940880",
+      "control_plane_ci_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38813941184",
+      "canary_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38813941288",
+      "chatgpt_oauth_client_id": "95d41a8f-0fb8-4c4b-9757-83ba6345062d",
+      "chatgpt_oauth_consent_granted_at": "2026-10-15T16:17:07.108736Z"
+    },
     "readiness_blockers": [
       "chatgpt_oauth_client_consent_not_verified",
       "product_device_enrollment_and_grants_missing",
