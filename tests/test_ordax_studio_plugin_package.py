@@ -7,10 +7,25 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.build_ordax_plugin import build_archive, validate_package
+from scripts.build_ordax_plugin import (
+    LEGACY_MCP_ENDPOINT,
+    PluginDistributionBlocked,
+    build_archive,
+    canonical_mcp_endpoint,
+    distribution_readiness,
+    validate_package,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_ROOT = ROOT / "plugins" / "ordax-chatgpt"
+READY = {
+    "schema": "ordax.chatgpt-plugin-distribution-readiness/1",
+    "ready": True,
+    "endpoint": "https://mcp.ordax.com.br/mcp",
+    "supports_remote_actions": True,
+    "blockers": [],
+    "foundation_version": 16,
+}
 
 
 class OrdaxChatGptConnectorPackageTests(unittest.TestCase):
@@ -39,7 +54,9 @@ class OrdaxChatGptConnectorPackageTests(unittest.TestCase):
 
     def test_package_version_matches_canonical_manifest(self):
         manifest = json.loads((PLUGIN_ROOT / "plugin.json").read_text(encoding="utf-8"))
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "scripts.build_ordax_plugin.distribution_readiness", return_value=READY
+        ):
             archive, _ = build_archive(Path(directory))
             self.assertEqual(archive.name, f"ordax-chatgpt-plugin-{manifest['version']}.zip")
 
@@ -47,14 +64,35 @@ class OrdaxChatGptConnectorPackageTests(unittest.TestCase):
         self.assertTrue(PLUGIN_ROOT.is_dir())
         self.assertFalse((ROOT / "plugins" / "ordax-studio").exists())
 
-    def test_plugin_uses_production_streamable_http_mcp(self):
+    def test_plugin_uses_canonical_product_mcp_endpoint(self):
         config = json.loads((PLUGIN_ROOT / "mcp.json").read_text(encoding="utf-8-sig"))
         server = config["mcpServers"]["ordax"]
         self.assertEqual(server["type"], "streamable-http")
-        self.assertEqual(
-            server["url"],
-            "https://ordax-control-plane-v3.ordax-ac1ca1b50d09.workers.dev/mcp",
-        )
+        self.assertEqual(server["url"], canonical_mcp_endpoint())
+        self.assertEqual(server["url"], "https://mcp.ordax.com.br/mcp")
+        self.assertNotEqual(server["url"], LEGACY_MCP_ENDPOINT)
+
+    def test_distribution_is_fail_closed_until_full_product_mcp_is_ready(self):
+        readiness = distribution_readiness()
+        self.assertFalse(readiness["ready"])
+        self.assertFalse(readiness["supports_remote_actions"])
+        self.assertIn("canonical_remote_actions_not_ready", readiness["blockers"])
+        self.assertIn("end_to_end_chatgpt_to_device_not_verified", readiness["blockers"])
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(PluginDistributionBlocked):
+                build_archive(Path(directory))
+            self.assertEqual(list(Path(directory).glob("*.zip")), [])
+
+    def test_builder_rejects_retired_legacy_mcp_endpoint(self):
+        legacy = {
+            "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+            "mcpServers": {
+                "ordax": {"type": "streamable-http", "url": LEGACY_MCP_ENDPOINT}
+            },
+        }
+        with patch("scripts.build_ordax_plugin.load_mcp_config", return_value=legacy):
+            with self.assertRaisesRegex(ValueError, "retired legacy MCP endpoint"):
+                validate_package()
 
     def test_manifests_are_utf8_without_bom(self):
         for name in ("plugin.json", "mcp.json"):
@@ -70,8 +108,10 @@ class OrdaxChatGptConnectorPackageTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_package()
 
-    def test_builder_produces_deterministic_portable_zip(self):
-        with tempfile.TemporaryDirectory() as directory:
+    def test_builder_produces_deterministic_portable_zip_when_release_is_ready(self):
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "scripts.build_ordax_plugin.distribution_readiness", return_value=READY
+        ):
             first, first_sha = build_archive(Path(directory) / "a")
             second, second_sha = build_archive(Path(directory) / "b")
             self.assertEqual(first_sha, second_sha)
@@ -82,8 +122,10 @@ class OrdaxChatGptConnectorPackageTests(unittest.TestCase):
                     ["ordax-chatgpt/assets/ordax.svg", "ordax-chatgpt/mcp.json", "ordax-chatgpt/plugin.json"],
                 )
 
-    def test_builder_removes_legacy_package_names(self):
-        with tempfile.TemporaryDirectory() as directory:
+    def test_builder_removes_legacy_package_names_when_release_is_ready(self):
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "scripts.build_ordax_plugin.distribution_readiness", return_value=READY
+        ):
             output = Path(directory)
             for stem in ("ordax-dev-plugin-0.4.1", "ordax-studio-plugin-0.4.1"):
                 (output / f"{stem}.zip").write_bytes(b"legacy")
