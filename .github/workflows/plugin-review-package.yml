@@ -8,6 +8,7 @@ on:
       - "plugins/ordax-studio/**"
       - "scripts/build_ordax_plugin.py"
       - "tests/test_ordax_studio_plugin_package.py"
+      - "control-plane/cloudflare/production-foundation.json"
       - ".github/workflows/plugin-review-package.yml"
   push:
     branches:
@@ -17,6 +18,7 @@ on:
       - "plugins/ordax-studio/**"
       - "scripts/build_ordax_plugin.py"
       - "tests/test_ordax_studio_plugin_package.py"
+      - "control-plane/cloudflare/production-foundation.json"
       - ".github/workflows/plugin-review-package.yml"
 
 permissions:
@@ -42,9 +44,41 @@ jobs:
       - name: Validate ChatGPT connector package contract
         run: python -m unittest tests.test_ordax_studio_plugin_package
 
-      - name: Build deterministic review package
+      - name: Evaluate canonical MCP release readiness
+        id: readiness
+        shell: bash
         run: |
-          rm -rf dist/plugins
+          set -euo pipefail
+          mkdir -p dist/plugins
+          python scripts/build_ordax_plugin.py \
+            --readiness-json dist/plugins/ordax-chatgpt-distribution-readiness.json
+          ready="$(python - <<'PY'
+          import json
+          value = json.load(open('dist/plugins/ordax-chatgpt-distribution-readiness.json', encoding='utf-8'))
+          print('true' if value.get('ready') is True else 'false')
+          PY
+          )"
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          value = json.load(open('dist/plugins/ordax-chatgpt-distribution-readiness.json', encoding='utf-8'))
+          print('## ORDAX ChatGPT connector distribution')
+          print()
+          print(f"- Ready: **{str(value['ready']).lower()}**")
+          print(f"- Endpoint: `{value['endpoint']}`")
+          print(f"- Remote actions: **{str(value['supports_remote_actions']).lower()}**")
+          print(f"- Foundation: `v{value['foundation_version']}`")
+          blockers = value.get('blockers') or []
+          if blockers:
+              print('- Blockers:')
+              for blocker in blockers:
+                  print(f"  - `{blocker}`")
+          PY
+
+      - name: Build deterministic review package
+        if: steps.readiness.outputs.ready == 'true'
+        run: |
+          rm -f dist/plugins/ordax-chatgpt-plugin-*.zip dist/plugins/ordax-chatgpt-plugin-*.zip.sha256
           python scripts/build_ordax_plugin.py --output-dir dist/plugins
           zip_path="$(find dist/plugins -maxdepth 1 -type f -name 'ordax-chatgpt-plugin-*.zip' -print)"
           count="$(printf '%s\n' "$zip_path" | sed '/^$/d' | wc -l)"
@@ -74,8 +108,6 @@ jobs:
               raise SystemExit("ChatGPT connector name mismatch")
           if plugin != validate_package():
               raise SystemExit("connector manifest differs from canonical source")
-          # The complete equality above binds display name and version to the
-          # validated canonical manifest; do not maintain another branding lock.
           servers = mcp.get("mcpServers")
           ordax = servers.get("ordax") if isinstance(servers, dict) else None
           url = ordax.get("url") if isinstance(ordax, dict) else None
@@ -88,7 +120,16 @@ jobs:
         run: |
           ! find dist/plugins -maxdepth 1 -type f \( -name 'ordax-dev-plugin-*' -o -name 'ordax-studio-plugin-*' \) | grep -q .
 
+      - name: Upload distribution readiness evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ordax-chatgpt-distribution-readiness
+          path: dist/plugins/ordax-chatgpt-distribution-readiness.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload canonical review package
+        if: steps.readiness.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ordax-chatgpt-plugin-review-package
