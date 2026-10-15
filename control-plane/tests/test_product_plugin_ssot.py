@@ -32,11 +32,12 @@ class PrivateProductOAuthValidationPluginTest(unittest.TestCase):
         )
         for file_path in ("mcp.json", ".mcp.json"):
             mcp = json.loads(files[file_path])
-            self.assertEqual(mcp["mcpServers"]["ordax-product-canary"]["url"], url)
+            packaged_url = mcp["mcpServers"]["ordax-product-canary"]["url"]
+            self.assertEqual(packaged_url, url)
+            self.assertNotIn("workers.dev", packaged_url)
+            self.assertNotIn("ordax-control-plane-v3", packaged_url)
+            self.assertNotIn("ordax-ac1ca1b50d09", packaged_url)
         all_text = b"\n".join(files.values()).decode("utf-8")
-        self.assertNotIn("workers.dev", all_text)
-        self.assertNotIn("ordax-control-plane-v3", all_text)
-        self.assertNotIn("ordax-ac1ca1b50d09", all_text)
         self.assertNotIn("service_role", all_text)
         self.assertNotIn("CLOUDFLARE_API_TOKEN", all_text)
         self.assertNotIn("localhost", all_text)
