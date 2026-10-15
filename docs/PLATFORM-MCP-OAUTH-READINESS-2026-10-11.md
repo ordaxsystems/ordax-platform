@@ -1,32 +1,140 @@
-# OrdaX Platform MCP — prontidão OAuth 2.1 (2026-10-11)
+# OrdaX Platform MCP — prontidão OAuth 2.1
 
-**Autoridade:** OrdaX Platform + Supabase Auth canônico; não existe autenticação substituta no Worker. Código: `control-plane/cloudflare/src/product_oauth_readiness.ts` e `product_mcp_entry.ts`.
+**Atualizado em 2026-10-15.**
+
+**Autoridade:** OrdaX Platform + Supabase Auth canônico. O Worker não mantém autenticação substituta, não aceita credencial de operador como OAuth Product e não possui fallback D1.
+
+## Endpoint canônico
+
+O único ingresso MCP Product válido é:
+
+- `https://mcp.ordax.com.br/mcp`
+- Worker Cloudflare: `ordax-mcp`
+- autoridade persistente: PostgreSQL via Hyperdrive
+- OAuth issuer: `https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1`
+- `workers.dev`: desabilitado no Worker canônico
+- remote actions: **desabilitadas** até os gates E2E finais
+
+O pacote oficial em `plugins/ordax-chatgpt/` e o pacote privado de validação OAuth em `integrations/chatgpt/product-canary/` apontam para esse mesmo endpoint. O pacote privado não cria outro Worker; ele limita a superfície às quatro ferramentas read-only para testar DCR/login/consentimento com segurança.
 
 ## Endpoints de operação
 
-- `GET /health`: prova **somente** vida do Worker e presença de configurações declaradas. `auth_configured=true` **não** prova que o OAuth Server está habilitado, que um cliente foi cadastrado, nem que um PC está disponível.
-- `GET /ready`: consulta, sem credenciais e com limite de 5 segundos, a descoberta OAuth 2.1 oficial do projeto Supabase. Exige issuer exato, HTTPS na mesma origem para endpoints, registro dinâmico de clientes (DCR), grant `authorization_code`, PKCE `S256` e método público `none`. Nunca segue redirecionamentos; aceita no máximo 64 KiB.
-- HTTP **200** em `/ready`: **apenas** descoberta OAuth conforme o contrato. `supports_remote_actions=false` permanece inalterado no canary. Não garante consentimento real, login, refresh, dispositivo, grants, inferência ou Runtime.
-- HTTP **503** em `/ready`: OAuth ausente, desabilitado, incompleto, com metadados inválidos ou indisponível. Falha segura: nenhuma tentativa de registrar um cliente alternativo ou fallback D1.
+- `GET /health`: prova vida do Worker e configuração declarada. Não prova OAuth completo, consentimento, dispositivo ou grants.
+- `GET /ready`: consulta a descoberta OAuth 2.1 oficial do Supabase com prazo limitado e falha segura. Exige issuer exato, HTTPS, DCR, `authorization_code`, PKCE `S256` e cliente público.
+- `GET /.well-known/oauth-protected-resource`: anuncia a autoridade OAuth do recurso MCP.
+- `POST /v3/device/setup`: bootstrap canônico de dispositivo; sem credencial válida deve falhar antes de qualquer autoridade de dispositivo.
+- `POST /mcp`: transporte Streamable HTTP do plugin.
 
-## Estado real verificado
+## Evidência pública já comprovada
 
-**Evidência mais recente, 11/10/2026 às 22:14 UTC:** a prova HTTP externa, executada em GitHub Actions [Product MCP Public Network Probe #38179596350](https://github.com/ordaxsystems/ordax-platform/actions/runs/38179596350), consultou **os endpoints publicados** e observou:
-- `GET https://jhfphsjptrpmtnzkpwud.supabase.co/.well-known/oauth-authorization-server/auth/v1` → **HTTP 200**, metadados OAuth 2.1 válidos, issuer correto, registro dinâmico anunciado, PKCE S256 e cliente público.
-- `GET https://ordax-control-plane-v3-canary.ordaxsystems.workers.dev/ready` → **HTTP 200**, descoberta OAuth reconhecida.
-- `GET /health` e `/.well-known/oauth-protected-resource` no canary → **HTTP 200**, `read-only-canary` e `supports_remote_actions=false`; `GET /v3/product/actions` → **HTTP 404**.
-- Prova versionada e repetível em `scripts/cloudflare/probe_live_product_mcp.py`, integrada pela [PR #132](https://github.com/ordaxsystems/ordax-platform/pull/132). O relatório imprime só indicadores públicos, sem tokens ou dados de usuário.
+A prova externa atual do domínio canônico está versionada no GitHub Actions:
 
-**Registro histórico, no início de 11/10/2026:** `verify_product_oauth_server.py` executado anteriormente no Windows havia recebido **HTTP 404**. A evidência HTTP externa posterior supersede aquele diagnóstico de indisponibilidade; não atribuir a mudança a uma configuração realizada por este chat, nem afirmar o instante da ativação.
+- run `38705274585`
+- `GET https://mcp.ordax.com.br/health` → HTTP 200
+- Worker em `read-only-canary`
+- `supports_remote_actions=false`
+- `POST https://mcp.ordax.com.br/v3/device/setup` sem login → HTTP 401 `product_auth_required`
+- Worker Version observada: `95c5b0cd-3f65-4cee-8d02-46f6bc1a91bb`
 
-**Estado operacional distinto de descoberta:** consulta canônica ao PostgreSQL após a prova mostrou **0 clientes OAuth registrados, 0 consentimentos, 0 dispositivos Product e 0 grants remotos**. A página `https://ordax.com.br/oauth/consent` também respondeu **200** e rejeitou IDs ausentes/malformados com **400** em prova HTTP externa do repositório `ordax-os` [workflow #38179767478](https://github.com/ordaxsystems/ordax-os/actions/runs/38179767478). Isso **não** executou OAuth real, não cadastrou cliente ChatGPT e não autorizou execução no PC. O canary ainda é somente leitura e o plugin antigo permanece em outro Worker.
+A descoberta pública OAuth 2.1 do Supabase já havia comprovado DCR, `authorization_code`, PKCE `S256` e cliente público. A evidência histórica do antigo Worker canary serviu para validação inicial, mas **não é mais o endpoint operacional**.
 
-## Próximos passos de integração — sem criar um segundo OAuth
+## Baseline OAuth antes do primeiro ChatGPT real
 
-1. **Já comprovado**: descoberta pública OAuth 2.1 válida na autoridade Supabase e no canary. Não recriar projeto/Auth para obter o mesmo endpoint.
-2. **Já comprovado**: apresentação first-party `/oauth/consent` publicada no `ordax.com.br`. Ainda é necessário confirmar o fluxo de redirecionamento com um `authorization_id` real criado pelo Supabase.
-3. **Pendente E2E**: o DCR está anunciado nos metadados, mas ainda não há nenhum client_id real registrado. Conectar o plugin privado canary ao ChatGPT por ação explícita do usuário para testar registro do cliente MCP com PKCE S256, login, consentimento, refresh e revogação por client_id exato.
-4. Conferir pelo PostgreSQL oficial qual client_id realmente foi criado e executar os testes OAuth/E2E no **MCP personalizado** do ChatGPT com a conta real, sem reutilizar credencial do plugin antigo.
-5. Só avançar para execução remota depois de parear os PCs na autoridade PostgreSQL, conceder o perfil necessário ao **cliente OAuth exato** e confirmar Full Access local no Studio. O modo local não contorna grants e vice-versa.
+Em 2026-10-15, antes de conectar o pacote privado ao ChatGPT, o projeto oficial `jhfphsjptrpmtnzkpwud` apresentava:
 
-**Não** ativar `deployment_ready` por flag, copiar tokens para o Worker, reduzir escopos de RLS ou reutilizar cookies de sessão ChatGPT. O cutover real é tratado em #42 e a falha de Space não autorizado em #118.
+- `auth.oauth_clients`: **0**
+- `auth.oauth_consents`: **0**
+- `auth.oauth_authorizations`: **0**
+- `auth.oauth_client_states`: **0**
+
+Esse baseline torna o primeiro E2E inequívoco: o primeiro cliente criado depois da conexão deve ser atribuível ao fluxo real do ChatGPT, não a teste anterior.
+
+## Critério de prova do OAuth ChatGPT
+
+Não remover `chatgpt_oauth_client_consent_not_verified` apenas porque discovery ou `/ready` retornam 200. A prova precisa demonstrar, no fluxo real do ChatGPT:
+
+1. **DCR real:** novo registro em `auth.oauth_clients` criado pelo cliente ChatGPT, com `client_id` próprio, redirect URI válido e cliente público.
+2. **PKCE:** autorização real usando challenge com método `S256`; não aceitar fluxo sem PKCE.
+3. **Consentimento:** registro em `auth.oauth_consents` para o usuário e `client_id` exato.
+4. **Authorization Code:** autorização real vinculada ao mesmo `client_id`, usuário, redirect URI e scopes.
+5. **Token/refresh:** a sessão obtida pelo ChatGPT autentica o MCP sem reutilizar cookie, token antigo ou credencial de outro cliente.
+6. **Isolamento:** outro `client_id` não pode reutilizar o consentimento/grant do cliente validado.
+7. **Revogação:** revogar consentimento ou cliente deve bloquear nova autoridade, sem cache permissivo no Worker.
+
+Nunca registrar manualmente um `oauth_clients` apenas para tornar o gate verde; o cliente deve nascer do fluxo real do consumidor MCP.
+
+## Bootstrap de dispositivo
+
+O contrato de bootstrap já foi integrado ao Worker canônico e ao Runtime:
+
+- Runtime envia `device_kind` e `channel` explicitamente;
+- Studio mantém o access token da conta apenas em memória;
+- primeiro login detecta `device_id=null`, executa enrollment, cria pairing e reivindica o pairing;
+- token bruto de dispositivo permanece local e o backend armazena hashes privados;
+- pairing de propriedade **não** cria automaticamente grants remotos.
+
+Baseline do PostgreSQL em 2026-10-15:
+
+- devices Product: **0**
+- credentials Product: **0**
+- presence: **0**
+- remote grants: **0**
+- session challenges: **0**
+
+No PC de desenvolvimento atual existe uma limitação externa de rota do provedor até o par anycast do custom domain. GitHub e outros destinos Cloudflare funcionam, e a prova HTTP externa do endpoint canônico está verde. Não habilitar `workers.dev`, fallback legado ou outra origem para mascarar essa rota local.
+
+## Pacotes do ChatGPT
+
+### Produção
+
+`plugins/ordax-chatgpt/`
+
+- versão atual: `0.4.9`
+- endpoint: `https://mcp.ordax.com.br/mcp`
+- distribuição continua bloqueada enquanto `mcp_release.deployment_ready=false` ou houver blockers.
+
+### Validação privada OAuth
+
+`integrations/chatgpt/product-canary/`
+
+- versão atual: `0.2.0`
+- nome interno: `ordax-product-canary`
+- endpoint: `https://mcp.ordax.com.br/mcp`
+- apenas: `ordax_session`, `ordax_profile`, `ordax_targets`, `ordax_action_status`
+- artifact CI: `ordax-product-oauth-validation-plugin`
+- finalidade exclusiva: provar DCR/login/consentimento/token do ChatGPT sem habilitar mutações remotas.
+
+## Blockers atuais do MCP
+
+O domínio/TLS e o contrato de device setup já foram comprovados e não devem voltar a aparecer como blockers sem regressão real. Permanecem:
+
+1. `chatgpt_oauth_client_consent_not_verified`
+2. `product_device_enrollment_and_grants_missing`
+3. `central_trusted_session_attestor_not_provisioned`
+4. `canonical_remote_actions_not_ready`
+5. `legacy_control_plane_v3_runtime_not_retired`
+6. `end_to_end_chatgpt_to_device_not_verified`
+
+`deployment_ready` continua **false** e `supports_remote_actions` continua **false**.
+
+## Ordem de fechamento
+
+1. Instalar/conectar explicitamente o pacote privado de validação no ChatGPT.
+2. Provar DCR + PKCE + consentimento + authorization code no Supabase oficial.
+3. Registrar o PC Product pelo fluxo automático do Studio e confirmar presença canônica.
+4. Criar somente os grants necessários para o `client_id` exato validado.
+5. Provar a sessão confiável ChatGPT ↔ cliente OAuth ↔ PC ↔ conversa.
+6. Validar leitura ponta a ponta no MCP oficial.
+7. Só depois implementar/promover remote actions canônicas e provar execução ponta a ponta.
+8. Retirar definitivamente o Runtime/control-plane legado quando não houver consumidor restante.
+
+## Regras de segurança
+
+- não ativar `deployment_ready` por flag;
+- não inserir clientes OAuth manualmente para satisfazer readiness;
+- não copiar tokens para o Worker;
+- não reutilizar credencial do plugin antigo;
+- não usar `workers.dev` como fallback produtivo;
+- não reduzir RLS/grants para facilitar E2E;
+- não deixar o modelo escolher `device_id`, `client_id`, grant ou autoridade fora de binding confiável;
+- falhas de rede, OAuth, sessão ou grant permanecem fail-closed.
