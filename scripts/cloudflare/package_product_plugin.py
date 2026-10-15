@@ -1,30 +1,57 @@
 #!/usr/bin/env python3
-"""Gera o plugin ChatGPT privado a partir do SSOT Product/Cloudflare.
+"""Build the private ChatGPT OAuth-validation package from the Product SSOT.
 
-Não instala o plugin nem modifica o deployment ativo. O release publicado
-deve ser atualizado apenas com o current_release_id retornado pelo ChatGPT.
+This package is intentionally not the production-distribution connector. It uses
+exactly the canonical Product MCP custom domain so ChatGPT OAuth/DCR/consent can
+be validated before remote actions are enabled. It never deploys a Worker,
+creates grants, or introduces a workers.dev fallback.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import re
-import tomllib
 import zipfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "integrations/chatgpt/product-canary/manifest.json"
 FOUNDATION = ROOT / "control-plane/cloudflare/production-foundation.json"
-WRANGLER = ROOT / "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
 READ_TOOLS = ("ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status")
+
+
+def _canonical_endpoint(foundation: dict) -> str:
+    release = foundation.get("mcp_release")
+    if not isinstance(release, dict):
+        raise ValueError("Canonical MCP release is missing")
+    hostname = release.get("hostname")
+    path = release.get("path")
+    if not isinstance(hostname, str) or not re.fullmatch(
+        r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+",
+        hostname,
+    ):
+        raise ValueError("Canonical MCP hostname is invalid")
+    if not isinstance(path, str) or not path.startswith("/") or "?" in path or "#" in path:
+        raise ValueError("Canonical MCP path is invalid")
+    if release.get("transport") != "streamable-http" or release.get("authority") != "postgresql":
+        raise ValueError("Canonical MCP transport/authority is invalid")
+    if release.get("custom_domain_required") is not True or release.get("workers_dev") is not False:
+        raise ValueError("Private validation must use the canonical custom domain")
+    if release.get("supports_remote_actions") is not False:
+        raise ValueError("Private OAuth validation package must remain read-only")
+    endpoint = f"https://{hostname}{path}"
+    parsed = urlsplit(endpoint)
+    if parsed.scheme != "https" or parsed.hostname != hostname or parsed.path != path:
+        raise ValueError("Canonical MCP endpoint is invalid")
+    if "workers.dev" in endpoint:
+        raise ValueError("workers.dev cannot be packaged as the Product MCP endpoint")
+    return endpoint
 
 
 def build_files() -> tuple[str, dict[str, bytes]]:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     foundation = json.loads(FOUNDATION.read_text(encoding="utf-8"))
-    with WRANGLER.open("rb") as stream:
-        wrangler = tomllib.load(stream)
     if manifest.get("schema") != "ordax.product-chatgpt-plugin/1":
         raise ValueError("Manifesto do plugin inválido")
     if manifest.get("status") != "private-canary" or manifest.get("worker_role") != "read-only-canary":
@@ -35,28 +62,12 @@ def build_files() -> tuple[str, dict[str, bytes]]:
         raise ValueError("Nome interno inválido")
     if not re.fullmatch(r"\d+\.\d+\.\d+", manifest.get("version", "")):
         raise ValueError("Versão semântica inválida")
-    worker = foundation.get("worker_name", "") + "-canary"
-    subdomain = foundation.get("workers_dev_subdomain", "")
-    if wrangler.get("name") != worker or wrangler.get("main") != "src/product_mcp_entry.ts":
-        raise ValueError("Worker do plugin diverge do código canônico")
-    if wrangler.get("d1_databases") or wrangler.get("durable_objects"):
-        raise ValueError("Worker read-only não pode incluir D1 nem o Runtime legado")
-    if wrangler.get("workers_dev") is not True or wrangler.get("preview_urls") is not False:
-        raise ValueError("A exposição do Worker de validação diverge do manifesto")
-    if not re.fullmatch(r"[a-z][a-z0-9-]{3,63}", subdomain):
-        raise ValueError("Subdomínio oficial inválido")
-    expected_hyperdrive = foundation["live_evidence"]["hyperdrive"]["id"]
-    if wrangler.get("hyperdrive") != [{"binding": "POSTGRES", "id": expected_hyperdrive}]:
-        raise ValueError("O plugin não está vinculado ao Hyperdrive oficial")
-    issuer = "https://" + foundation["postgres"]["project_ref"] + ".supabase.co/auth/v1"
-    variables = wrangler.get("vars") or {}
-    if (variables.get("PRODUCT_AUTH_ISSUER") != issuer
-        or variables.get("PRODUCT_AUTH_JWKS_URL") != issuer + "/.well-known/jwks.json"
-        or variables.get("PRODUCT_AUTH_AUDIENCE") != "authenticated"):
-        raise ValueError("Issuer e JWKS diferem do Supabase canônico")
-    url = f"https://{worker}.{subdomain}.workers.dev/mcp"
-    if "ordax-ac1ca1b50d09" in url:
-        raise ValueError("A URL de origem antiga não pode entrar no release")
+
+    endpoint = _canonical_endpoint(foundation)
+    release = foundation["mcp_release"]
+    expected_issuer = "https://" + foundation["postgres"]["project_ref"] + ".supabase.co/auth/v1"
+    if release.get("oauth_issuer") != expected_issuer:
+        raise ValueError("OAuth issuer difere do Supabase canônico")
 
     display = {
         "displayName": manifest["display_name"],
@@ -78,20 +89,28 @@ def build_files() -> tuple[str, dict[str, bytes]]:
         "extensions": {"com.openai": {"interface": display}},
     }
     codex = {
-        "interface": display, "name": manifest["name"],
-        "version": manifest["version"], "description": manifest["description"],
-        "author": {"name": "OrdaX"}, "keywords": manifest["keywords"],
-        "repository": plugin["repository"], "license": "Proprietary",
+        "interface": display,
+        "name": manifest["name"],
+        "version": manifest["version"],
+        "description": manifest["description"],
+        "author": {"name": "OrdaX"},
+        "keywords": manifest["keywords"],
+        "repository": plugin["repository"],
+        "license": "Proprietary",
         "mcpServers": "./.mcp.json",
     }
     mcp = {
         "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
-        "mcpServers": {manifest["name"]: {"type": "streamable-http", "url": url}},
+        "mcpServers": {manifest["name"]: {"type": "streamable-http", "url": endpoint}},
     }
     mcp_codex = {
-        "mcpServers": {manifest["name"]: {
-            "type": "streamable-http", "url": url, "headers": {},
-        }},
+        "mcpServers": {
+            manifest["name"]: {
+                "type": "streamable-http",
+                "url": endpoint,
+                "headers": {},
+            }
+        },
     }
     documents = {
         "plugin.json": plugin,
@@ -99,7 +118,7 @@ def build_files() -> tuple[str, dict[str, bytes]]:
         "mcp.json": mcp,
         ".mcp.json": mcp_codex,
     }
-    return url, {
+    return endpoint, {
         path: (json.dumps(body, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
         for path, body in documents.items()
     }
@@ -117,7 +136,7 @@ def main() -> None:
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             archive.writestr(info, contents[path])
-    print("ORDAX_CANONICAL_CHATGPT_PLUGIN=PACKAGED")
+    print("ORDAX_PRIVATE_OAUTH_VALIDATION_PLUGIN=PACKAGED")
     print("ENDPOINT=" + endpoint)
     print("ARCHIVE=" + str(args.out))
 
