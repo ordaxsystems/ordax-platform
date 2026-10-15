@@ -538,6 +538,17 @@
         "path": "control-plane/supabase/migrations/20261007214000_central_attestor_least_privilege_v1.sql",
         "blob_sha": "28ff2f794ce8b31f8be0a1bd4bb096f1a1bc9331"
       }
+    },
+    {
+      "name": "20261015133000_central_device_attested_session_v1",
+      "applied_version": "20261015062329",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261015133000_central_device_attested_session_v1.sql",
+        "blob_sha": "4f3ecfd7ca89baeb3f8605a17241b9679c0b0088"
+      }
     }
   ]
 }
