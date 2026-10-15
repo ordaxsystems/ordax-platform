@@ -40,7 +40,9 @@ const identity = async (jwt:string)=>new Request("https://central.example/mcp",{
   headers:{authorization:"Bearer "+jwt,"x-ordax-device-id":secondDevice,
     "x-ordax-client-id":otherClient},
 });
+const allowDiscovery=async()=>({ok:true,devices_granted:1});
 const deps = (deviceCatalog:unknown, accepted=base)=>({
+  ensureDiscovery:allowDiscovery,
   listTargets:async (_env:unknown,record:{clientId:string})=>
     record.clientId===client?deviceCatalog:{ok:true,targets:[]},
   verifySession:async (principal:{ownerUserId:string,clientId:string},
@@ -125,6 +127,7 @@ test("server-owned session binding may select among authorized PCs only AFTER tr
       ...catalog([group()],secondDevice).targets,
     ]};
     const verifier=createCanonicalCentralAdmissionVerifier(env,{
+      ensureDiscovery:allowDiscovery,
       listTargets:async()=>{queried++;return double;},
       verifySession:async(_client,record)=>{
         attested++;
@@ -145,6 +148,7 @@ test("device receipt requires signed exact client, device and NULL project",asyn
   await withIssuer(async()=>{
     let returnedOther=false,removed=false,calls=0;
     const handlers=createCanonicalCentralMcpReadHandlers(env,{
+      ensureDiscovery:allowDiscovery,
       listTargets:async()=>removed?{ok:true,targets:[]}:catalog(),
       getAction:async()=>{
         calls++;
@@ -177,6 +181,7 @@ test("device receipt requires signed exact client, device and NULL project",asyn
 test("mixed PC and project grants without persisted routing remain ambiguous",async()=>{
   await withIssuer(async()=>{
     const handlers=createCanonicalCentralMcpReadHandlers(env,{
+      ensureDiscovery:allowDiscovery,
       listTargets:async()=>catalog([group(),projectGroup()]),
       getAction:async()=>actionRecord({project_id:null,capability:"computer.windows"}),
     });
@@ -213,6 +218,7 @@ test("one OAuth client with TWO PCs reads ONLY the PC attested by this ChatGPT s
     let revoked=false;
     const secondRequest=randomUUID();
     const gateway=createCanonicalCentralSessionMcpGateway(env,base,{
+      ensureDiscovery:allowDiscovery,
       listTargets:async()=>revoked?{ok:true,targets:[]}:
         {ok:true,targets:[
           ...catalog([group()]).targets,
@@ -253,8 +259,6 @@ test("one OAuth client with TWO PCs reads ONLY the PC attested by this ChatGPT s
     assert.equal(own.status,200,JSON.stringify(own));
     assert.equal(own.body.result.structuredContent.action.result.windows,"FIRST-PC-SAFE");
     const foreign=await tool("ordax_action_status",{request_id:secondRequest});
-    // A valid MCP JSON-RPC envelope MAY use HTTP 200 for a denied tool.
-    // Reject by the actual tool result, not only its transport status.
     assert.ok(foreign.status!==200
       || foreign.body?.result?.structuredContent?.ok===false
       || foreign.body?.result?.isError===true,JSON.stringify(foreign));
@@ -280,6 +284,7 @@ test("a trusted project session can select one project grant beside other PC/dev
   await withIssuer(async()=>{
     const trusted={...base,spaceId,projectId};
     const gateway=createCanonicalCentralSessionMcpGateway(env,trusted,{
+      ensureDiscovery:allowDiscovery,
       listTargets:async()=>({ok:true,targets:[
         ...catalog([group(),projectGroup()]).targets,
         ...catalog([group()],secondDevice).targets,
