@@ -7,6 +7,7 @@
  */
 import { authenticateProductMcpClientRequest, type ProductAuthEnv } from "./product_auth.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
+import { ensureProductMcpTargetDiscovery } from "./product_mcp_discovery_store.ts";
 import {
   listCanonicalProductTargets, getProductAction,
   type ProductPostgresEnv,
@@ -22,6 +23,7 @@ type Env = ProductAuthEnv & ProductPostgresEnv;
 type Dependencies = Readonly<{
   listTargets?: typeof listCanonicalProductTargets;
   getAction?: typeof getProductAction;
+  ensureDiscovery?: typeof ensureProductMcpTargetDiscovery;
 }>;
 
 /**
@@ -46,8 +48,9 @@ export function createCanonicalCentralMcpReadHandlers(
 ): OrdaxMcpHandlers {
   const listTargets = deps.listTargets ?? listCanonicalProductTargets;
   const authorizedAction = deps.getAction ?? getProductAction;
+  const ensureDiscovery = deps.ensureDiscovery ?? ensureProductMcpTargetDiscovery;
   const canonical = createCanonicalProductMcpReadHandlers(env,{
-    listTargets, getAction: authorizedAction,
+    listTargets, getAction: authorizedAction, ensureDiscovery,
   });
   const attest = createCanonicalRelayReceiptVerifier(env,{getAction:authorizedAction});
 
@@ -55,6 +58,8 @@ export function createCanonicalCentralMcpReadHandlers(
     try {
       const identity = await authenticateProductMcpClientRequest(request, env);
       if (!identity.ok) return null;
+      const discovery = await ensureDiscovery(env, identity.ownerUserId, identity.clientId);
+      if (!discovery.ok) return null;
       const catalog = await listTargets(env,{
         ownerUserId: identity.ownerUserId,
         clientKind: identity.clientKind,
@@ -158,9 +163,11 @@ export function createCanonicalCentralSessionMcpGateway(
 ) {
   const verify=createCanonicalCentralAdmissionVerifier(env,deps);
   const authorizedAction=deps.getAction ?? getProductAction;
+  const ensureDiscovery=deps.ensureDiscovery ?? ensureProductMcpTargetDiscovery;
   const canonical=createCanonicalProductMcpReadHandlers(env,{
     listTargets:deps.listTargets ?? listCanonicalProductTargets,
     getAction:authorizedAction,
+    ensureDiscovery,
   });
   const attest=createCanonicalRelayReceiptVerifier(env,{getAction:authorizedAction});
   const denied=()=>Response.json({ok:false,error:"central_admission_denied"},{
