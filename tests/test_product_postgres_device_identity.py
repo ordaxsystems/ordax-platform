@@ -141,10 +141,15 @@ class ProductPostgresDeviceIdentityTests(unittest.TestCase):
             (ROOT / "control-plane/cloudflare/production-foundation.json")
             .read_text(encoding="utf-8")
         )
-        self.assertIn(
+        self.assertNotIn(
             "product_device_setup_client_contract_not_verified",
             foundation["readiness_blockers"],
         )
+        canonical_entry = (
+            ROOT / "control-plane/cloudflare/src/product_mcp_entry.ts"
+        ).read_text(encoding="utf-8")
+        self.assertIn("handleProductDeviceSetup", canonical_entry)
+        self.assertIn("PRODUCT_DEVICE_SETUP_PATH", canonical_entry)
         self.assertFalse(foundation["deployment_ready"])
 
     def test_worker_adapter_exposes_hash_only_device_methods(self) -> None:
