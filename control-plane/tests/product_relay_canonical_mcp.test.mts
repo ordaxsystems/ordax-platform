@@ -25,6 +25,7 @@ function fixtures(){
   const byClient=(input:{ownerUserId:string;clientId:string})=>
     people.find(p=>p.owner===input.ownerUserId&&p.client===input.clientId);
   const handlers=createCanonicalRelayReadOnlyHandlers(env,{
+    ensureDiscovery:async()=>({ok:true,devices_granted:1}),
     listTargets:async (_env,input)=>{
       trace.push({type:"targets",identity:input});
       const person=byClient(input);
