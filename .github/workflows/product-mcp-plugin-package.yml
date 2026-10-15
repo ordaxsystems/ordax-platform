@@ -1,4 +1,4 @@
-name: Canonical Product Plugin Package
+name: Private Product OAuth Validation Package
 
 on:
   pull_request:
@@ -7,7 +7,6 @@ on:
       - "scripts/cloudflare/package_product_plugin.py"
       - "control-plane/tests/test_product_plugin_ssot.py"
       - ".github/workflows/product-mcp-plugin-package.yml"
-      - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/cloudflare/production-foundation.json"
   push:
     branches: [main]
@@ -16,7 +15,6 @@ on:
       - "scripts/cloudflare/package_product_plugin.py"
       - "control-plane/tests/test_product_plugin_ssot.py"
       - ".github/workflows/product-mcp-plugin-package.yml"
-      - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/cloudflare/production-foundation.json"
   workflow_dispatch:
 
@@ -25,29 +23,31 @@ permissions:
 
 jobs:
   package:
-    name: Plugin package SSOT
+    name: Private OAuth validation package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Deterministic package regression
+      - name: Validate private OAuth package against canonical Product SSOT
         run: python -m unittest discover -s control-plane/tests -p test_product_plugin_ssot.py -v
-      - name: Generate private ChatGPT plugin ZIP
-        run: python scripts/cloudflare/package_product_plugin.py --out dist/ordax-product-canary-plugin.zip
-      - name: Verify packaged file
+      - name: Generate private ChatGPT OAuth-validation ZIP
+        run: python scripts/cloudflare/package_product_plugin.py --out dist/ordax-product-oauth-validation-plugin.zip
+      - name: Verify canonical endpoint and read-only package
         run: |
-          sha256sum dist/ordax-product-canary-plugin.zip
+          sha256sum dist/ordax-product-oauth-validation-plugin.zip
           python - <<'PY'
           import json, zipfile
-          with zipfile.ZipFile("dist/ordax-product-canary-plugin.zip") as archive:
+          with zipfile.ZipFile("dist/ordax-product-oauth-validation-plugin.zip") as archive:
               m = json.loads(archive.read("mcp.json"))
-              assert m["mcpServers"]["ordax-product-canary"]["url"].endswith(".ordaxsystems.workers.dev/mcp")
-              print("ORDAX_CHATGPT_PLUGIN_SINGLE_OWNER=PASS")
+              url = m["mcpServers"]["ordax-product-canary"]["url"]
+              assert url == "https://mcp.ordax.com.br/mcp", url
+              assert "workers.dev" not in url
+              print("ORDAX_PRIVATE_OAUTH_VALIDATION_SINGLE_ENDPOINT=PASS")
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: ordax-product-canary-plugin
-          path: dist/ordax-product-canary-plugin.zip
+          name: ordax-product-oauth-validation-plugin
+          path: dist/ordax-product-oauth-validation-plugin.zip
           retention-days: 7
