@@ -1,0 +1,33 @@
+name: MCP Live Smoke Temporary
+
+on:
+  push:
+    branches:
+      - release/ordax-mcp-bootstrap-20261015
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Resolve public MCP hostname
+        run: |
+          set -euo pipefail
+          getent ahosts mcp.ordax.com.br
+      - name: Probe canonical health
+        run: |
+          set -euo pipefail
+          status="$(curl -sS --connect-timeout 10 --max-time 20 -o /tmp/mcp-health.json -w '%{http_code}' https://mcp.ordax.com.br/health)"
+          cat /tmp/mcp-health.json
+          echo "HTTP_STATUS=$status"
+          test "$status" = "200"
+      - name: Prove device bootstrap fails closed without Product auth
+        run: |
+          set -euo pipefail
+          status="$(curl -sS --connect-timeout 10 --max-time 20 -X POST -H 'Content-Type: application/json' -d '{}' -o /tmp/mcp-setup.json -w '%{http_code}' https://mcp.ordax.com.br/v3/device/setup)"
+          cat /tmp/mcp-setup.json
+          echo "HTTP_STATUS=$status"
+          test "$status" = "401"
