@@ -25,7 +25,7 @@ class PrivateProductOAuthValidationPluginTest(unittest.TestCase):
         )
         definition = json.loads(files["plugin.json"])
         self.assertEqual(definition["name"], "ordax-product-canary")
-        self.assertEqual(definition["version"], "0.1.0")
+        self.assertEqual(definition["version"], "0.2.0")
         self.assertEqual(
             definition["extensions"]["com.openai"]["interface"]["capabilities"],
             ["Read"],
@@ -67,7 +67,7 @@ class PrivateProductOAuthValidationPluginTest(unittest.TestCase):
                 )
                 self.assertEqual(
                     json.loads(archive.read("plugin.json"))["version"],
-                    "0.1.0",
+                    "0.2.0",
                 )
 
 
