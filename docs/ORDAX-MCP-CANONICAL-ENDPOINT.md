@@ -1,70 +1,69 @@
-# OrdaX MCP — endereço e identidade definitivos
+# OrdaX MCP — endpoint canônico e papel arquitetural
 
-## Um único serviço MCP oficial
+## Serviço oficial
 
-**Identidade externa planejada:** `OrdaX`.
-**Domínio canônico:** `https://mcp.ordax.com.br/mcp`.
-**Worker:** `ordax-mcp`.
-**Owner de código:** `ordaxsystems/ordax-platform`.
-**Ponto de entrada:** `src/product_mcp_entry.ts`.
-**Transporte:** HTTP streamable com OAuth 2.1.
-**Autoridade:** Supabase Auth + PostgreSQL via Hyperdrive `POSTGRES`.
+**Identidade externa:** `OrdaX`  
+**Endpoint canônico atual:** `https://mcp.ordax.com.br/mcp`  
+**Worker:** `ordax-mcp`  
+**Owner de código:** `ordaxsystems/ordax-platform`  
+**Entrypoint:** `src/product_mcp_entry.ts`  
+**Transporte:** Streamable HTTP  
+**Auth:** OAuth 2.1 / Supabase Auth  
+**Autoridade persistente:** PostgreSQL via Hyperdrive `POSTGRES`
 
-As referências de domínio/nome/estado constam **uma única vez** em
-`production-foundation.json#mcp_release`; `wrangler.mcp.toml` é validado
-contra esse SSOT. Não criar ou renomear outro OAuth, banco, executor, broker,
-fila, Runtime ou infraestrutura de dispositivos para expor o MCP.
+O endpoint está ativo externamente e o domínio/TLS já foram comprovados por smoke público. O Worker canônico continua em modo **read-only canary** e `supports_remote_actions=false` até concluir OAuth real, vínculo de dispositivo/grants e E2E ChatGPT → Runtime.
 
-O nome `control-plane-v3` pertence a um Worker com D1 no código histórico
-de produção, e não será usado como nome ou destino de deploy do MCP.
-O Worker de validação `ordax-control-plane-v3-canary` permanece apenas como
-ponto experimental *read-only* existente; NÃO é alias nem proxy do novo
-endereço. Os testes compilam o **bundle próprio do Worker `ordax-mcp`**,
-sem importar `src/index.ts` ou `env.DB` em nenhum caminho de execução.
+A fonte de verdade permanece `control-plane/cloudflare/production-foundation.json#mcp_release`. `workers.dev` fica desabilitado para o MCP oficial, D1 não é autoridade do novo MCP e não existe fallback para o Worker legado.
 
-## Decisão de segurança
+## Não confundir MCP com OrdaX Central
 
-O endereço `mcp.ordax.com.br` **ainda não está ativo**. Não anunciar
-ao ChatGPT antes que um Worker com o bundle aprovado seja implantado,
-o domínio TLS seja verificado, a sessão OAuth e o client_id real estejam
-consentidos e o PC/Runtime tenha vínculo Product canônico.
+O MCP canônico pertence ao **Modo 1 — ChatGPT direto do usuário** descrito em `docs/ORDAX-AI-CONNECTION-MODES.md`.
 
-`scripts/cloudflare/check_mcp_release.py` é o gate fail-closed da
-identidade e release pública do MCP. A política exige comprovantes
-independentes de:
+```text
+Usuário -> conta ChatGPT do usuário -> MCP OrdaX -> Runtime/Studio autorizado
+```
 
-1. Domínio customizado, DNS e TLS aprovados por HTTPS real;
-2. OAuth do cliente ChatGPT e consentimento first-party concluídos;
-3. Dispositivo Product real pareado, com grants do client_id correto;
-4. Host Central que atesta de modo independente a sessão e o PC;
-5. E2E multi-dispositivo com isolamento, revogação e falhas;
-6. Serviço legado desativado, sem possibilidade de fallback.
+Neste modo, o OrdaX não recebe a mensagem do usuário para chamar um modelo em nome dele. O ChatGPT já é o ambiente de conversa/inferência e chama o MCP somente para acessar capacidades OrdaX.
 
-O gate atual registra os seis bloqueios e **recusa** tentativa de liberar
-a produção sem as evidências. A workflow
-`OrdaX MCP Canonical Candidate` valida a configuração, executa testes
-de OAuth e compila o bundle definitivo sem possuir acesso a tokens de
-deploy e sem executar nenhuma mutação Cloudflare.
+O Worker pode executar autenticação, descoberta de targets, grants, auditoria e coordenação/atestado de sessão. Isso **não** o transforma no OrdaX Central de inferência.
 
-**Nunca** disponibilizar tools de ação remota pelo nome `OrdaX`
-enquanto o host confiável e os grants não estiverem comprovados.
-O código atual da entrada é conscientemente somente leitura; os
-resultados de CI NÃO equivalem a E2E real ChatGPT → PC.
+O **Modo 2 — OrdaX Central** é outro caminho de conversa:
 
-## Remoção do legado
+```text
+Apps/PCs -> OrdaX Central -> Model Router/provedor -> Central -> origem correta
+```
 
-A configuração velha `wrangler.toml` do **Control Plane genérico** não
-foi silenciosamente substituída, pois ainda possui D1 e o mapa de
-dependências `d1-cutover-authority-map.json` aponta migrações ausentes
-(pareamento/links, jobs de engenharia e artifact lifecycle).
-Apagá-lo por renomeação seria perder os testes de regressão e deixar
-dados/efeitos sem owner. Sua implantação já está `deployment_ready=false`.
+A Central pode reutilizar identidade, Runtime, grants, contratos de tools e auditoria, mas não deve ser inserida obrigatoriamente no caminho do MCP direto.
 
-A retirada final deste código ocorrerá **depois** de selecionar para
-cada contrato legado uma implementação canônica ou aposentadoria
-explícita, com as suites e recibos correspondentes. Não usar D1 no novo
-MCP, não duplicar uma queue e não redirecionar o plugin privado
-anterior para um serviço não homologado.
+Os nomes históricos `product_central_*` presentes em partes do código atual representam mecanismos de sessão/coordenação legados em nomenclatura. Não significam automaticamente o produto OrdaX Central de inferência.
 
-Estado em 11/10/2026: **bundle candidato configurado, domínio não
-publicado, E2E remoto não comprovado**.
+## URL versus túnel
+
+No ChatGPT, o MCP é cadastrado como uma **Server URL** HTTPS. O transporte que torna essa URL alcançável pode variar:
+
+- validação atual: `https://mcp.ordax.com.br/mcp`, Worker público Cloudflare;
+- futuro direto por dispositivo: URL HTTPS estável por dispositivo terminando no Runtime por conexão/túnel seguro iniciado pelo dispositivo.
+
+Logo, “usar URL” e “usar túnel” não são conceitos opostos: uma URL pública pode ser a ponta externa de um túnel. O produto não deve depender de URLs temporárias de demonstração como identidade estável.
+
+## Segurança atual
+
+A superfície publicada continua restrita a:
+
+- `ordax_session`
+- `ordax_profile`
+- `ordax_targets`
+- `ordax_action_status`
+
+Ações de computador, terminal, arquivos mutáveis, browser, Blender, Unity, mouse e teclado permanecem indisponíveis no MCP público até a promoção explícita com grants e E2E.
+
+Bloqueios atuais de release continuam registrados no SSOT. Nenhum deles deve ser contornado por `No Auth`, credenciais fixas, D1, `workers.dev`, sessão compartilhada ou fallback legado.
+
+## Evidência live
+
+- Worker version: `95c5b0cd-3f65-4cee-8d02-46f6bc1a91bb`
+- smoke externo: `https://github.com/ordaxsystems/ordax-platform/actions/runs/38705274585`
+- `GET /health`: público e read-only
+- `/v3/device/setup` sem autenticação: rejeita com `401 product_auth_required`
+
+Estado em 15/10/2026: **endpoint público ativo, OAuth ChatGPT real ainda em validação, ações remotas bloqueadas**.
