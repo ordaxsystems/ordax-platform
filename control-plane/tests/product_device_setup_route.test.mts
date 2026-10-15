@@ -9,11 +9,11 @@ const ENV = Object.freeze({
   PRODUCT_AUTH_JWKS_URL: "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1/.well-known/jwks.json",
   POSTGRES: { connectionString: "postgresql://localhost:6543/example" },
 });
-const URL = "https://mcp.example/v3/device/setup";
+const SETUP_URL = "https://mcp.example/v3/device/setup";
 const HEX64 = "a".repeat(64);
 
 function post(body: Record<string, unknown>, headers: Record<string, string> = {}) {
-  return new Request(URL, {
+  return new Request(SETUP_URL, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: JSON.stringify(body),
@@ -33,7 +33,7 @@ test("canonical MCP entry mounts device bootstrap without importing legacy Worke
 
 test("device bootstrap accepts only POST and fails closed before authority calls", async () => {
   const gateway = createCanonicalProductMcpGateway(ENV);
-  const get = await gateway(new Request(URL));
+  const get = await gateway(new Request(SETUP_URL));
   assert.equal(get.status, 405);
   assert.equal((await get.json()).error, "method_not_allowed");
 
