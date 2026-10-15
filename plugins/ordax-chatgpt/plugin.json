@@ -1,13 +1,13 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ordax-chatgpt",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "Connect ChatGPT to an authorized ORDAX device for grant-scoped projects, typed Computer Control, files, Git and specialized adapters.",
   "author": {
     "name": "ORDAX",
-    "url": "https://ordax-control-plane-v3.ordax-ac1ca1b50d09.workers.dev/"
+    "url": "https://mcp.ordax.com.br/"
   },
-  "homepage": "https://ordax-control-plane-v3.ordax-ac1ca1b50d09.workers.dev/",
+  "homepage": "https://mcp.ordax.com.br/",
   "repository": "https://github.com/ordaxsystems/ordax-platform",
   "license": "Proprietary",
   "keywords": [
@@ -38,10 +38,10 @@
           "Managed browser",
           "Blender & Unity adapters"
         ],
-        "websiteURL": "https://ordax-control-plane-v3.ordax-ac1ca1b50d09.workers.dev/",
-        "supportURL": "https://ordax-control-plane-v3.ordax-ac1ca1b50d09.workers.dev/support",
-        "privacyPolicyURL": "https://ordax-control-plane-v3.ordax-ac1ca1b50d09.workers.dev/privacy",
-        "termsOfServiceURL": "https://ordax-control-plane-v3.ordax-ac1ca1b50d09.workers.dev/terms",
+        "websiteURL": "https://mcp.ordax.com.br/",
+        "supportURL": "https://mcp.ordax.com.br/support",
+        "privacyPolicyURL": "https://mcp.ordax.com.br/privacy",
+        "termsOfServiceURL": "https://mcp.ordax.com.br/terms",
         "defaultPrompt": [
           "Continue working on my ORDAX project from where we left off.",
           "Show the projects available on my connected ORDAX computer.",
@@ -130,7 +130,7 @@
       },
       "publication": {
         "countries": [],
-        "release_notes": "0.4.8 binds the connector to the canonical PostgreSQL MCP release endpoint and fails closed before producing an installable package until canonical remote actions, trusted session admission, OAuth/domain readiness and end-to-end ChatGPT-to-device verification are complete. The retired legacy D1 MCP endpoint is no longer distributable.",
+        "release_notes": "0.4.9 promotes the canonical PostgreSQL-backed MCP gateway to https://mcp.ordax.com.br/mcp on the production ordax-mcp Worker and aligns all plugin metadata URLs to the canonical ORDAX domain. The connector remains fail-closed for remote mutations until canonical action admission, trusted device-attested sessions and end-to-end verification are green.",
         "translations": {
           "pt-BR": {
             "subtitle": "Use o ORDAX no ChatGPT",
