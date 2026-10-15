@@ -28,14 +28,26 @@ class McpReleaseContract(unittest.TestCase):
 
     def test_real_state_is_blocked_not_faked_ready(self):
         self.assertFalse(validate(self.foundation,self.config))
-        self.assertFalse(self.foundation["mcp_release"]["deployment_ready"])
-        self.assertEqual(len(self.foundation["mcp_release"]["readiness_blockers"]),6)
+        release=self.foundation["mcp_release"]
+        self.assertFalse(release["deployment_ready"])
+        self.assertFalse(release["supports_remote_actions"])
+        required_blockers={
+            "canonical_custom_domain_not_verified",
+            "chatgpt_oauth_client_consent_not_verified",
+            "product_device_enrollment_and_grants_missing",
+            "central_trusted_session_attestor_not_provisioned",
+            "canonical_remote_actions_not_ready",
+            "legacy_control_plane_v3_runtime_not_retired",
+            "end_to_end_chatgpt_to_device_not_verified",
+        }
+        self.assertTrue(required_blockers.issubset(set(release["readiness_blockers"])))
         self.assertFalse(self.config["workers_dev"])
         self.assertFalse(self.config["preview_urls"])
 
     def test_bogus_enablement_without_proofs_is_rejected(self):
         f=copy.deepcopy(self.foundation)
         f["mcp_release"]["deployment_ready"]=True
+        f["mcp_release"]["supports_remote_actions"]=True
         f["mcp_release"]["readiness_blockers"]=[]
         with self.assertRaisesRegex(McpReleaseError,"independent_proofs"):
             validate(f,self.config)
@@ -47,6 +59,14 @@ class McpReleaseContract(unittest.TestCase):
             for p in REQUIRED_PROOFS
         }
         with self.assertRaisesRegex(McpReleaseError,"device_dispatch_not_verified"):
+            validate(f,self.config)
+
+    def test_ready_release_cannot_disable_remote_actions(self):
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["deployment_ready"]=True
+        f["mcp_release"]["readiness_blockers"]=[]
+        f["mcp_release"]["supports_remote_actions"]=False
+        with self.assertRaisesRegex(McpReleaseError,"remote_actions_not_ready"):
             validate(f,self.config)
 
     def test_d1_old_worker_or_broader_bindings_are_never_accepted(self):
