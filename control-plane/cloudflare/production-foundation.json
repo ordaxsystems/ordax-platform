@@ -1,5 +1,5 @@
 {
-  "version": 16,
+  "version": 17,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -42,7 +42,6 @@
     "worker_d1_cutover_incomplete",
     "artifact_retention_authority_not_ready",
     "engineering_device_deletion_lifecycle_not_ready",
-    "product_device_setup_client_contract_not_verified",
     "worker_operator_auth_cutover_incomplete",
     "worker_not_provisioned",
     "cloudflare_ci_worker_editor_token_not_provisioned"
@@ -128,7 +127,6 @@
     "deployment_ready": false,
     "supports_remote_actions": false,
     "readiness_blockers": [
-      "canonical_custom_domain_not_verified",
       "chatgpt_oauth_client_consent_not_verified",
       "product_device_enrollment_and_grants_missing",
       "central_trusted_session_attestor_not_provisioned",
@@ -136,6 +134,11 @@
       "legacy_control_plane_v3_runtime_not_retired",
       "end_to_end_chatgpt_to_device_not_verified"
     ],
+    "verified_evidence": {
+      "custom_domain_tls_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38705274585",
+      "worker_version_id": "95c5b0cd-3f65-4cee-8d02-46f6bc1a91bb",
+      "observed_at": "2026-10-15T08:23:16Z"
+    },
     "safety": {
       "allow_d1": false,
       "allow_legacy_fallback": false,
