@@ -7,6 +7,7 @@
  */
 import {
   authenticateProductDevice,
+  bindProductActionRuntimeProvenance,
   claimProductAction,
   progressProductAction,
   recordProductPresence,
@@ -21,8 +22,11 @@ import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 
 type Json = Record<string, unknown>;
+type RuntimeKind = "ordax-os" | "desktop-agent" | "mobile-client" | "other";
+type RuntimeProvenance = { runtimeKind: RuntimeKind; agentVersion: string };
 export const PRODUCT_DEVICE_TRANSPORT_PREFIX = "/v3/device/transport";
 const HEX64 = /^[0-9a-f]{64}$/;
+const RUNTIME_KINDS = new Set<RuntimeKind>(["ordax-os", "desktop-agent", "mobile-client", "other"]);
 
 function respond(value: unknown, status = 200): Response {
   return Response.json(value, {
@@ -95,6 +99,20 @@ function runtimeIdentity(body: Json): { agentInstanceId: string; bootId: string 
   return { agentInstanceId, bootId };
 }
 
+function hasRuntimeProvenance(body: Json): boolean {
+  return body.runtime_kind !== undefined || body.agent_version !== undefined;
+}
+
+function runtimeProvenance(body: Json): RuntimeProvenance | null {
+  const runtimeKind = typeof body.runtime_kind === "string" ? body.runtime_kind : "";
+  const agentVersion = typeof body.agent_version === "string" ? body.agent_version : "";
+  if (!RUNTIME_KINDS.has(runtimeKind as RuntimeKind)
+      || agentVersion.length < 1 || agentVersion.length > 80
+      || agentVersion !== agentVersion.trim()
+      || /[\x00-\x1f\x7f]/u.test(agentVersion)) return null;
+  return { runtimeKind: runtimeKind as RuntimeKind, agentVersion };
+}
+
 function executionContext(body: Json) {
   const requestId = typeof body.job_id === "string" ? body.job_id.toLowerCase() : "";
   const effectId = typeof body.effect_id === "string" ? body.effect_id.toLowerCase() : "";
@@ -156,7 +174,10 @@ async function claim(request: Request, env: ProductPostgresEnv, deviceId: string
   const body = await readBoundedJsonObject(request, 16 * 1024);
   if (!body) return respond({ ok: false, error: "claim_invalid" }, 400);
   const identity = runtimeIdentity(body);
-  if (!identity) return respond({ ok: false, error: "claim_invalid" }, 400);
+  const provenance = runtimeProvenance(body);
+  if (!identity || (hasRuntimeProvenance(body) && !provenance)) {
+    return respond({ ok: false, error: "claim_invalid" }, 400);
+  }
   const leaseSeconds = body.lease_seconds === undefined ? 120 : Number(body.lease_seconds);
   if (!Number.isInteger(leaseSeconds) || leaseSeconds < 30 || leaseSeconds > 300) {
     return respond({ ok: false, error: "claim_invalid" }, 400);
@@ -174,7 +195,14 @@ async function claim(request: Request, env: ProductPostgresEnv, deviceId: string
 async function start(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
   const body = await readBoundedJsonObject(request, 16 * 1024);
   const ctx = body ? executionContext(body) : null;
-  if (!ctx) return respond({ ok: false, error: "start_invalid" }, 400);
+  const provenance = body ? runtimeProvenance(body) : null;
+  if (!ctx || (body && hasRuntimeProvenance(body) && !provenance)) {
+    return respond({ ok: false, error: "start_invalid" }, 400);
+  }
+  if (provenance) {
+    const bound = await bindProductActionRuntimeProvenance(env, { deviceId, ...ctx, ...provenance });
+    if (!bound) return respond({ ok: false, error: "runtime_provenance_conflict" }, 409);
+  }
   const ok = await startProductAction(env, { deviceId, ...ctx });
   return respond({ ok, ...(ok ? {} : { error: "lease_not_active" }) }, ok ? 200 : 409);
 }
@@ -210,6 +238,7 @@ async function progress(request: Request, env: ProductPostgresEnv, deviceId: str
 async function report(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
   const body = await readBoundedJsonObject(request, 640 * 1024);
   const ctx = body ? executionContext(body) : null;
+  const provenance = body ? runtimeProvenance(body) : null;
   const reportId = body && typeof body.report_id === "string" ? body.report_id.toLowerCase() : "";
   const status = body?.status;
   const resultCanonicalB64 = body && typeof body.result_canonical_b64 === "string"
@@ -218,7 +247,7 @@ async function report(request: Request, env: ProductPostgresEnv, deviceId: strin
     ? body.result_sha256.toLowerCase() : "";
   const errorCode = body?.error_code == null ? null : String(body.error_code);
   const resultBytes = base64ToBytes(resultCanonicalB64);
-  if (!ctx || !isCanonicalUuid(reportId)
+  if (!ctx || (body && hasRuntimeProvenance(body) && !provenance) || !isCanonicalUuid(reportId)
       || (status !== "succeeded" && status !== "failed" && status !== "cancelled")
       || !resultBytes || resultBytes.byteLength > 524288
       || !HEX64.test(resultSha256) || (errorCode !== null && errorCode.length > 120)) {
@@ -242,6 +271,10 @@ async function report(request: Request, env: ProductPostgresEnv, deviceId: strin
   if (committed.ok !== true) {
     const conflict = committed.error === "terminal_report_conflict" || committed.error === "lease_not_active";
     return respond(committed, conflict ? 409 : 400);
+  }
+  if (provenance) {
+    const bound = await bindProductActionRuntimeProvenance(env, { deviceId, ...ctx, ...provenance });
+    if (!bound) return respond({ ok: false, error: "runtime_provenance_conflict" }, 409);
   }
   return respond(committed);
 }
