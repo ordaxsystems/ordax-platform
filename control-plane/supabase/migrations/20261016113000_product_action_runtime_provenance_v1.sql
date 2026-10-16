@@ -68,27 +68,27 @@ begin
      or v_row.execution_epoch <> p_execution_epoch
      or v_row.agent_instance_id <> p_agent_instance_id
      or v_row.boot_id <> p_boot_id
-     or v_row.status not in ('leased','running')
+     or v_row.status not in ('leased','running','succeeded','failed','cancelled')
   then
     return false;
   end if;
 
-  if v_row.execution_runtime_kind is null then
-    update private.ordax_product_action_requests
-       set execution_runtime_kind = p_runtime_kind,
-           execution_agent_version = p_agent_version
-     where request_id = p_request_id;
-    return true;
+  if v_row.execution_runtime_kind is not null then
+    return v_row.execution_runtime_kind = p_runtime_kind
+       and v_row.execution_agent_version = p_agent_version;
   end if;
 
-  return v_row.execution_runtime_kind = p_runtime_kind
-     and v_row.execution_agent_version = p_agent_version;
+  update private.ordax_product_action_requests
+     set execution_runtime_kind = p_runtime_kind,
+         execution_agent_version = p_agent_version
+   where request_id = p_request_id;
+  return true;
 end;
 $$;
 
 comment on function public.ordax_bind_product_action_runtime_provenance_v1(
   uuid, uuid, uuid, uuid, uuid, bigint, uuid, text, text, text
-) is 'Binds immutable execution-time Runtime kind/version to an actively fenced Product action. Presence metadata is never substituted for historical action provenance.';
+) is 'Binds immutable execution-time Runtime kind/version to an exactly fenced Product action. Terminal binding is used only after an accepted/replayed terminal report; presence metadata is never substituted for historical action provenance.';
 
 revoke all on function public.ordax_bind_product_action_runtime_provenance_v1(
   uuid, uuid, uuid, uuid, uuid, bigint, uuid, text, text, text
