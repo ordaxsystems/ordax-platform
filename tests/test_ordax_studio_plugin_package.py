@@ -24,7 +24,7 @@ READY = {
     "endpoint": "https://mcp.ordax.com.br/mcp",
     "supports_remote_actions": True,
     "blockers": [],
-    "foundation_version": 20,
+    "foundation_version": 23,
 }
 
 
@@ -72,13 +72,13 @@ class OrdaxChatGptConnectorPackageTests(unittest.TestCase):
         self.assertEqual(server["url"], "https://mcp.ordax.com.br/mcp")
         self.assertNotEqual(server["url"], LEGACY_MCP_ENDPOINT)
 
-    def test_distribution_is_fail_closed_until_full_product_mcp_is_ready(self):
+    def test_distribution_remains_blocked_while_interactive_candidate_is_enabled(self):
         readiness = distribution_readiness()
         self.assertFalse(readiness["ready"])
-        self.assertFalse(readiness["supports_remote_actions"])
-        self.assertIn("canonical_remote_actions_not_ready", readiness["blockers"])
-        self.assertIn("attested_device_read_end_to_end_not_verified", readiness["blockers"])
-        self.assertIn("computer_observe_grant_not_authorized", readiness["blockers"])
+        self.assertTrue(readiness["supports_remote_actions"])
+        self.assertIn("canonical_remote_actions_release_not_verified", readiness["blockers"])
+        self.assertIn("attested_interactive_end_to_end_not_verified", readiness["blockers"])
+        self.assertIn("interactive_computer_grant_not_authorized", readiness["blockers"])
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(PluginDistributionBlocked):
                 build_archive(Path(directory))
