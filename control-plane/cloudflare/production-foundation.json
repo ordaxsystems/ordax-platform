@@ -1,5 +1,5 @@
 {
-  "version": 21,
+  "version": 22,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -152,6 +152,14 @@
     "oauth_issuer": "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1",
     "custom_domain_required": true,
     "workers_dev": false,
+    "edge_machine_endpoint": {
+      "scope": "hostname_only",
+      "hostname": "mcp.ordax.com.br",
+      "cloudflare_phase": "http_config_settings",
+      "cloudflare_rule_ref": "ordax_mcp_disable_bic",
+      "browser_integrity_check": false,
+      "reason": "machine_to_machine_clients_must_not_require_browser_headers"
+    },
     "deployment_ready": false,
     "supports_remote_actions": false,
     "conversation_topology": "user_chatgpt_direct",
@@ -172,8 +180,11 @@
     ],
     "verified_evidence": {
       "custom_domain_tls_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38705274585",
-      "worker_version_id": "95c5b0cd-3f65-4cee-8d02-46f6bc1a91bb",
-      "observed_at": "2026-10-15T08:23:16Z"
+      "public_read_only_smoke_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38900507479",
+      "worker_version_id": "e0d2049f-adec-46db-b094-6c9f051964ef",
+      "edge_config_ruleset_id": "b56fe7258b7f42d4843a131f4ee1e731",
+      "edge_config_rule_ref": "ordax_mcp_disable_bic",
+      "observed_at": "2026-10-16T13:10:19Z"
     },
     "safety": {
       "allow_d1": false,

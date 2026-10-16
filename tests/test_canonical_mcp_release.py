@@ -27,6 +27,23 @@ class McpReleaseContract(unittest.TestCase):
         self.assertNotIn("r2_buckets",c)
         self.assertEqual(c["hyperdrive"][0]["binding"],"POSTGRES")
 
+    def test_machine_endpoint_edge_policy_is_explicit_and_hostname_scoped(self):
+        edge=self.foundation["mcp_release"].get("edge_machine_endpoint")
+        self.assertEqual(edge,{
+            "scope":"hostname_only",
+            "hostname":"mcp.ordax.com.br",
+            "cloudflare_phase":"http_config_settings",
+            "cloudflare_rule_ref":"ordax_mcp_disable_bic",
+            "browser_integrity_check":False,
+            "reason":"machine_to_machine_clients_must_not_require_browser_headers",
+        })
+        evidence=self.foundation["mcp_release"]["verified_evidence"]
+        self.assertEqual(evidence["edge_config_rule_ref"],edge["cloudflare_rule_ref"])
+        self.assertRegex(
+            evidence["public_read_only_smoke_run_url"],
+            r"^https://github\.com/ordaxsystems/ordax-platform/actions/runs/[0-9]+$",
+        )
+
     def test_real_production_state_is_blocked_not_faked_ready(self):
         self.assertFalse(validate(self.foundation,self.config))
         release=self.foundation["mcp_release"]
@@ -45,7 +62,7 @@ class McpReleaseContract(unittest.TestCase):
         )
         self.assertEqual(
             evidence.get("worker_version_id"),
-            "95c5b0cd-3f65-4cee-8d02-46f6bc1a91bb",
+            "e0d2049f-adec-46db-b094-6c9f051964ef",
         )
         self.assertFalse(self.config["workers_dev"])
         self.assertFalse(self.config["preview_urls"])
