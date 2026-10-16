@@ -6,7 +6,7 @@ import unittest
 
 from scripts.cloudflare.check_mcp_release import (
     ROOT, FOUNDATION, CONFIG, McpReleaseError, validate, validate_interactive_candidate,
-    REQUIRED_PROOFS, VALIDATION_BASELINE_EVIDENCE,
+    REQUIRED_PROOFS, VALIDATION_BASELINE_EVIDENCE, DEVICE_MACHINE_INGRESS,
 )
 
 
@@ -44,6 +44,18 @@ class McpReleaseContract(unittest.TestCase):
             r"^https://github\.com/ordaxsystems/ordax-platform/actions/runs/[0-9]+$",
         )
 
+    def test_runtime_machine_ingress_is_separate_from_public_mcp_identity(self):
+        release=self.foundation["mcp_release"]
+        self.assertFalse(release["workers_dev"])
+        self.assertTrue(self.config["workers_dev"])
+        self.assertFalse(self.config["preview_urls"])
+        self.assertEqual(release["device_machine_ingress"],DEVICE_MACHINE_INGRESS)
+        self.assertFalse(release["device_machine_ingress"]["public_mcp_exposed"])
+        self.assertNotEqual(
+            release["device_machine_ingress"]["hostname"],
+            release["hostname"],
+        )
+
     def test_candidate_has_actions_but_production_is_still_blocked(self):
         self.assertFalse(validate(self.foundation,self.config))
         release=self.foundation["mcp_release"]
@@ -61,7 +73,8 @@ class McpReleaseContract(unittest.TestCase):
             r"^https://github\.com/ordaxsystems/ordax-platform/actions/runs/[0-9]+$",
         )
         self.assertEqual(evidence.get("worker_version_id"),"e0d2049f-adec-46db-b094-6c9f051964ef")
-        self.assertFalse(self.config["workers_dev"])
+        self.assertFalse(release["workers_dev"])
+        self.assertTrue(self.config["workers_dev"])
         self.assertFalse(self.config["preview_urls"])
 
     def test_interactive_candidate_is_eligible_while_production_remains_blocked(self):
@@ -145,7 +158,7 @@ class McpReleaseContract(unittest.TestCase):
             {"durable_objects":{"bindings":[{"name":"DEVICE_SESSIONS"}]}},
             {"r2_buckets":[{"binding":"ARTIFACTS"}]},
             {"routes":["mcp.ordax.com.br/*"]},
-            {"workers_dev":True},
+            {"workers_dev":False},
             {"preview_urls":True},
             {"vars":{"PRODUCT_AUTH_ISSUER":"https://evil.example.invalid"}},
         ):
@@ -153,6 +166,20 @@ class McpReleaseContract(unittest.TestCase):
                 c=copy.deepcopy(self.config);c.update(change)
                 with self.assertRaises(McpReleaseError): validate(self.foundation,c)
                 with self.assertRaises(McpReleaseError): validate_interactive_candidate(self.foundation,c)
+
+    def test_machine_ingress_contract_cannot_be_broadened_or_renamed(self):
+        for mutate in (
+            lambda ingress: ingress.update({"hostname":"evil.example"}),
+            lambda ingress: ingress.update({"public_mcp_exposed":True}),
+            lambda ingress: ingress["allowed_exact_paths"].append("/mcp"),
+            lambda ingress: ingress["allowed_path_prefixes"].append("/v3/product/"),
+        ):
+            f=copy.deepcopy(self.foundation)
+            mutate(f["mcp_release"]["device_machine_ingress"])
+            with self.assertRaisesRegex(McpReleaseError,"device_machine_ingress_contract_invalid"):
+                validate(f,self.config)
+            with self.assertRaises(McpReleaseError):
+                validate_interactive_candidate(f,self.config)
 
     def test_alias_or_duplicate_name_is_rejected(self):
         for field,value in (
@@ -182,6 +209,8 @@ class McpReleaseContract(unittest.TestCase):
         self.assertIn('PRODUCT_MCP_DIRECT_TOOLS',entry)
         self.assertIn('ATTESTED_DEVICE_ACTION_TOOLS',entry)
         self.assertIn('createAttestedDeviceActionHandler',entry)
+        self.assertIn('PRODUCT_DEVICE_MACHINE_HOSTNAME',entry)
+        self.assertIn('isProductDeviceMachinePath',entry)
         self.assertNotIn('createAttestedDeviceReadActionHandler',entry)
 
 
