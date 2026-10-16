@@ -20,7 +20,7 @@ on:
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/tests/product_mcp_entry.test.mts"
-      - "control-plane/tests/product_mcp_machine_ingress.test.mts"
+      - "control-plane/tests/product_mcp_trusted_client_ingress.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "control-plane/tests/product_device_transport.test.mts"
@@ -76,13 +76,13 @@ jobs:
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
 
       - name: Re-run canonical interactive MCP contract before deploy
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_machine_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_trusted_client_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
 
       - name: Build exact candidate and prove no legacy authority
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.mcp.toml --outdir .mcp-validation-deploy-bundle
 
-      - name: Assert compiled Worker is attested interactive, machine-scoped and D1-free
+      - name: Assert compiled Worker is attested interactive, trusted-client scoped and D1-free
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -94,12 +94,13 @@ jobs:
           for required in [
               'trusted_operation_required','attested-device-control','computer-observe',
               'interactive-computer-control','ordax_action_status','computer.click','computer.type',
-              'ordax-mcp.ordaxsystems.workers.dev','/v3/product/device/central-session',
-              '/v3/device/transport',
+              'ordax-mcp.ordaxsystems.workers.dev','/v3/product/session',
+              '/v3/product/device/central-session','/v3/device/transport','/v3/owner/remote-authority',
+              '/v3/owner/remote-grant-groups',
           ]:
               assert required in code, required
           print('ORDAX_MCP_ATTESTED_INTERACTIVE_BUNDLE=PASS')
-          print('ORDAX_MCP_DEVICE_MACHINE_INGRESS_GUARD=PASS')
+          print('ORDAX_MCP_TRUSTED_CLIENT_INGRESS_GUARD=PASS')
           PY
 
       - name: Validate least-privilege deployment credential exists
@@ -144,7 +145,7 @@ jobs:
           print('ORDAX_MCP_PUBLIC_ATTESTED_INTERACTIVE_SMOKE=PASS')
           PY
 
-      - name: Verify workers.dev is Runtime-only and not a second MCP endpoint
+      - name: Verify workers.dev is trusted Product ingress and never a second MCP endpoint
         shell: bash
         run: |
           set -euo pipefail
@@ -161,17 +162,34 @@ jobs:
             fi
             curl "${args[@]}" "$base$path"
           }
+          require_status() {
+            local name="$1" actual="$2" allowed="$3"
+            case " $allowed " in *" $actual "*) return 0;; esac
+            echo "::error::$name returned $actual, expected one of: $allowed"
+            cat "$tmp/$name.body" || true
+            exit 1
+          }
 
           status="$(request_status mcp POST /mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')"
-          test "$status" = 404 || { echo "::error::workers.dev exposed /mcp ($status)"; cat "$tmp/mcp.body"; exit 1; }
-
+          require_status mcp "$status" '404'
           status="$(request_status oauth GET /.well-known/oauth-protected-resource)"
-          test "$status" = 404 || { echo "::error::workers.dev exposed OAuth metadata ($status)"; cat "$tmp/oauth.body"; exit 1; }
+          require_status oauth "$status" '404'
+          status="$(request_status health GET /health)"
+          require_status health "$status" '404'
+          status="$(request_status targets GET /v3/product/targets)"
+          require_status targets "$status" '404'
 
-          status="$(request_status session GET /v3/product/device/central-session)"
-          [[ "$status" = 401 || "$status" = 403 ]] || { echo "::error::device session route did not reach credential guard ($status)"; cat "$tmp/session.body"; exit 1; }
-
+          status="$(request_status owner_session GET /v3/product/session)"
+          require_status owner_session "$status" '401 403'
+          status="$(request_status setup POST /v3/product/device/setup '{}')"
+          require_status setup "$status" '400 401 403'
+          status="$(request_status central_session GET /v3/product/device/central-session)"
+          require_status central_session "$status" '401 403'
           status="$(request_status heartbeat POST /v3/device/transport/heartbeat '{"status":"online","agent_version":"smoke","capabilities":[]}')"
-          [[ "$status" = 400 || "$status" = 401 || "$status" = 403 ]] || { echo "::error::device transport route did not reach credential/input guard ($status)"; cat "$tmp/heartbeat.body"; exit 1; }
+          require_status heartbeat "$status" '400 401 403'
+          status="$(request_status owner_authority GET '/v3/owner/remote-authority?device_id=22222222-2222-4222-8222-222222222222')"
+          require_status owner_authority "$status" '401 403'
+          status="$(request_status owner_grants POST /v3/owner/remote-grant-groups '{}')"
+          require_status owner_grants "$status" '400 401 403'
 
-          echo 'ORDAX_MCP_DEVICE_MACHINE_INGRESS_LIVE=PASS'
+          echo 'ORDAX_MCP_TRUSTED_CLIENT_INGRESS_LIVE=PASS'

@@ -1,9 +1,10 @@
 # Canonical OrdaX MCP release target. Not the legacy D1 Control Plane.
 # This config is NOT a deployment authorization. Gate requires real E2E
 # identity, device enrolment, trusted session attestation and verified DNS/TLS.
-# workers.dev is enabled only as the Runtime machine ingress. The entrypoint
-# rejects MCP/OAuth/owner/public routes on that hostname and permits only the
-# device transport and central-session attestation paths.
+# workers.dev is enabled only as the path-restricted trusted Product client
+# ingress for Runtime/Studio on networks that cannot reach the branded domain.
+# The entrypoint rejects MCP/OAuth metadata/health/public Product routes there
+# and permits only explicitly allowlisted authenticated Product handlers.
 name = "ordax-mcp"
 main = "src/product_mcp_entry.ts"
 compatibility_date = "2026-09-27"
