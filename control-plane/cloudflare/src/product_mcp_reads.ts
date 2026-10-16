@@ -62,6 +62,7 @@ function validAction(value: unknown, requestId: string): value is Record<string,
     && action.request_id.toLowerCase() === requestId.toLowerCase()
     && isCanonicalUuid(action.device_id)
     && isCanonicalUuid(action.effect_id)
+    && (action.space_id === null || isCanonicalUuid(action.space_id))
     && (action.project_id === null || isCanonicalUuid(action.project_id))
     && typeof action.capability === "string"
     && action.capability.length >= 2 && action.capability.length <= 120
@@ -158,6 +159,7 @@ export function createCanonicalProductMcpReadHandlers(
         return json({ ok: true, action: {
           request_id: result.request_id,
           device_id: result.device_id,
+          space_id: result.space_id,
           action: result.capability,
           project: null,
           project_id: result.project_id,
