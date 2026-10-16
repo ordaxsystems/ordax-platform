@@ -39,6 +39,10 @@ import {
   PRODUCT_OWNER_REMOTE_AUTHORITY_PATH,
   PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH,
 } from "./product_owner_grant_admin.ts";
+import {
+  handleProductOwnerProjectScope,
+  PRODUCT_OWNER_PROJECT_SCOPE_PATH,
+} from "./product_owner_project_scope.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 export const PRODUCT_MCP_CORE_READ_TOOLS: ReadonlySet<string> = new Set([
@@ -147,6 +151,9 @@ export function createCanonicalProductMcpGateway(
     }
     if (url.pathname.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX + "/")) {
       return handleProductDeviceTransport(request, env);
+    }
+    if (url.pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH) {
+      return handleProductOwnerProjectScope(request, env);
     }
     if (url.pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
         || url.pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH

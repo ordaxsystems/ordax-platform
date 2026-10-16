@@ -615,6 +615,17 @@
         "path": "control-plane/supabase/migrations/20261016113000_product_action_runtime_provenance_v1.sql",
         "blob_sha": "fa95c0e6adbda148055d0af47fa7d53ee9994041"
       }
+    },
+    {
+      "name": "20261016141000_owner_project_scope_resolver_v1",
+      "applied_version": "20261016174300",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261016141000_owner_project_scope_resolver_v1.sql",
+        "blob_sha": "22eb9d1b4bde21588eca5bf568069d110dacbe42"
+      }
     }
   ]
 }
