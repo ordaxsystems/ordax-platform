@@ -604,6 +604,17 @@
         "path": "control-plane/supabase/migrations/20261016063000_owner_mcp_grant_authority_v1.sql",
         "blob_sha": "7e46b641180b5b3c1fc5a40d14ae825856c1431b"
       }
+    },
+    {
+      "name": "20261016113000_product_action_runtime_provenance_v1",
+      "applied_version": "20261016122139",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261016113000_product_action_runtime_provenance_v1.sql",
+        "blob_sha": "fa95c0e6adbda148055d0af47fa7d53ee9994041"
+      }
     }
   ]
 }
