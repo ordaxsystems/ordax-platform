@@ -152,6 +152,17 @@
     "oauth_issuer": "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1",
     "custom_domain_required": true,
     "workers_dev": false,
+    "device_machine_ingress": {
+      "hostname": "ordax-mcp.ordaxsystems.workers.dev",
+      "workers_dev_enabled": true,
+      "public_mcp_exposed": false,
+      "allowed_exact_paths": [
+        "/v3/product/device/central-session"
+      ],
+      "allowed_path_prefixes": [
+        "/v3/device/transport/"
+      ]
+    },
     "edge_machine_endpoint": {
       "scope": "hostname_only",
       "hostname": "mcp.ordax.com.br",
