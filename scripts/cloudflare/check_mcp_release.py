@@ -41,12 +41,22 @@ VALIDATION_BASELINE_EVIDENCE=frozenset({
 })
 CHATGPT_OAUTH_CLIENT_ID="95d41a8f-0fb8-4c4b-9757-83ba6345062d"
 RUN_URL_RE=re.compile(r"https://github\.com/ordaxsystems/ordax-platform/actions/runs/[0-9]+")
-DEVICE_MACHINE_INGRESS={
+TRUSTED_CLIENT_INGRESS={
     "hostname":"ordax-mcp.ordaxsystems.workers.dev",
     "workers_dev_enabled":True,
     "public_mcp_exposed":False,
-    "allowed_exact_paths":["/v3/product/device/central-session"],
-    "allowed_path_prefixes":["/v3/device/transport/"],
+    "authority":"same_worker_postgresql_oauth",
+    "allowed_exact_paths":[
+        "/v3/product/session",
+        "/v3/product/device/setup",
+        "/v3/product/device/central-session",
+        "/v3/owner/remote-authority",
+        "/v3/owner/remote-grant-groups",
+    ],
+    "allowed_path_prefixes":[
+        "/v3/device/transport/",
+        "/v3/owner/remote-grant-groups/",
+    ],
 }
 
 
@@ -68,9 +78,11 @@ def validate(foundation:dict,config:dict)->bool:
         or release.get("workers_dev") is not False
         or config.get("preview_urls") is not False):
         raise McpReleaseError("mcp_public_surface_must_remain_custom_domain_only")
-    machine=release.get("device_machine_ingress")
-    if machine!=DEVICE_MACHINE_INGRESS or config.get("workers_dev") is not True:
-        raise McpReleaseError("mcp_device_machine_ingress_contract_invalid")
+    trusted_ingress=release.get("trusted_client_ingress")
+    if trusted_ingress!=TRUSTED_CLIENT_INGRESS or config.get("workers_dev") is not True:
+        raise McpReleaseError("mcp_trusted_client_ingress_contract_invalid")
+    if "device_machine_ingress" in release:
+        raise McpReleaseError("mcp_obsolete_device_machine_ingress_present")
     if any(key in config for key in (
         "d1_databases","kv_namespaces","durable_objects","r2_buckets",
         "services","routes","unsafe")):
@@ -101,13 +113,20 @@ def validate(foundation:dict,config:dict)->bool:
 
     code=ENTRY.read_text("utf-8")
     for required in (
-        'PRODUCT_DEVICE_MACHINE_HOSTNAME = "ordax-mcp.ordaxsystems.workers.dev"',
-        "isProductDeviceMachinePath",
+        'PRODUCT_TRUSTED_CLIENT_HOSTNAME = "ordax-mcp.ordaxsystems.workers.dev"',
+        "isProductTrustedClientPath",
+        "PRODUCT_OWNER_SESSION_PATH",
+        "PRODUCT_DEVICE_SETUP_PATH",
         "PRODUCT_DEVICE_CENTRAL_SESSION_PATH",
         "PRODUCT_DEVICE_TRANSPORT_PREFIX",
+        "PRODUCT_OWNER_REMOTE_AUTHORITY_PATH",
+        "PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH",
     ):
         if required not in code:
-            raise McpReleaseError("mcp_device_machine_ingress_source_guard_missing")
+            raise McpReleaseError("mcp_trusted_client_ingress_source_guard_missing")
+    for obsolete in ("PRODUCT_DEVICE_MACHINE_HOSTNAME", "isProductDeviceMachinePath"):
+        if obsolete in code:
+            raise McpReleaseError("mcp_obsolete_device_machine_ingress_source_present")
 
     blocked=release.get("readiness_blockers")
     ready=release.get("deployment_ready")
@@ -193,8 +212,8 @@ def validate_interactive_candidate(foundation:dict,config:dict)->bool:
         "supports_remote_actions: true",
         "trusted_operation_required",
         "createCanonicalProductMcpReadHandlers",
-        "PRODUCT_DEVICE_MACHINE_HOSTNAME",
-        "isProductDeviceMachinePath",
+        "PRODUCT_TRUSTED_CLIENT_HOSTNAME",
+        "isProductTrustedClientPath",
     )
     if any(item not in code for item in required):
         raise McpReleaseError("mcp_interactive_entry_contract_missing")
