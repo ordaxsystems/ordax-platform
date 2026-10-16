@@ -49,6 +49,7 @@ test("ready uses canonical discovery URL with 5s deadline and rejects redirects"
     oauth_discovery_ready: true,
     conversation_topology: "user_chatgpt_direct",
     model_relay: false,
+    supports_attested_remote_reads: true,
     supports_remote_actions: false,
   });
   assert.equal(calls, 2);
@@ -68,6 +69,7 @@ test("disabled Supabase OAuth 2.1 server does not turn configured variables into
     oauth_discovery_ready: false,
     conversation_topology: "user_chatgpt_direct",
     model_relay: false,
+    supports_attested_remote_reads: false,
     supports_remote_actions: false,
     error: "oauth_discovery_unavailable",
     upstream_http_status: 404,
@@ -151,6 +153,7 @@ test("Worker readiness distinguishes failed fetch from unreadable metadata witho
     const body = await reply.json();
     assert.equal(body.failure_stage, stage);
     assert.equal(body.error, "oauth_discovery_unavailable");
+    assert.equal(body.supports_attested_remote_reads, false);
     assert.equal(body.supports_remote_actions, false);
     assert.doesNotMatch(JSON.stringify(body), /supersecret|private token/i);
   }

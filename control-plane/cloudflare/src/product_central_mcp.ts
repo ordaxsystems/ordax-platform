@@ -16,7 +16,10 @@ import { selectCanonicalRelayProjectScope, selectCanonicalRelayDeviceScope } fro
 import { createCanonicalRelayReceiptVerifier } from "./product_relay_receipt.ts";
 import { scopeRelayMcp } from "./product_mcp_scoped.ts";
 import type { OrdaxMcpHandlers } from "./mcp_http.ts";
-import { createCanonicalProductMcpGateway } from "./product_mcp_entry.ts";
+import {
+  createCanonicalProductMcpGateway,
+  PRODUCT_MCP_CORE_READ_TOOLS,
+} from "./product_mcp_entry.ts";
 import { createCanonicalCentralAdmissionVerifier, createPostgresCentralSessionVerifier, validChatGptSessionMarker, type TrustedCentralConversation } from "./product_central_admission.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
@@ -109,16 +112,20 @@ export const createCanonicalRelayReadOnlyHandlers = createCanonicalCentralMcpRea
 
 /**
  * Inactive composition candidate for a Central-bound Product MCP connection.
- * Reuses the existing read-only canary gateway, protocol and OAuth discovery.
- * It advertises only the four safe Product MCP tools; no execution endpoint,
- * D1 Worker, provider session, cookie or conversation-specific authority.
- * DO NOT install/activate for a shared ChatGPT OAuth connection unless each
- * plugin connection is independently attested for exactly one device.
+ * Reuses the existing Product gateway protocol and OAuth discovery but keeps an
+ * explicit four-tool projection. The five direct Product device-observation
+ * tools require Runtime-attested direct-session dispatch and are intentionally
+ * not inherited by Central compositions.
  */
 export function createCanonicalCentralMcpGateway(
   env: Env, deps: Dependencies = {}, discoveryFetch: typeof fetch = fetch,
 ) {
-  return createCanonicalProductMcpGateway(env,createCanonicalCentralMcpReadHandlers(env,deps),discoveryFetch);
+  return createCanonicalProductMcpGateway(
+    env,
+    createCanonicalCentralMcpReadHandlers(env,deps),
+    discoveryFetch,
+    PRODUCT_MCP_CORE_READ_TOOLS,
+  );
 }
 
 /**
@@ -200,7 +207,9 @@ export function createCanonicalCentralSessionMcpGateway(
     projectId:scope.projectId === undefined ? null : scope.projectId,
     allowedActions:scope.actions,
   }));
-  const gateway=createCanonicalProductMcpGateway(env,scoped,discoveryFetch);
+  const gateway=createCanonicalProductMcpGateway(
+    env,scoped,discoveryFetch,PRODUCT_MCP_CORE_READ_TOOLS,
+  );
   return async (request:Request):Promise<Response>=>{
     // The original JSON-RPC request carries the provider correlation marker.
     // Internal read projections become GET Requests and lose that body, so

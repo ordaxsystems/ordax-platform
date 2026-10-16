@@ -8,16 +8,34 @@ import {
   OWNER_MCP_GRANT_PROFILES,
   productCapabilityAccessMode,
 } from "../cloudflare/src/product_owner_grant_profiles.ts";
-import { COMPUTER_DEVICE_ACTIONS, PROJECT_BROWSER_ACTIONS } from "../cloudflare/src/product_action_scope.ts";
+import {
+  COMPUTER_DEVICE_ACTIONS,
+  OBSERVE_COMPUTER_CONTROL_MODE,
+  PROJECT_BROWSER_ACTIONS,
+} from "../cloudflare/src/product_action_scope.ts";
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 
-test("owner grant profiles are explicit and full-computer-control covers canonical device actions", () => {
+test("owner grant profiles are explicit and observation remains least privilege", () => {
   const full=OWNER_MCP_GRANT_PROFILES["full-computer-control"];
   assert.equal(full.scope,"device");
   assert.deepEqual(full.capabilities.map((item)=>item.capability), [...COMPUTER_DEVICE_ACTIONS].sort());
   assert.equal(productCapabilityAccessMode("computer.screenshot"),"read");
   assert.equal(productCapabilityAccessMode("computer.click"),"write");
+
+  const observe=OWNER_MCP_GRANT_PROFILES[OBSERVE_COMPUTER_CONTROL_MODE];
+  assert.equal(observe.scope,"device");
+  assert.deepEqual(observe.capabilities, [
+    {capability:"computer.access_status",accessMode:"read"},
+    {capability:"computer.active_window",accessMode:"read"},
+    {capability:"computer.processes",accessMode:"read"},
+    {capability:"computer.screen_info",accessMode:"read"},
+    {capability:"computer.windows",accessMode:"read"},
+  ]);
+  assert.equal(observe.capabilities.some((item)=>[
+    "computer.click","computer.screenshot","computer.terminate_process","computer.type",
+  ].includes(item.capability)),false);
+
   const browser=OWNER_MCP_GRANT_PROFILES["project-browser-automation"];
   assert.equal(browser.scope,"project");
   assert.deepEqual(browser.capabilities.map((item)=>item.capability), [...PROJECT_BROWSER_ACTIONS].sort());
@@ -46,4 +64,3 @@ test("owner grant source contains no device-link or pairing authority", () => {
   for (const required of ["replaceOwnerMcpGrantGroup","revokeOwnerMcpGrantGroup","ownerMcpGrantProfile"])
     assert.equal(source.includes(required),true,required);
 });
-

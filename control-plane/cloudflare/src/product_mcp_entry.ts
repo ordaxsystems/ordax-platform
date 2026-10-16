@@ -8,8 +8,8 @@
  * Central multi-client inference relay.
  *
  * Never imports the legacy D1 Worker and never makes model arguments an
- * authorization source. Device-attested session bootstrap is allowed, but
- * remote action dispatch remains blocked until that bootstrap is proven E2E.
+ * authorization source. Device-attested read-only dispatch is allowed through
+ * the canonical Product queue; mutating remote actions remain blocked.
  */
 import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
@@ -19,8 +19,13 @@ import { checkCanonicalProductOAuthDiscovery } from "./product_oauth_readiness.t
 import {
   handleProductDeviceCentralSession,
   openCentralSessionFromMcp,
+  resolveCentralSessionFromMcp,
   PRODUCT_DEVICE_CENTRAL_SESSION_PATH,
 } from "./product_central_device_session.ts";
+import {
+  createAttestedDeviceReadActionHandler,
+  type AttestedMcpDevice,
+} from "./product_mcp_attested_device_read.ts";
 import {
   handleProductDeviceSetup,
   PRODUCT_DEVICE_SETUP_PATH,
@@ -36,8 +41,19 @@ import {
 } from "./product_owner_grant_admin.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
-const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+export const PRODUCT_MCP_CORE_READ_TOOLS: ReadonlySet<string> = new Set([
   "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
+]);
+const ATTESTED_DEVICE_READ_TOOLS: ReadonlySet<string> = new Set([
+  "computer_access_status",
+  "computer_active_window",
+  "computer_processes",
+  "computer_screen_info",
+  "computer_windows",
+]);
+export const PRODUCT_MCP_DIRECT_READ_TOOLS: ReadonlySet<string> = new Set([
+  ...PRODUCT_MCP_CORE_READ_TOOLS,
+  ...ATTESTED_DEVICE_READ_TOOLS,
 ]);
 type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction">;
 function respond(value: unknown, status = 200): Response {
@@ -66,17 +82,15 @@ async function mcpToolName(request: Request): Promise<string | null> {
   }
 }
 
-/** Injecting read handlers is an internal test seam, never an HTTP option. */
+/** Injecting read handlers or a narrower tool projection is an internal test/composition seam, never an HTTP option. */
 export function createCanonicalProductMcpGateway(
   env: Env,
   reads: ReadHandlers = createCanonicalProductMcpReadHandlers(env),
   discoveryFetch: typeof fetch = fetch,
+  allowedTools: ReadonlySet<string> = PRODUCT_MCP_DIRECT_READ_TOOLS,
 ) {
-  const handlers: OrdaxMcpHandlers = {
+  const deniedHandlers: OrdaxMcpHandlers = {
     ...reads,
-    // The public model still cannot choose a PC, Space, project or operation.
-    // Remote enqueue is promoted only after the device-attested session path
-    // has independent E2E evidence.
     createAction: async () => respond({ ok: false, error: "trusted_operation_required" }, 403),
   };
   return async (request: Request): Promise<Response> => {
@@ -85,11 +99,12 @@ export function createCanonicalProductMcpGateway(
     if (request.method === "GET" && url.pathname === "/health") {
       return respond({
         ok: true, service: "ordax-platform-mcp",
-        mode: "read-only-canary",
+        mode: "attested-read-only",
         conversation_topology: "user_chatgpt_direct",
         model_relay: false,
         auth_configured: productAuthConfigured(env),
         postgres_configured: productPostgresConfigured(env),
+        supports_attested_remote_reads: true,
         supports_remote_actions: false,
       });
     }
@@ -98,6 +113,7 @@ export function createCanonicalProductMcpGateway(
         return respond({
           ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
           conversation_topology: "user_chatgpt_direct", model_relay: false,
+          supports_attested_remote_reads: false,
           supports_remote_actions: false, error: "platform_mcp_unconfigured",
         }, 503);
       }
@@ -107,6 +123,7 @@ export function createCanonicalProductMcpGateway(
         oauth_discovery_ready: discovery.ok,
         conversation_topology: "user_chatgpt_direct",
         model_relay: false,
+        supports_attested_remote_reads: discovery.ok,
         supports_remote_actions: false,
         ...(discovery.error ? { error: discovery.error } : {}),
         ...(discovery.upstream_http_status !== undefined ? { upstream_http_status: discovery.upstream_http_status } : {}),
@@ -137,16 +154,36 @@ export function createCanonicalProductMcpGateway(
       return handleProductOwnerGrantAdmin(request, env);
     }
     if (url.pathname === "/mcp") {
+      const toolName = await mcpToolName(request);
       // ordax_session is already a safe authenticated read tool. Its only new
       // side effect is opening/renewing a short-lived, server-selected device
       // challenge from the hidden provider correlation marker. This is session
       // coordination for the direct MCP path; it is not Central model relay.
-      // Failure to open the challenge never fabricates a binding and does not
-      // weaken the existing session-auth result.
-      if (await mcpToolName(request) === "ordax_session") {
+      if (toolName === "ordax_session") {
         try { await openCentralSessionFromMcp(request.clone(), env); } catch { /* fail closed */ }
       }
-      return handleOrdaxMcp(request, handlers, READ_ONLY_TOOLS);
+
+      let handlers = deniedHandlers;
+      if (toolName && allowedTools.has(toolName) && ATTESTED_DEVICE_READ_TOOLS.has(toolName)) {
+        let trusted: AttestedMcpDevice | null = null;
+        try {
+          const resolved = await resolveCentralSessionFromMcp(request.clone(), env);
+          if (resolved.ok) {
+            trusted = Object.freeze({
+              ownerUserId: resolved.ownerUserId,
+              clientId: resolved.clientId,
+              deviceId: resolved.deviceId,
+            });
+          }
+        } catch {
+          trusted = null;
+        }
+        handlers = {
+          ...reads,
+          createAction: createAttestedDeviceReadActionHandler(env, trusted),
+        };
+      }
+      return handleOrdaxMcp(request, handlers, allowedTools);
     }
     return respond({ ok: false, error: "not_found" }, 404);
   };

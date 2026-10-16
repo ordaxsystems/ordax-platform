@@ -1,4 +1,4 @@
-"""Canonical production release stays blocked; read-only validation is separate."""
+"""Canonical mutation release stays blocked; attested read-only validation is separate."""
 import copy
 import json
 import tomllib
@@ -33,12 +33,9 @@ class McpReleaseContract(unittest.TestCase):
         self.assertFalse(release["deployment_ready"])
         self.assertFalse(release["supports_remote_actions"])
         required_blockers={
-            "chatgpt_oauth_client_consent_not_verified",
-            "product_device_enrollment_and_grants_missing",
-            "central_trusted_session_attestor_not_provisioned",
+            "computer_observe_grant_not_authorized",
+            "attested_device_read_end_to_end_not_verified",
             "canonical_remote_actions_not_ready",
-            "legacy_control_plane_v3_runtime_not_retired",
-            "end_to_end_chatgpt_to_device_not_verified",
         }
         self.assertTrue(required_blockers.issubset(set(release["readiness_blockers"])))
         evidence=release.get("verified_evidence") or {}
@@ -57,7 +54,7 @@ class McpReleaseContract(unittest.TestCase):
         self.assertFalse(validate(self.foundation,self.config))
         self.assertTrue(validate_read_only_validation(self.foundation,self.config))
         release=self.foundation["mcp_release"]
-        self.assertEqual(release["validation_mode"],"read-only-canary")
+        self.assertEqual(release["validation_mode"],"attested-read-only")
         self.assertTrue(release["validation_deployment_ready"])
         self.assertFalse(release["supports_remote_actions"])
         evidence=release["read_only_validation_evidence"]
@@ -159,9 +156,13 @@ class McpReleaseContract(unittest.TestCase):
         self.assertNotIn("env.DB",entry)
         self.assertNotIn("ordax-control-plane-v3",entry)
         self.assertIn('supports_remote_actions: false',entry)
+        self.assertIn('supports_attested_remote_reads: true',entry)
         self.assertIn('trusted_operation_required',entry)
         self.assertIn('createCanonicalProductMcpReadHandlers',entry)
-        self.assertIn('READ_ONLY_TOOLS',entry)
+        self.assertIn('PRODUCT_MCP_CORE_READ_TOOLS',entry)
+        self.assertIn('PRODUCT_MCP_DIRECT_READ_TOOLS',entry)
+        self.assertIn('ATTESTED_DEVICE_READ_TOOLS',entry)
+        self.assertIn('createAttestedDeviceReadActionHandler',entry)
 
 if __name__=="__main__":
     unittest.main()

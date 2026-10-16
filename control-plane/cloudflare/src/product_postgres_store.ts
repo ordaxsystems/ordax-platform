@@ -317,7 +317,7 @@ export async function enqueueProductAction(
   env: ProductPostgresEnv,
   input: {
     ownerUserId: string;
-    spaceId: string;
+    spaceId: string | null;
     projectId: string | null;
     deviceId: string;
     clientKind: RemoteClientKind;

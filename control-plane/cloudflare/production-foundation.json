@@ -1,5 +1,5 @@
 {
-  "version": 19,
+  "version": 21,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -121,7 +121,7 @@
       "windows_delivery": "studio_plus_runtime",
       "ordax_os_delivery": "native_runtime",
       "current_validation_endpoint": "https://mcp.ordax.com.br/mcp",
-      "device_tunnel_transport": "allowed_future_direct_transport",
+      "device_tunnel_transport": "product_mcp_postgres_device_transport",
       "central_ai_relay_required": false
     },
     "central_ai_relay": {
@@ -156,22 +156,19 @@
     "supports_remote_actions": false,
     "conversation_topology": "user_chatgpt_direct",
     "model_relay": false,
-    "validation_mode": "read-only-canary",
+    "validation_mode": "attested-read-only",
     "validation_deployment_ready": true,
     "read_only_validation_evidence": {
-      "candidate_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38813940880",
-      "control_plane_ci_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38813941184",
-      "canary_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38813941288",
+      "candidate_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38875928110",
+      "control_plane_ci_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38875928115",
+      "canary_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38875928179",
       "chatgpt_oauth_client_id": "95d41a8f-0fb8-4c4b-9757-83ba6345062d",
       "chatgpt_oauth_consent_granted_at": "2026-10-15T16:17:07.108736Z"
     },
     "readiness_blockers": [
-      "chatgpt_oauth_client_consent_not_verified",
-      "product_device_enrollment_and_grants_missing",
-      "central_trusted_session_attestor_not_provisioned",
-      "canonical_remote_actions_not_ready",
-      "legacy_control_plane_v3_runtime_not_retired",
-      "end_to_end_chatgpt_to_device_not_verified"
+      "computer_observe_grant_not_authorized",
+      "attested_device_read_end_to_end_not_verified",
+      "canonical_remote_actions_not_ready"
     ],
     "verified_evidence": {
       "custom_domain_tls_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38705274585",

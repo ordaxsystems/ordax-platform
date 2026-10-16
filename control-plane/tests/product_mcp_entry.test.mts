@@ -32,7 +32,7 @@ test("published canary entry cannot accidentally import legacy D1 Worker or conf
   assert.match(config, /binding = "POSTGRES"/);
   assert.match(config, /id = "4b601ec5815f43259bd8040053825d2a"/);
 });
-test("health is honest about direct ChatGPT topology, read-only operation and Product authority", async () => {
+test("health is honest about attested read-only operation and Product authority", async () => {
   const run = createCanonicalProductMcpGateway(ENV);
   const response = await run(new Request("https://canary.example/health"));
   const status = await response.json();
@@ -42,13 +42,15 @@ test("health is honest about direct ChatGPT topology, read-only operation and Pr
     mode: status.mode,
     topology: status.conversation_topology,
     model_relay: status.model_relay,
+    supports_attested_remote_reads: status.supports_attested_remote_reads,
     supports_remote_actions: status.supports_remote_actions,
     auth: status.auth_configured,
     postgres: status.postgres_configured,
   }, {
-    mode: "read-only-canary",
+    mode: "attested-read-only",
     topology: "user_chatgpt_direct",
     model_relay: false,
+    supports_attested_remote_reads: true,
     supports_remote_actions: false,
     auth: true,
     postgres: true,
@@ -72,7 +74,7 @@ test("owner session route is exposed on canonical MCP gateway and fails closed w
   assert.deepEqual(json, { ok: false, error: "product_auth_required" });
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
-test("MCP discovery advertises only four canonical read-only tools, not computer or terminal actions", async () => {
+test("MCP discovery advertises core reads plus only five attested computer observation tools", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   const response = await run(new Request(MCP_URL, {
@@ -83,14 +85,20 @@ test("MCP discovery advertises only four canonical read-only tools, not computer
   assert.equal(response.status, 200);
   assert.deepEqual(json.result.tools.map((t: any) => t.name), [
     "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
+    "computer_windows", "computer_active_window", "computer_screen_info",
+    "computer_access_status", "computer_processes",
   ]);
+  assert.ok(json.result.tools.every((tool: any) => tool.annotations.readOnlyHint === true));
   assert.equal(calls.session, 1);
   assert.equal(calls.targets, 0);
 });
-test("unadvertised computer action cannot reach createAction or executor", async () => {
+test("mutating, screenshot, filesystem and terminal tools remain unadvertised", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
-  for (const action of ["computer_screen_info", "terminal_exec", "project_text_write", "workspace_directory_list"]) {
+  for (const action of [
+    "computer_screenshot", "computer_click", "computer_text_read",
+    "terminal_exec", "project_text_write", "workspace_directory_list",
+  ]) {
     const response = await run(request(action, { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
     assert.equal(response.status, 200);
     const json = await response.json();
@@ -98,6 +106,17 @@ test("unadvertised computer action cannot reach createAction or executor", async
     assert.equal(calls.targets, 0);
     assert.equal(calls.getAction, 0);
   }
+});
+test("attested observation tool is advertised but fails closed without a verified session binding", async () => {
+  const { handlers } = fakeHandlers();
+  const run = createCanonicalProductMcpGateway(ENV, handlers);
+  const response = await run(request("computer_windows", {
+    device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  }));
+  assert.equal(response.status, 200);
+  const json = await response.json();
+  assert.equal(json.result.isError, true);
+  assert.equal(json.result.structuredContent.error, "trusted_operation_required");
 });
 test("reading authorized targets requires the same session but never invents devices", async () => {
   const { handlers, calls } = fakeHandlers();
@@ -123,7 +142,7 @@ test("unconfigured and unauthenticated clients fail closed, no legacy routes exp
   }
 });
 
-test("canary session accurately reports the exposed tool count, not hidden executor tools", async () => {
+test("session reports the expanded read-only tool count without exposing writes", async () => {
   const { handlers } = fakeHandlers();
   const gateway = createCanonicalProductMcpGateway(ENV, handlers);
   const response = await gateway(request("ordax_session"));
@@ -131,7 +150,7 @@ test("canary session accurately reports the exposed tool count, not hidden execu
   assert.equal(response.status, 200);
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
-  assert.equal(json.result.structuredContent.mcp_tool_count, 4);
+  assert.equal(json.result.structuredContent.mcp_tool_count, 9);
   assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-11.1");
 });
 
