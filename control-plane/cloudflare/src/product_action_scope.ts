@@ -95,6 +95,7 @@ export const INTERACTIVE_COMPUTER_CONTROL_MODE = "interactive-computer-control";
 export const FILESYSTEM_COMPUTER_CONTROL_MODE = "computer-filesystem";
 export const CLIPBOARD_COMPUTER_CONTROL_MODE = "computer-clipboard";
 export const PROCESS_COMPUTER_CONTROL_MODE = "computer-process-control";
+export const OBSERVE_COMPUTER_CONTROL_MODE = "computer-observe";
 const MAX_BODY_BYTES = 16 * 1024;
 
 export const OWNER_DEVICE_COMPUTER_GRANT_PROFILES: Readonly<Record<string, readonly string[]>> = {
@@ -133,5 +134,15 @@ export const OWNER_DEVICE_COMPUTER_GRANT_PROFILES: Readonly<Record<string, reado
   [PROCESS_COMPUTER_CONTROL_MODE]: [
     "computer.processes",
     "computer.terminate_process",
+  ],
+  // Least-privilege observation profile for attested Product-MCP sessions.
+  // Keep this entry last so authorization hints prefer it over broader profiles
+  // for capabilities shared with interactive/process-control grants.
+  [OBSERVE_COMPUTER_CONTROL_MODE]: [
+    "computer.access_status",
+    "computer.active_window",
+    "computer.processes",
+    "computer.screen_info",
+    "computer.windows",
   ],
 };
