@@ -8,8 +8,8 @@
  * Central multi-client inference relay.
  *
  * Never imports the legacy D1 Worker and never makes model arguments an
- * authorization source. Device-attested read-only dispatch is allowed through
- * the canonical Product queue; mutating remote actions remain blocked.
+ * authorization source. Device actions are dispatched only through the
+ * Runtime-attested Product session and current canonical PostgreSQL grants.
  */
 import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
@@ -23,9 +23,9 @@ import {
   PRODUCT_DEVICE_CENTRAL_SESSION_PATH,
 } from "./product_central_device_session.ts";
 import {
-  createAttestedDeviceReadActionHandler,
+  createAttestedDeviceActionHandler,
   type AttestedMcpDevice,
-} from "./product_mcp_attested_device_read.ts";
+} from "./product_mcp_attested_device_action.ts";
 import {
   handleProductDeviceSetup,
   PRODUCT_DEVICE_SETUP_PATH,
@@ -48,17 +48,34 @@ type Env = ProductAuthEnv & ProductPostgresEnv;
 export const PRODUCT_MCP_CORE_READ_TOOLS: ReadonlySet<string> = new Set([
   "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
 ]);
-const ATTESTED_DEVICE_READ_TOOLS: ReadonlySet<string> = new Set([
+const ATTESTED_DEVICE_OBSERVE_TOOLS: ReadonlySet<string> = new Set([
   "computer_access_status",
   "computer_active_window",
   "computer_processes",
   "computer_screen_info",
   "computer_windows",
 ]);
-export const PRODUCT_MCP_DIRECT_READ_TOOLS: ReadonlySet<string> = new Set([
-  ...PRODUCT_MCP_CORE_READ_TOOLS,
-  ...ATTESTED_DEVICE_READ_TOOLS,
+const ATTESTED_DEVICE_INTERACTIVE_TOOLS: ReadonlySet<string> = new Set([
+  "computer_screenshot",
+  "computer_focus_window",
+  "computer_click",
+  "computer_mouse_move",
+  "computer_drag",
+  "computer_launch_app",
+  "computer_scroll",
+  "computer_type",
+  "computer_hotkey",
 ]);
+const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
+  ...ATTESTED_DEVICE_OBSERVE_TOOLS,
+  ...ATTESTED_DEVICE_INTERACTIVE_TOOLS,
+]);
+export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
+  ...PRODUCT_MCP_CORE_READ_TOOLS,
+  ...ATTESTED_DEVICE_ACTION_TOOLS,
+]);
+// Compatibility export for callers/tests that previously consumed the read-only name.
+export const PRODUCT_MCP_DIRECT_READ_TOOLS = PRODUCT_MCP_DIRECT_TOOLS;
 type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction">;
 function respond(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
@@ -91,7 +108,7 @@ export function createCanonicalProductMcpGateway(
   env: Env,
   reads: ReadHandlers = createCanonicalProductMcpReadHandlers(env),
   discoveryFetch: typeof fetch = fetch,
-  allowedTools: ReadonlySet<string> = PRODUCT_MCP_DIRECT_READ_TOOLS,
+  allowedTools: ReadonlySet<string> = PRODUCT_MCP_DIRECT_TOOLS,
 ) {
   const deniedHandlers: OrdaxMcpHandlers = {
     ...reads,
@@ -103,13 +120,13 @@ export function createCanonicalProductMcpGateway(
     if (request.method === "GET" && url.pathname === "/health") {
       return respond({
         ok: true, service: "ordax-platform-mcp",
-        mode: "attested-read-only",
+        mode: "attested-device-control",
         conversation_topology: "user_chatgpt_direct",
         model_relay: false,
         auth_configured: productAuthConfigured(env),
         postgres_configured: productPostgresConfigured(env),
         supports_attested_remote_reads: true,
-        supports_remote_actions: false,
+        supports_remote_actions: true,
       });
     }
     if (request.method === "GET" && url.pathname === "/ready") {
@@ -128,7 +145,7 @@ export function createCanonicalProductMcpGateway(
         conversation_topology: "user_chatgpt_direct",
         model_relay: false,
         supports_attested_remote_reads: discovery.ok,
-        supports_remote_actions: false,
+        supports_remote_actions: discovery.ok,
         ...(discovery.error ? { error: discovery.error } : {}),
         ...(discovery.upstream_http_status !== undefined ? { upstream_http_status: discovery.upstream_http_status } : {}),
         ...(discovery.failure_stage ? { failure_stage: discovery.failure_stage } : {}),
@@ -171,7 +188,7 @@ export function createCanonicalProductMcpGateway(
       }
 
       let handlers = deniedHandlers;
-      if (toolName && allowedTools.has(toolName) && ATTESTED_DEVICE_READ_TOOLS.has(toolName)) {
+      if (toolName && allowedTools.has(toolName) && ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)) {
         let trusted: AttestedMcpDevice | null = null;
         try {
           const resolved = await resolveCentralSessionFromMcp(request.clone(), env);
@@ -187,7 +204,7 @@ export function createCanonicalProductMcpGateway(
         }
         handlers = {
           ...reads,
-          createAction: createAttestedDeviceReadActionHandler(env, trusted),
+          createAction: createAttestedDeviceActionHandler(env, trusted),
         };
       }
       return handleOrdaxMcp(request, handlers, allowedTools);
