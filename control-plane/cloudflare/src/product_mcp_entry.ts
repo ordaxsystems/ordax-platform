@@ -13,7 +13,7 @@
  */
 import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
-import { productAuthConfigured, type ProductAuthEnv } from "./product_auth.ts";
+import { productAuthConfigured, productOwnerAccountSession, type ProductAuthEnv } from "./product_auth.ts";
 import { productPostgresConfigured, type ProductPostgresEnv } from "./product_postgres_store.ts";
 import { checkCanonicalProductOAuthDiscovery } from "./product_oauth_readiness.ts";
 import {
@@ -107,6 +107,11 @@ export function createCanonicalProductMcpGateway(
     if (request.method === "GET" && metadata) {
       if (!productAuthConfigured(env)) return respond({ ok: false, error: "product_auth_unconfigured" }, 503);
       return respond(resourceMetadata(url.origin, String(env.PRODUCT_AUTH_ISSUER)));
+    }
+    if (request.method === "GET" && url.pathname === "/v3/product/session") {
+      // Studio owner validation shares the same signed Product identity boundary
+      // as enrollment. It does not grant MCP client permissions or remote actions.
+      return productOwnerAccountSession(request, env);
     }
     if (url.pathname === PRODUCT_DEVICE_SETUP_PATH) {
       return handleProductDeviceSetup(request, env);
