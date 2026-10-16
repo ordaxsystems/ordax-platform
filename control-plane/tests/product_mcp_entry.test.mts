@@ -64,6 +64,14 @@ test("OAuth protected resource metadata references the actual MCP origin and sin
   assert.deepEqual(json.authorization_servers, [ENV.PRODUCT_AUTH_ISSUER]);
   assert.deepEqual(json.bearer_methods_supported, ["header"]);
 });
+test("owner session route is exposed on canonical MCP gateway and fails closed without bearer", async () => {
+  const run = createCanonicalProductMcpGateway(ENV);
+  const response = await run(new Request("https://canary.example/v3/product/session"));
+  const json = await response.json();
+  assert.equal(response.status, 401);
+  assert.deepEqual(json, { ok: false, error: "product_auth_required" });
+  assert.equal(response.headers.get("cache-control"), "no-store");
+});
 test("MCP discovery advertises only four canonical read-only tools, not computer or terminal actions", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
