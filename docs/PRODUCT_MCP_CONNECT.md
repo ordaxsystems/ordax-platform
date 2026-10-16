@@ -1,329 +1,251 @@
-# Conectar o ORDAX ao ChatGPT
+# Conectar o OrdaX ao ChatGPT
+
+## Terminologia
+
+No ChatGPT, o OrdaX é conectado como um **servidor MCP personalizado**.
+
+Nome canônico de produto: **OrdaX MCP**.  
+Endpoint canônico: `https://mcp.ordax.com.br/mcp`.
+
+A interface do ChatGPT pode manter essa configuração dentro da área chamada **Plugins**, e o repositório contém arquivos internos com `plugin` no nome para empacotamento e compatibilidade. Isso é detalhe de implementação; a conexão do usuário é um servidor MCP personalizado.
+
+A referência operacional completa está em [CHATGPT-CUSTOM-MCP-SERVER.md](CHATGPT-CUSTOM-MCP-SERVER.md).
 
 ## Arquitetura
 
-O ORDAX Runtime mantém o computador conectado ao Control Plane. O ChatGPT não acessa `localhost` e não precisa manter um terminal aberto.
+O OrdaX Runtime mantém o computador conectado ao plano de controle. O ChatGPT não acessa `localhost` e não precisa manter um terminal aberto.
 
 ```text
-ChatGPT normal
+ChatGPT do usuário
    |
-   | ORDAX Studio (conector ChatGPT)
+   | OAuth + MCP Streamable HTTP
    v
-MCP remoto do Control Plane (definido pelo manifest publicado)
+https://mcp.ordax.com.br/mcp
    |
    v
-ORDAX Runtime no Windows
+OrdaX Control Plane
+   |-- identidade OAuth
+   |-- targets / presença
+   |-- grants / Spaces
+   |-- admissão / auditoria / status
+   v
+OrdaX Runtime autorizado
    |
-   +-- projetos
-   +-- arquivos / Git
-   +-- preview / processos
    +-- Computer Control
-   +-- Blender / Unity
+   +-- projetos / arquivos (família em evolução)
+   +-- Git (família em evolução)
+   +-- preview / processos
+   +-- browser de testes (família em evolução)
+   +-- Blender / Unity (adapters especializados em evolução)
 ```
 
-## Conector
+O dispositivo onde o ChatGPT está aberto é o **cliente**. O dispositivo escolhido a partir de `ordax_targets` é o **target**. Cliente e target podem ser dispositivos diferentes e o target nunca deve ser trocado silenciosamente.
 
-### Onde ficam os arquivos e qual dispositivo executa
+## Cadastro no ChatGPT
 
-O dispositivo onde o ChatGPT/Studio abre é o **cliente**; o dispositivo
-selecionado em `ordax_targets` é um possível **alvo**, com projeto, grants e
-Runtime próprios. Não trocar esse alvo silenciosamente. Cadastro/presença e
-`device_kind=mobile` são metadados, não acesso a arquivos, câmera, sensores ou
-capabilities desktop. O setup Product aceita identidade mobile, mas o agente
-Mobile Companion ainda está desativado no contrato OS.
+Usar:
 
-Ferramentas de projeto atuais encaminham ações ao Runtime do alvo autorizado.
-Na Web, arquivos do PC não aparecem automaticamente na nuvem; o PC precisa
-estar disponível para operações locais. Projeto já na nuvem requer conector
-ou serviço de arquivos autorizado; executar build/preview exige executor
-provisionado. Nenhum desses executores/fluxos cloud é criado por hospedar a UI
-ou o MCP na Cloudflare. User Cloud Storage do OS permanece em fundação com
-rollout desativado, sem integração desses arquivos no plugin.
+| Campo | Valor |
+| --- | --- |
+| Tipo | Servidor MCP personalizado |
+| Nome | OrdaX |
+| URL do servidor | `https://mcp.ordax.com.br/mcp` |
+| Autenticação | OAuth |
 
-Um telefone pode ser cliente de uma futura composição Web/mobile e solicitar
-trabalho em outro alvo. Servir seus próprios arquivos/capacidades requer
-adapter mobile e permissões/grants explícitos; não é consequência de login.
-Usar somente arquivos já hospedados na nuvem não exige instalar um agente no
-PC do usuário, mas a integração cloud ainda precisa ser implementada.
+Não usar `No Auth`, token fixo, URL `workers.dev`, endpoint temporário ou uma URL versionada criada apenas para atualizar tools.
 
-O `initialize.instructions` do MCP orienta essa distinção para o provider.
-Teste de catálogo misto verifica metadados desktop/mobile, nenhum dispatch e
-nenhum campo de acesso privado exportado; não é prova de aparelho real,
-agente Android/iOS, deploy ou integração de arquivos cloud.
+O arquivo `plugins/ordax-chatgpt/mcp.json` preserva a configuração compatível de empacotamento do mesmo endpoint. Ele não representa um segundo servidor.
 
-A fonte do conector do ChatGPT fica em `plugins/ordax-chatgpt/`. O pacote contém somente os manifests/configuração e assets necessários para apontar o ChatGPT ao MCP remoto. O runtime real continua no dispositivo.
+## Autenticação e autoridade
 
-O nome visível do conector é **ORDAX Studio**, governado pelo mesmo manifest
-`plugins/ordax-chatgpt/plugin.json` usado no pacote. O ID estável `ordax-chatgpt`
-continua identificando o conector ChatGPT, com versão independente do app. O
-nome compartilhado não altera ownership nem embute Studio/Runtime no plugin.
-[IA do OS, contratos necessários e limites atuais](ORDAX_PROVIDER_CONNECTORS.md#relationship-to-ordax-os).
+A autenticação do caminho canônico usa OAuth. A identidade persistente e os grants do MCP novo pertencem à autoridade PostgreSQL do OrdaX Platform.
 
-Outros providers devem seguir o mesmo padrão com conectores independentes, por exemplo `ORDAX for Grok`, reutilizando o mesmo protocolo, Control Plane, grants e handlers tipados.
+Princípios obrigatórios:
 
-## Autenticação OAuth e cutover do Supabase
+- o usuário e o cliente OAuth são derivados de credenciais verificadas, não de campos fornecidos pelo caller;
+- um target aparecer no catálogo não concede execução;
+- grants são avaliados por capability e podem ser associados a Space/projeto;
+- revogação e expiração precisam ser respeitadas em cada nova operação;
+- D1 não é autoridade paralela do MCP canônico;
+- não existe fallback silencioso para o Worker legado;
+- o Runtime aplica uma política local adicional antes da execução.
 
-O **SSOT de identidade** para a próxima versão do OrdaX Platform é o projeto Supabase
-`jhfphsjptrpmtnzkpwud` (`ordax-platform`, São Paulo). A página
-`/oauth/consent` deriva a origem desse projeto exclusivamente da variável
-`PRODUCT_AUTH_ISSUER`; a chave `SUPABASE_PUBLISHABLE_KEY` é pública e
-pertence ao mesmo projeto. Sem configuração válida, a rota retorna **503**
-(fail-closed), sem fallback ao projeto antigo.
+## Descoberta dos dispositivos
 
-A tela não cria contas no fluxo de link mágico
-(`shouldCreateUser: false`). A aprovação de um OAuth client só é habilitada
-após validar os detalhes do `authorization_id` junto ao Supabase.
+`ordax_targets` retorna somente a visão autorizada para a sessão atual, incluindo presença informada e grupos de grants publicados.
 
-**Migração ainda pendente:** o manifest do conector distribuído
-(`plugins/ordax-chatgpt/mcp.json`) aponta para o Worker publicado na conta
-Cloudflare antiga. Essa URL é operacionalmente legada e **não valida** o
-projeto Supabase canônico. Não redirecionar o manifest nem desligar o serviço
-antigo antes do cutover coordenado, preservando conexões existentes.
+Interpretar os campos de forma estrita:
 
-Antes de anunciar o OAuth em produção no ambiente canônico:
+- `online=true` significa presença informada pela plataforma; não é grant;
+- `last_seen_at` informa a última presença conhecida; não cria reachability;
+- um dispositivo offline pode continuar no catálogo;
+- um dispositivo online pode rejeitar uma operação por ausência de capability;
+- `grant_groups` descreve autorização publicada para aquele target/contexto.
 
-1. Habilitar o **OAuth 2.1 Server** no projeto Supabase correto, configurar
-   **Authentication → URL Configuration** (Site URL/redirects) e o caminho
-   `/oauth/consent` em **Authentication → OAuth Server**.
-2. Configurar o modo de clientes OAuth: **registro dinâmico (DCR)** para
-   provedores MCP compatíveis, com consentimento por usuário e monitoramento,
-   **ou** pré-cadastrar cada cliente com URI de redirecionamento exata.
-   **Zero clientes pré-cadastrados não é falha por si só se o DCR estiver
-   habilitado.** Configurar também envio de e-mails e a política de
-   cadastro/recuperação.
-3. Concluir o cutover seguro Worker/D1 → PostgreSQL, secrets, grants e
-   vinculação do dispositivo na conta Cloudflare exclusiva do ORDAX.
-4. Publicar o Worker canônico **somente após** o gate de readiness e
-   testar PKCE, consentimento, revogação, isolamento por `client_id`,
-   ausência de grants, fluxo de e-mail, cadastro desabilitado e E2E no Runtime.
-5. Atualizar manifests e URL pública apenas depois de demonstrar E2E
-   no ambiente novo, preservando rollback e auditabilidade.
+Não fazer scan de rede para inventar targets e não usar nome do computador como autoridade de segurança. O UUID do target retornado pelo MCP é a identidade usada nas tools.
 
-### Verificação não destrutiva do OAuth canônico
+## Superfície atual
 
-Executar na raiz do repositório:
+Em 16/10/2026 a conexão autenticada do ChatGPT reporta **18 tools**.
 
-```bash
-python scripts/cloudflare/verify_product_oauth_server.py https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1
-```
+### Sessão, perfil, targets e status
 
-O verificador aceita **somente** o emissor do projeto Supabase, valida a
-descoberta OAuth (issuer, endpoints na mesma origem, PKCE S256, cliente público
-`none` e anúncio do registro dinâmico) e não aceita redirecionamentos de
-HTTP nem respostas JSON excessivas. Não usa token administrativo.
+- `ordax_session`
+- `ordax_profile`
+- `ordax_targets`
+- `ordax_action_status`
 
-**Limitação deliberada:** o endpoint de registro pode ser **anunciado** sem
-que o cadastro de um cliente tenha sido testado. Esse diagnóstico apenas lê
-metadados; não cria cliente, sessão nem grant e não substitui E2E de registro,
-aprovação, troca de código, renovação, revogação e acesso autorizado no Runtime.
+### Observação e política do computador
 
-O uso local do Studio não depende da ativação do serviço OAuth remoto.
+- `computer_windows`
+- `computer_active_window`
+- `computer_screenshot`
+- `computer_screen_info`
+- `computer_access_status`
+- `computer_processes`
 
-## Descoberta dos dispositivos da conta
+### Interação tipada
 
-Entrar na Conta ORDAX e conectar um dispositivo não concede acesso automático
-ao cliente de IA. O catálogo canônico consulta dispositivos ativos com grants
-ativos e não expirados para o usuário e o **cliente OAuth exato**. Esses filtros
-pertencem a `ordax_list_product_targets_v1`, não à UI, ao conector ou a um scan
-de computadores. Os claims assinados `sub` e `client_id` identificam o usuário
-e o cliente; campos enviados em headers, argumentos ou metadata do usuário
-não escolhem essa autoridade. A distinção entre identidade OAuth e acesso aos
-dados segue o [contrato OAuth do Supabase](https://supabase.com/docs/guides/auth/oauth-server/token-security).
+- `computer_focus_window`
+- `computer_click`
+- `computer_mouse_move`
+- `computer_drag`
+- `computer_launch_app`
+- `computer_scroll`
+- `computer_type`
+- `computer_hotkey`
 
-Um catálogo vazio pode significar ausência de grants para esse cliente. Já
-falha de autenticação, conta inelegível, banco indisponível ou resposta inválida
-precisam aparecer como erro, sem fingir que o catálogo disponível está vazio.
-`online` é a presença informada pela plataforma; `last_seen_at` é a última
-atividade informada. Nenhum deles concede execução. Um dispositivo offline
-pode continuar listado, mas operações locais dependem do Runtime conectado.
+A superfície não é mais descrita como “somente leitura”. Ao mesmo tempo, **tool publicada não significa tool autorizada no target**.
 
-**Estado comprovado no source em 2026-10-09:**
-
-- A projeção MCP preserva nome, presença e descrições dos grants canônicos,
-  excluindo campos privados e identificadores internos de grupos.
-- `product_mcp_reads.ts` prepara handlers de leitura que verificam OAuth
-  com o boundary existente e chamam o adapter PostgreSQL existente. Catálogos
-  são relidos por requisição e recebem `Cache-Control: no-store`; erros não
-  expõem SQL, credenciais nem detalhes internos.
-- O teste `product_mcp_discovery.test.mts` percorre requisição MCP → verificação
-  de token assinado → reader RPC controlado → projeção pública. Também testa
-  negação antes do reader, catálogo alterado/vazio, conta inelegível, UUIDs
-  inválidos/duplicados e ausência da configuração PostgreSQL. Não é E2E real.
-- **As rotas em `index.ts` ainda usam D1.** Os novos handlers não estão
-  ativados. A migração coordenada de descoberta, grants, ações e status está
-  pendente no item #42 e no `d1-cutover-authority-map.json`.
-- A publicação permanece bloqueada por `production-foundation.json`.
-  CI verde ou esses testes de source não removem o gate de produção.
-
-Para aceitar a funcionalidade em produção, demonstrar OAuth/consentimento no
-emissor canônico, isolamento entre duas contas e dois clientes OAuth, ausência
-e revogação de grants, presença online/offline e uma ação autorizada pelo
-Runtime. A conta autenticada precisa ser elegível no momento da consulta.
-Não redirecionar apenas a descoberta ao PostgreSQL mantendo execução em D1.
-
-## Acompanhamento canônico de tarefas — source preparado
-
-O mesmo factory `createCanonicalProductMcpReadHandlers` prepara a leitura de
-`ordax_get_product_action_v1`. A identidade é verificada em cada requisição;
-o RPC existente verifica elegibilidade da conta e seleciona somente o request
-do usuário e do cliente OAuth exato. Um resultado ausente retorna 404, uma
-conta inelegível retorna 403 e falhas de configuração/transporte retornam 503.
-Registros malformados, IDs divergentes e estados desconhecidos retornam 502,
-sem simular conclusão ou publicar SQL/credenciais.
-
-Os estados publicados são `queued`, `leased`, `running`, `succeeded`, `failed`
-e `cancelled`. A projeção MCP mantém o request de continuação e distingue
-pendência de estado terminal. O `project_id` canônico é preservado; `project`
-fica nulo porque não existe conversão oficial para o slug legado nesse RPC.
-O resultado pertence ao contrato Product do Runtime; campos extras de banco,
-payload de entrada e identidades internas não são incluídos na resposta HTTP.
-Timestamps válidos são normalizados e as respostas recebem `no-store`, também
-na saída JSON MCP. A consulta não concede execução nem cria audit/queue
-paralelos; usa somente o adapter de leitura existente.
-
-O histórico de uma ação aceita é consultado diretamente por sua identidade,
-sem pedir catálogo de dispositivos ou disparar outra ação. Desktop offline
-ou catálogo indisponível não apagam essa identidade. Isso não equivale a
-executar novas operações offline. A autoridade do RPC determina o acesso
-ao histórico; o handler não adiciona grants nem amplia seu escopo.
-
-`product_mcp_action_status.test.mts` exercita token assinado → handler/MCP →
-reader controlado → resultado público, incluindo todas as transições,
-negações, identidade enviada pelo caller ignorada, ausência de replay,
-preservação do UUID de projeto e ausência de configuração PostgreSQL.
-Esses testes não comprovam execução, filtragem ou revogação em banco real.
-
-### Dependências para ativar as rotas juntas
-
-O Runtime remoto foi conferido no commit `113c49e72eb6f12ed12ca4597478765102c18ac7`.
-O [consumidor Product auditado](https://github.com/ordaxsystems/ordax-runtime/blob/113c49e72eb6f12ed12ca4597478765102c18ac7/ordax_dev_agent/product_remote.py)
-ainda exige o envelope legado `action`, `arguments`, `context`, `grant` e
-reconhece `ordax.product.invoke`/`ordax.product.read.invoke`.
-O [transporte auditado](https://github.com/ordaxsystems/ordax-runtime/blob/113c49e72eb6f12ed12ca4597478765102c18ac7/ordax_dev_agent/cloudflare_control_plane.py)
-usa o WebSocket `/v3/device/ws` e o audit `/v3/product/audit` existentes.
-Isso não demonstra consumo da fila Product privada PostgreSQL.
-
-Antes do cutover, Platform e Runtime precisam provar o contrato de enqueue →
-claim/lease → execução com política local → report/audit → status. Também
-precisam publicar o vínculo entre UUID do projeto canônico e projeto local,
-preservar requests já aceitos, prevenir execução duplicada e validar
-revogação/reconexão. Usar slugs arbitrários como UUIDs, fabricar grants ou
-enviar jobs para o consumidor legado sem esse contrato não resolve a migração.
-Os handlers preparados não estão conectados às rotas de `index.ts`.
-
-### Recuperação do consumidor Runtime atual
-
-[Runtime PR 65](https://github.com/ordaxsystems/ordax-runtime/pull/65), source
-`fd72a79`, corrige o único cliente HTTP/MCP Python existente: ID/estado da tarefa
-validados, ID aceito preservado em erro/timeout, `product_action_status` como GET
-autenticado e ACK perdido/malformado tratado como aceitação incerta. Um teste das
-ferramentas registradas prova POST → falha GET → recuperação GET, com um único
-POST. Não cria grant, fila, pairing ou executor e não adapta o envelope legado
-para fingir compatibilidade PostgreSQL. Runtime candidato 0.4.5 deriva sua versão
-de metadados próprios, separado do Studio/Blender/Device Agent, e requer o SDK
-MCP 1.30.0 verificado, sem correções privadas no SDK.
-
-O [contrato de recuperação](https://github.com/ordaxsystems/ordax-runtime/blob/codex/product-action-response-integrity/docs/PRODUCT-ACTION-RECOVERY.md)
-descreve limites, riscos, testes e source versus instalação. A enumeração de
-dependências de cutover acima permanece válida; esta correção não habilita rotas
-canônicas, não altera readiness/authority map nem comprova conta/dispositivo real.
-
-### Correção do facade MCP atual
-
-O facade compartilhado também valida o conteúdo das respostas dos handlers
-atuais: HTTP 200 sozinho não autentica a sessão, não comprova catálogo, ACK
-de ação nem status. Catálogo malformado recebe erro; somente `ok:true` com
-array de targets pode representar lista vazia. Estados desconhecidos, action
-ausente e IDs divergentes não mantêm uma tarefa como se estivesse trabalhando
-nem anunciam conclusão. `isError` reflete essas falhas na saída MCP.
-
-Consulta inválida/falha depois do ACK preserva o request aceito para recuperação
-por `ordax_action_status`. Nenhuma falha repete o dispatch; ausência de ACK
-válido é estado incerto, não prova de que a ação nunca foi aceita. Exceções e
-campos arbitrários do backend não aparecem como detalhes ao provider. A
-negação de grant conserva o código público e o direcionamento para o perfil
-de autorização do owner, sem criar ou ampliar permissões.
-
-A leitura de JSON reutiliza `readBoundedJsonObject` com limite de 2 MiB e UTF-8
-válido; resposta excessiva ou inválida é rejeitada e o reader é liberado.
-`product_mcp_failure_responses.test.mts` testa o facade efetivo, incluindo
-sessão inválida, catálogo vazio legítimo, erro HTTP, exceção, estado desconhecido,
-request diferente, ACK malformado e ausência de segundo dispatch. A mesma
-função de validação dos seis estados serve ao handler canônico e à projeção.
-Essas correções de source não removem o gate de publicação.
-
-## Configuração no Windows
-
-### Presença canônica do dispositivo — source, ainda sem ativação
-
-O cadastro canônico em PostgreSQL agora possui um contrato HTTP de presença:
-`POST /v3/product/device/presence`, autenticado pela credencial do dispositivo
-e delegado aos RPCs existentes. Conta/OAuth no navegador não substitui essa
-credencial nem autoriza um heartbeat. Nome, presença observada e grants são
-informações distintas. `changed:false` significa coalescência da autoridade;
-não é falha e não informa que o timestamp mudou naquela chamada.
-
-O Runtime atual ainda usa `/v3/device/ws` legado e **não envia** para essa nova
-rota. Portanto, este incremento não comprova que um dispositivo real cadastrado
-apareça online no plugin nem que receba tarefas. Canal, grants, bindings e
-consumidor precisam migrar juntos, sem heartbeat ou persistência paralelos.
-O Worker permanece sujeito ao gate de produção. [Contrato, limites e provas](PRODUCT_DEVICE_PRESENCE.md).
-
-A instalação/conexão deve deixar claro que existem duas decisões diferentes:
-
-1. **Vincular o dispositivo à Conta ORDAX / conector remoto.** Isso determina quem pode alcançar o Runtime remotamente e quais ações/grants remotos são válidos.
-2. **Escolher localmente o modo de Computer Control.** Essa escolha pertence ao dono do computador e nunca ao cliente de IA.
-
-No ORDAX Studio, em **Acesso ao computador**, o dono escolhe:
-
-### Bounded
-
-Mantém controles de menor privilégio:
-
-- filesystem limitado às pastas autorizadas, salvo quando `full_filesystem` for habilitado separadamente;
-- aplicativos limitados à allowlist local;
-- adequado para máquinas em que o usuário quer restringir a superfície acessível pelo conector.
-
-### Full Access
-
-Depois de uma confirmação local explícita, remove as allowlists ORDAX de pastas e aplicativos para todas as capabilities Computer Control suportadas.
-
-O aviso deve explicar de forma clara que um cliente ORDAX remoto **já autorizado** poderá, conforme as capabilities disponíveis:
-
-- ler, criar, alterar, mover e remover arquivos;
-- inspecionar e controlar janelas;
-- usar mouse, teclado e clipboard;
-- inspecionar processos;
-- capturar a tela/janela ativa;
-- iniciar aplicativos suportados;
-- usar outras capabilities Computer Control publicadas pelo Runtime.
-
-Full Access não remove autenticação, grants, validação tipada, receipts/auditoria nem as permissões reais do Windows. UAC, recursos protegidos, outro usuário/sessão e operações que exigem elevação continuam sujeitos às regras do Windows.
-
-**O ChatGPT, o conector ou qualquer outro cliente remoto não pode habilitar, ampliar ou persistir Full Access.** A alteração precisa acontecer na superfície local do ORDAX Studio ou por uma política administrada no próprio dispositivo.
-
-O dono pode revogar Full Access a qualquer momento e voltar para Bounded; a mudança deve ter efeito imediato nas próximas ações.
-
-## Fluxo recomendado de onboarding
+Uma operação interativa precisa passar por todas estas fronteiras:
 
 ```text
-1. Instalar ORDAX Studio / ORDAX Runtime no Windows
-2. Abrir ORDAX Studio localmente
-3. Opcionalmente entrar na Conta ORDAX
-4. Vincular o dispositivo ao conector ORDAX Studio
-5. Escolher localmente:
-      - Bounded
-      - Full Access
-6. Se Full Access:
-      mostrar aviso de controle amplo do computador
-      exigir confirmação local do dono
-7. Usar o conector ORDAX Studio no cliente externo
+OAuth válido
+  -> target autorizado
+  -> capability/grant válido
+  -> sessão/transport do Runtime válida
+  -> política local permite
+  -> argumentos passam validação
+  -> ação executa
+  -> receipt/status/auditoria
 ```
 
-A Conta ORDAX continua opcional para uso local do Studio. Ela passa a ser necessária quando o usuário quer as capacidades remotas/account-scoped correspondentes, como vínculo de dispositivo, grants remotos e acesso pelo conector.
+Se qualquer etapa falhar, a operação deve falhar fechada.
 
-## Produto atual
+## Atualização
 
-Nesta etapa não há licença nem assinatura. Conta ORDAX, quando usada, serve para autenticar/vincular o dispositivo e seus grants; ela não conecta automaticamente um provider de IA.
+A URL do servidor MCP permanece estável.
 
-A UI Windows é o ORDAX Studio. A conversa acontece no cliente externo, por exemplo o ChatGPT normal, e o conector apenas disponibiliza as capabilities ORDAX autorizadas.
+### Quando não é necessária ação no ChatGPT
+
+Deploys que alterem apenas implementação do Worker, Control Plane, banco, Runtime ou comportamento interno de uma tool, preservando o contrato publicado, devem continuar funcionando pelo cadastro existente.
+
+### Quando usar “Atualizar ferramentas”
+
+Quando uma release adicionar/remover uma tool ou mudar de forma relevante o schema publicado, usar **Atualizar ferramentas** nas configurações do OrdaX MCP no ChatGPT.
+
+Esse refresh:
+
+- relê o catálogo/schema do servidor;
+- não cria um novo endpoint;
+- não reinstala o Runtime;
+- não concede grants;
+- não substitui OAuth;
+- não justifica `/mcp-v2` ou outro cadastro duplicado.
+
+Mudanças incompatíveis precisam de contrato/versionamento interno e migração explícita.
+
+## Computer Control
+
+Computer Control é composto por tools pequenas e tipadas. Não deve existir uma única ação genérica capaz de contornar as políticas das demais.
+
+Exemplos de limites intencionais:
+
+- clique e movimento usam coordenadas validadas;
+- hotkeys têm conjunto/tamanho limitado;
+- digitação é bounded;
+- `computer_launch_app` não faz expansão de shell;
+- screenshot é uma capability separada;
+- processos são metadados limitados, não controle arbitrário;
+- política local e roots permitidos podem ser consultados sem transformar descoberta em autorização.
+
+Ver [COMPUTER_CONTROL_POLICY.md](COMPUTER_CONTROL_POLICY.md).
+
+## Projetos, arquivos e Git
+
+Essas famílias fazem parte do objetivo do produto, mas **não estão entre as 18 tools publicadas na superfície observada atualmente**.
+
+O básico esperado é:
+
+- listar projetos/roots autorizados;
+- leitura e busca de texto;
+- escrita/criação/movimentação limitada a roots autorizados;
+- status/diff/branch/commit Git;
+- pull/push e PR de forma tipada e auditável;
+- nenhuma leitura fora do escopo por path traversal, symlink ou slug fabricado.
+
+Não usar terminal genérico para simular essa API.
+
+## Processos, preview e browser de testes
+
+O objetivo é permitir um fluxo de desenvolvimento reproduzível:
+
+1. selecionar projeto autorizado;
+2. iniciar processo autorizado;
+3. acompanhar logs/health/porta;
+4. abrir preview;
+5. navegar no browser de testes;
+6. clicar/preencher/validar UI;
+7. retornar evidência estruturada ao ChatGPT.
+
+O browser de testes deve ser uma família própria de capabilities, não uma sequência opaca de automação desktop quando houver API específica disponível.
+
+## Blender e Unity
+
+Blender e Unity devem continuar como adapters especializados, reutilizando identidade, target, grants, auditoria e transporte do OrdaX MCP.
+
+Não duplicar backend, autenticação ou fila para cada aplicação. O adapter define operações semânticas específicas; o Control Plane continua sendo a fronteira comum.
+
+## Estado de release
+
+O SSOT é `control-plane/cloudflare/production-foundation.json#mcp_release`.
+
+No estado de 16/10/2026 ele registra:
+
+- endpoint `mcp.ordax.com.br/mcp`;
+- Streamable HTTP;
+- autoridade PostgreSQL;
+- `supports_remote_actions=true`;
+- `validation_mode=attested-interactive-candidate`;
+- `validation_deployment_ready=true`;
+- `workers.dev=false`.
+
+A promoção final ainda fica bloqueada até fechar os gates explícitos de grant interativo, E2E atestado e verificação da release canônica de ações remotas. Portanto, não confundir “surface publicada” com “controle liberado para qualquer target”.
+
+## Gate de aceitação do básico completo
+
+A primeira versão pode ser chamada de **básico completo** quando um usuário autorizado conseguir pedir ao ChatGPT, ponta a ponta:
+
+> abra meu projeto, leia e altere os arquivos necessários, mostre o diff, rode o preview, teste a interface, confira o resultado e prepare o commit.
+
+A prova deve usar o OrdaX MCP e o Runtime oficiais, com OAuth, grants, política local e auditoria, sem Desktop Commander como dependência normal e sem bypass via shell.
+
+## Relação com OrdaX Central
+
+Este MCP pertence ao caminho de **ChatGPT direto do usuário**. O ChatGPT já é o ambiente de inferência e chama o OrdaX apenas para capabilities.
+
+OrdaX Central é um caminho separado no qual Apps/PCs podem enviar uma conversa ao Model Router do OrdaX. Ele pode reutilizar os mesmos contratos, identidade e Runtime, mas não deve ser inserido obrigatoriamente entre ChatGPT e MCP.
+
+Ver [ORDAX-AI-CONNECTION-MODES.md](ORDAX-AI-CONNECTION-MODES.md).
+
+## SSOT e arquivos relacionados
+
+- release do MCP: `control-plane/cloudflare/production-foundation.json#mcp_release`;
+- entrypoint: `control-plane/cloudflare/src/product_mcp_entry.ts`;
+- cadastro/atualização no ChatGPT: `docs/CHATGPT-CUSTOM-MCP-SERVER.md`;
+- endpoint canônico: `docs/ORDAX-MCP-CANONICAL-ENDPOINT.md`;
+- política desktop: `docs/COMPUTER_CONTROL_POLICY.md`;
+- provider boundaries: `docs/ORDAX_PROVIDER_CONNECTORS.md`;
+- config MCP de empacotamento: `plugins/ordax-chatgpt/mcp.json`.
+
+Documentos datados de canary/review permanecem como evidência histórica. Quando houver conflito entre uma evidência histórica e o SSOT atual, o `mcp_release` atual e estes documentos canônicos prevalecem.
