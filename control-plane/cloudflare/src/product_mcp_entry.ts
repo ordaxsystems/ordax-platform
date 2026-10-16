@@ -25,6 +25,10 @@ import {
   handleProductDeviceSetup,
   PRODUCT_DEVICE_SETUP_PATH,
 } from "./product_device_setup.ts";
+import {
+  handleProductDeviceTransport,
+  PRODUCT_DEVICE_TRANSPORT_PREFIX,
+} from "./product_device_transport.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
@@ -118,6 +122,9 @@ export function createCanonicalProductMcpGateway(
     }
     if (url.pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH) {
       return handleProductDeviceCentralSession(request, env);
+    }
+    if (url.pathname.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX + "/")) {
+      return handleProductDeviceTransport(request, env);
     }
     if (url.pathname === "/mcp") {
       // ordax_session is already a safe authenticated read tool. Its only new

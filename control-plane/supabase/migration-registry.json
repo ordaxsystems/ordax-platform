@@ -582,6 +582,17 @@
         "path": "control-plane/supabase/migrations/20261016041134_repair_trusted_actor_auth_eligibility_v1.sql",
         "blob_sha": "89cce5e2d456d147d5d89c7ecf4c145ce2b7db1a"
       }
+    },
+    {
+      "name": "20261016053000_product_action_edge_verified_result_digest_v1",
+      "applied_version": "20261016055144",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261016053000_product_action_edge_verified_result_digest_v1.sql",
+        "blob_sha": "ce5e974c204149a9cd787d0656a618a5fc1a5682"
+      }
     }
   ]
 }
