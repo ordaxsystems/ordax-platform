@@ -2,6 +2,26 @@ name: Deploy OrdaX MCP Read-Only Validation
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "control-plane/cloudflare/wrangler.mcp.toml"
+      - "control-plane/cloudflare/production-foundation.json"
+      - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_auth.ts"
+      - "control-plane/cloudflare/src/product_device_setup.ts"
+      - "control-plane/cloudflare/src/product_central_device_session.ts"
+      - "control-plane/cloudflare/src/product_mcp_reads.ts"
+      - "control-plane/cloudflare/src/product_postgres_store.ts"
+      - "control-plane/cloudflare/src/mcp_http.ts"
+      - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_device_setup_route.test.mts"
+      - "control-plane/tests/product_mcp_discovery.test.mts"
+      - "control-plane/tests/product_mcp_failure_responses.test.mts"
+      - "control-plane/tests/product_oauth_readiness.test.mts"
+      - "scripts/cloudflare/check_mcp_release.py"
+      - "tests/test_canonical_mcp_release.py"
+      - ".github/workflows/ordax-mcp-readonly-validation-deploy.yml"
 
 permissions:
   contents: read
