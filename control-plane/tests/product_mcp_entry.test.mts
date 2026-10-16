@@ -23,7 +23,8 @@ function fakeHandlers() {
   };
   return { handlers, calls };
 }
-test("published canary entry cannot accidentally import legacy D1 Worker or configure D1 binding", async () => {
+
+test("published entry cannot accidentally import legacy D1 Worker or configure D1 binding", async () => {
   const source = await readFile(new URL("../cloudflare/src/product_mcp_entry.ts", import.meta.url), "utf8");
   const config = await readFile(new URL("../cloudflare/wrangler.product-mcp-canary.toml", import.meta.url), "utf8");
   assert.doesNotMatch(source, /env\.DB\b|from ["']\.\/index(?:\.ts)?["']/);
@@ -32,7 +33,8 @@ test("published canary entry cannot accidentally import legacy D1 Worker or conf
   assert.match(config, /binding = "POSTGRES"/);
   assert.match(config, /id = "4b601ec5815f43259bd8040053825d2a"/);
 });
-test("health is honest about attested read-only operation and Product authority", async () => {
+
+test("health reports canonical attested device control without model relay", async () => {
   const run = createCanonicalProductMcpGateway(ENV);
   const response = await run(new Request("https://canary.example/health"));
   const status = await response.json();
@@ -47,16 +49,17 @@ test("health is honest about attested read-only operation and Product authority"
     auth: status.auth_configured,
     postgres: status.postgres_configured,
   }, {
-    mode: "attested-read-only",
+    mode: "attested-device-control",
     topology: "user_chatgpt_direct",
     model_relay: false,
     supports_attested_remote_reads: true,
-    supports_remote_actions: false,
+    supports_remote_actions: true,
     auth: true,
     postgres: true,
   });
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
+
 test("OAuth protected resource metadata references the actual MCP origin and single issuer", async () => {
   const run = createCanonicalProductMcpGateway(ENV);
   const response = await run(new Request("https://canary.example/.well-known/oauth-protected-resource"));
@@ -66,6 +69,7 @@ test("OAuth protected resource metadata references the actual MCP origin and sin
   assert.deepEqual(json.authorization_servers, [ENV.PRODUCT_AUTH_ISSUER]);
   assert.deepEqual(json.bearer_methods_supported, ["header"]);
 });
+
 test("owner session route is exposed on canonical MCP gateway and fails closed without bearer", async () => {
   const run = createCanonicalProductMcpGateway(ENV);
   const response = await run(new Request("https://canary.example/v3/product/session"));
@@ -74,7 +78,8 @@ test("owner session route is exposed on canonical MCP gateway and fails closed w
   assert.deepEqual(json, { ok: false, error: "product_auth_required" });
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
-test("MCP discovery advertises core reads plus only five attested computer observation tools", async () => {
+
+test("MCP discovery advertises core, observation and the complete interactive computer tranche", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   const response = await run(new Request(MCP_URL, {
@@ -85,19 +90,28 @@ test("MCP discovery advertises core reads plus only five attested computer obser
   assert.equal(response.status, 200);
   assert.deepEqual(json.result.tools.map((t: any) => t.name), [
     "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
-    "computer_windows", "computer_active_window", "computer_screen_info",
+    "computer_windows", "computer_active_window", "computer_screenshot", "computer_screen_info",
+    "computer_focus_window", "computer_click", "computer_mouse_move", "computer_drag",
+    "computer_launch_app", "computer_scroll", "computer_type", "computer_hotkey",
     "computer_access_status", "computer_processes",
   ]);
-  assert.ok(json.result.tools.every((tool: any) => tool.annotations.readOnlyHint === true));
+  const byName = new Map(json.result.tools.map((tool: any) => [tool.name, tool]));
+  assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("computer_screenshot") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("computer_click") as any).annotations.readOnlyHint, false);
+  assert.equal((byName.get("computer_click") as any).annotations.destructiveHint, true);
+  assert.equal((byName.get("computer_focus_window") as any).annotations.destructiveHint, false);
   assert.equal(calls.session, 1);
   assert.equal(calls.targets, 0);
 });
-test("mutating, screenshot, filesystem and terminal tools remain unadvertised", async () => {
+
+test("filesystem, clipboard, process-control, browser and terminal families remain unadvertised", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   for (const action of [
-    "computer_screenshot", "computer_click", "computer_text_read",
-    "terminal_exec", "project_text_write", "workspace_directory_list",
+    "computer_clipboard_read", "computer_clipboard_write", "computer_text_read",
+    "computer_terminate_process", "browser_start", "terminal_exec", "project_text_write",
+    "workspace_directory_list",
   ]) {
     const response = await run(request(action, { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
     assert.equal(response.status, 200);
@@ -107,17 +121,22 @@ test("mutating, screenshot, filesystem and terminal tools remain unadvertised", 
     assert.equal(calls.getAction, 0);
   }
 });
-test("attested observation tool is advertised but fails closed without a verified session binding", async () => {
+
+test("attested observation and interactive tools fail closed without a verified session binding", async () => {
   const { handlers } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
-  const response = await run(request("computer_windows", {
-    device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-  }));
-  assert.equal(response.status, 200);
-  const json = await response.json();
-  assert.equal(json.result.isError, true);
-  assert.equal(json.result.structuredContent.error, "trusted_operation_required");
+  for (const [tool, args] of [
+    ["computer_windows", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }],
+    ["computer_click", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", x: 10, y: 20 }],
+  ] as const) {
+    const response = await run(request(tool, args));
+    assert.equal(response.status, 200);
+    const json = await response.json();
+    assert.equal(json.result.isError, true);
+    assert.equal(json.result.structuredContent.error, "trusted_operation_required");
+  }
 });
+
 test("reading authorized targets requires the same session but never invents devices", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
@@ -127,6 +146,7 @@ test("reading authorized targets requires the same session but never invents dev
   assert.equal(calls.session, 1);
   assert.equal(calls.targets, 1);
 });
+
 test("unconfigured and unauthenticated clients fail closed, no legacy routes exposed", async () => {
   const gateway = createCanonicalProductMcpGateway({});
   const response = await gateway(request("ordax_targets"));
@@ -142,7 +162,7 @@ test("unconfigured and unauthenticated clients fail closed, no legacy routes exp
   }
 });
 
-test("session reports the expanded read-only tool count without exposing writes", async () => {
+test("session reports the expanded canonical computer tool count", async () => {
   const { handlers } = fakeHandlers();
   const gateway = createCanonicalProductMcpGateway(ENV, handlers);
   const response = await gateway(request("ordax_session"));
@@ -150,7 +170,7 @@ test("session reports the expanded read-only tool count without exposing writes"
   assert.equal(response.status, 200);
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
-  assert.equal(json.result.structuredContent.mcp_tool_count, 9);
+  assert.equal(json.result.structuredContent.mcp_tool_count, 18);
   assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-11.1");
 });
 
