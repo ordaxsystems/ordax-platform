@@ -45,7 +45,10 @@ function timestamp(value: unknown): string | null {
 function validRuntimeProvenance(action: Record<string, unknown>): boolean {
   const kind = action.execution_runtime_kind;
   const version = action.execution_agent_version;
-  if (kind === null && version === null) return true;
+  const absentKind = kind === null || kind === undefined;
+  const absentVersion = version === null || version === undefined;
+  if (absentKind && absentVersion) return true;
+  if (absentKind !== absentVersion) return false;
   return typeof kind === "string" && RUNTIME_KINDS.has(kind)
     && typeof version === "string" && version.length >= 1 && version.length <= 80
     && version === version.trim() && !/[\x00-\x1f\x7f]/u.test(version);
@@ -162,8 +165,8 @@ export function createCanonicalProductMcpReadHandlers(
           effect_id: result.effect_id,
           result: result.result,
           error_code: result.error_code,
-          execution_runtime_kind: result.execution_runtime_kind,
-          execution_agent_version: result.execution_agent_version,
+          execution_runtime_kind: result.execution_runtime_kind ?? null,
+          execution_agent_version: result.execution_agent_version ?? null,
           created_at: timestamp(result.created_at),
           started_at: timestamp(result.started_at),
           finished_at: timestamp(result.finished_at),
