@@ -11,6 +11,8 @@ on:
       - "control-plane/cloudflare/src/product_auth.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
       - "control-plane/cloudflare/src/product_device_transport.ts"
+      - "control-plane/cloudflare/src/product_owner_grant_admin.ts"
+      - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
       - "control-plane/cloudflare/src/product_central_device_session.ts"
       - "control-plane/cloudflare/src/product_mcp_reads.ts"
       - "control-plane/cloudflare/src/product_postgres_store.ts"
@@ -18,9 +20,12 @@ on:
       - "control-plane/tests/product_mcp_entry.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "control-plane/tests/product_device_transport.test.mts"
+      - "control-plane/tests/product_owner_grant_admin.test.mts"
       - "control-plane/tests/product_mcp_discovery.test.mts"
       - "control-plane/tests/product_mcp_failure_responses.test.mts"
       - "control-plane/tests/product_oauth_readiness.test.mts"
+      - "control-plane/supabase/migration-registry.json"
+      - "control-plane/supabase/migrations/20261016063000_owner_mcp_grant_authority_v1.sql"
       - "scripts/cloudflare/check_mcp_release.py"
       - "tests/test_canonical_mcp_release.py"
       - ".github/workflows/ordax-mcp-readonly-validation-deploy.yml"
@@ -69,7 +74,7 @@ jobs:
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
 
       - name: Re-run read-only MCP contract before deploy
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
 
       - name: Build exact candidate and prove no legacy authority
         working-directory: control-plane/cloudflare

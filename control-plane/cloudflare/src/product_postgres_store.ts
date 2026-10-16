@@ -157,6 +157,22 @@ const RPC_SPECS = {
     keys: ["p_owner_user_id", "p_grant_group_id"],
     casts: ["uuid", "uuid"],
   },
+  ordax_owner_mcp_remote_authority_v1: {
+    keys: ["p_owner_user_id", "p_device_id"],
+    casts: ["uuid", "uuid"],
+  },
+  ordax_replace_owner_mcp_grant_group_v1: {
+    keys: [
+      "p_owner_user_id", "p_space_id", "p_project_id", "p_device_id",
+      "p_client_id", "p_profile_key", "p_capabilities", "p_access_modes",
+      "p_valid_until",
+    ],
+    casts: ["uuid", "uuid", "uuid", "uuid", "text", "text", "text[]", "text[]", "timestamptz"],
+  },
+  ordax_revoke_owner_mcp_grant_group_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_grant_group_id"],
+    casts: ["uuid", "text", "uuid"],
+  },
   ordax_bind_central_conversation_v1: {
     keys: ["p_owner_user_id","p_client_id","p_device_id","p_space_id",
       "p_project_id","p_request_id","p_conversation_id","p_session_sha256",
@@ -613,6 +629,53 @@ export async function revokeRemoteGrantGroup(
   return callRpc<JsonObject>(env, "ordax_revoke_remote_grant_group_v1", {
     p_owner_user_id: ownerUserId,
     p_grant_group_id: grantGroupId,
+  });
+}
+
+export async function listOwnerMcpRemoteAuthority(
+  env: ProductPostgresEnv,
+  ownerUserId: string,
+  deviceId: string,
+): Promise<JsonObject> {
+  if (!isCanonicalUuid(ownerUserId) || !isCanonicalUuid(deviceId))
+    throw new ProductPostgresError("owner_remote_authority_invalid", 400);
+  return callRpc<JsonObject>(env, "ordax_owner_mcp_remote_authority_v1", {
+    p_owner_user_id: ownerUserId, p_device_id: deviceId,
+  });
+}
+
+export async function replaceOwnerMcpGrantGroup(
+  env: ProductPostgresEnv,
+  input: {
+    ownerUserId: string; spaceId: string | null; projectId: string | null;
+    deviceId: string; clientId: string; profileKey: string;
+    capabilities: readonly { capability: string; accessMode: "read" | "write" }[];
+    validUntil: string | null;
+  },
+): Promise<JsonObject> {
+  const args = canonicalRemoteGrantGroup({
+    ownerUserId: input.ownerUserId, spaceId: input.spaceId, projectId: input.projectId,
+    deviceId: input.deviceId, clientKind: "product-mcp", clientId: input.clientId,
+    profileKey: input.profileKey, capabilities: [...input.capabilities], validUntil: input.validUntil,
+  });
+  if (!args) throw new ProductPostgresError("remote_grant_invalid", 400);
+  return callRpc<JsonObject>(env, "ordax_replace_owner_mcp_grant_group_v1", {
+    p_owner_user_id: args.p_owner_user_id, p_space_id: args.p_space_id,
+    p_project_id: args.p_project_id, p_device_id: args.p_device_id,
+    p_client_id: args.p_client_id, p_profile_key: args.p_profile_key,
+    p_capabilities: args.p_capabilities, p_access_modes: args.p_access_modes,
+    p_valid_until: args.p_valid_until,
+  });
+}
+
+export async function revokeOwnerMcpGrantGroup(
+  env: ProductPostgresEnv, ownerUserId: string, clientId: string, grantGroupId: string,
+): Promise<JsonObject> {
+  if (!isCanonicalUuid(ownerUserId) || !isCanonicalUuid(grantGroupId)
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/.test(clientId))
+    throw new ProductPostgresError("owner_mcp_grant_revoke_invalid", 400);
+  return callRpc<JsonObject>(env, "ordax_revoke_owner_mcp_grant_group_v1", {
+    p_owner_user_id: ownerUserId, p_client_id: clientId, p_grant_group_id: grantGroupId,
   });
 }
 
