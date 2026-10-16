@@ -571,6 +571,17 @@
         "path": "control-plane/supabase/migrations/20261015194500_product_mcp_target_discovery_auto_v1.sql",
         "blob_sha": "5148c11540a2512548326b8f38ed12a6607a61dd"
       }
+    },
+    {
+      "name": "20261016041134_repair_trusted_actor_auth_eligibility_v1",
+      "applied_version": "20261016041134",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261016041134_repair_trusted_actor_auth_eligibility_v1.sql",
+        "blob_sha": "89cce5e2d456d147d5d89c7ecf4c145ce2b7db1a"
+      }
     }
   ]
 }
