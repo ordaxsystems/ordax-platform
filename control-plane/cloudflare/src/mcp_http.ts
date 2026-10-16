@@ -491,6 +491,17 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
       || !/^[a-z][a-z0-9._-]+$/.test(action.action)) return invalid;
     const status = action.status;
     const pending = !["succeeded", "failed", "cancelled"].includes(status);
+    const runtimeKind = action.execution_runtime_kind;
+    const runtimeVersion = action.execution_agent_version;
+    const provenanceUnknown = (runtimeKind === null || runtimeKind === undefined)
+      && (runtimeVersion === null || runtimeVersion === undefined);
+    const provenanceValid = typeof runtimeKind === "string"
+      && ["ordax-os", "desktop-agent", "mobile-client", "other"].includes(runtimeKind)
+      && typeof runtimeVersion === "string"
+      && runtimeVersion.length >= 1 && runtimeVersion.length <= 80
+      && runtimeVersion === runtimeVersion.trim()
+      && !/[\x00-\x1f\x7f]/u.test(runtimeVersion);
+    if (!provenanceUnknown && !provenanceValid) return invalid;
     return {
       ok: payload.ok !== false,
       pending,
@@ -503,6 +514,8 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
         status,
         result: action.result ?? null,
         error_code: typeof action.error_code === "string" ? action.error_code : null,
+        runtime_kind: provenanceValid ? runtimeKind : null,
+        runtime_version: provenanceValid ? runtimeVersion : null,
       },
     };
   }
