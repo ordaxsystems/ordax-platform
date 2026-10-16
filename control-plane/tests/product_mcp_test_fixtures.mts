@@ -63,7 +63,9 @@ export function actionRecord(overrides: Record<string, unknown> = {}) {
   return {
     ok: true, request_id: requestId, device_id: device, project_id: projectId,
     capability: "project.text_read", status: "running", effect_id: effectId,
-    result: null, error_code: null, created_at: "2026-10-09T12:00:00Z",
+    result: null, error_code: null,
+    execution_runtime_kind: null, execution_agent_version: null,
+    created_at: "2026-10-09T12:00:00Z",
     started_at: "2026-10-09T12:01:00Z", finished_at: null,
     ...overrides,
   };
