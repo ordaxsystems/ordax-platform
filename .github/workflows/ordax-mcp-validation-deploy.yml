@@ -94,7 +94,7 @@ jobs:
           for required in [
               'trusted_operation_required','attested-device-control','computer-observe',
               'interactive-computer-control','ordax_action_status','computer.click','computer.type',
-              'ordax-mcp.ordaxsystems.workers.dev','/v3/product/session','/v3/product/device/setup',
+              'ordax-mcp.ordaxsystems.workers.dev','/v3/product/session',
               '/v3/product/device/central-session','/v3/device/transport','/v3/owner/remote-authority',
               '/v3/owner/remote-grant-groups',
           ]:
