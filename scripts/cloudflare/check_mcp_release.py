@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Release guards for OrdaX's ONE public MCP endpoint, independent of old D1.
 
-The production/remote-actions release remains fail-closed until its full E2E
-proof set exists. A separate read-only validation mode can authorize updating
-the public canary while remote actions remain explicitly disabled.
+The production/mutating-remote-actions release remains fail-closed until its
+full E2E proof set exists. A separate attested read-only validation mode can
+authorize the public Product MCP while mutating remote actions remain disabled.
 """
 from __future__ import annotations
 import argparse
@@ -24,7 +24,7 @@ class McpReleaseError(ValueError):
     pass
 
 # Independent proofs required before production cutover. Source flags alone do
-# not constitute readiness, and remote-action capability needs its own proof.
+# not constitute readiness, and mutating remote capability needs its own proof.
 REQUIRED_PROOFS=frozenset({
     "custom_domain_tls_run_url",
     "oauth_chatgpt_consent_run_url",
@@ -117,20 +117,20 @@ def validate(foundation:dict,config:dict)->bool:
             r"https://github\.com/ordaxsystems/(ordax-platform|ordax-apps|ordax-os)/actions/runs/[0-9]+",value
         ):
             raise McpReleaseError(f"mcp_release_invalid_proof_{key}")
-    # A real production dispatcher also requires verified host attestation;
-    # the read-only canary source must not be silently promoted as executor.
+    # A real mutating production dispatcher also requires verified host
+    # attestation; read-only source must not silently become a write executor.
     if not release.get("device_dispatch_via_trusted_host_verified",False):
         raise McpReleaseError("mcp_device_dispatch_not_verified")
     return True
 
 
 def validate_read_only_validation(foundation:dict,config:dict)->bool:
-    """Authorize only the already-public read-only canary, never remote dispatch."""
+    """Authorize only attested read operations, never mutating remote dispatch."""
     production_ready=validate(foundation,config)
     if production_ready:
         raise McpReleaseError("read_only_gate_cannot_authorize_production_release")
     release=foundation["mcp_release"]
-    if release.get("validation_mode")!="read-only-canary":
+    if release.get("validation_mode")!="attested-read-only":
         raise McpReleaseError("mcp_read_only_validation_mode_invalid")
     if release.get("validation_deployment_ready") is not True:
         raise McpReleaseError("mcp_read_only_validation_not_ready")
@@ -164,7 +164,16 @@ def validate_read_only_validation(foundation:dict,config:dict)->bool:
         raise McpReleaseError("mcp_read_only_consent_timestamp_invalid")
 
     code=ENTRY.read_text("utf-8")
-    required=("READ_ONLY_TOOLS","supports_remote_actions: false","trusted_operation_required","createCanonicalProductMcpReadHandlers")
+    required=(
+        "PRODUCT_MCP_CORE_READ_TOOLS",
+        "PRODUCT_MCP_DIRECT_READ_TOOLS",
+        "ATTESTED_DEVICE_READ_TOOLS",
+        "createAttestedDeviceReadActionHandler",
+        "supports_attested_remote_reads: true",
+        "supports_remote_actions: false",
+        "trusted_operation_required",
+        "createCanonicalProductMcpReadHandlers",
+    )
     if any(item not in code for item in required):
         raise McpReleaseError("mcp_read_only_entry_contract_missing")
     forbidden=("D1Database","env.DB.prepare","ordax-control-plane-v3","operatorAuthorized(")
@@ -176,9 +185,9 @@ def validate_read_only_validation(foundation:dict,config:dict)->bool:
 def main()->int:
     parser=argparse.ArgumentParser()
     parser.add_argument("--inspect",action="store_true",
-        help="Allow the blocked production candidate for CI/audit; NEVER authorizes deploy.")
+        help="Allow the blocked mutating production candidate for CI/audit; NEVER authorizes deploy.")
     parser.add_argument("--read-only-validation",action="store_true",
-        help="Authorize only the canonical read-only validation canary; remote actions remain blocked.")
+        help="Authorize only the canonical attested read-only validation; mutations remain blocked.")
     opt=parser.parse_args()
     try:
         data=json.loads(FOUNDATION.read_text("utf-8"))
@@ -187,7 +196,7 @@ def main()->int:
         if opt.read_only_validation:
             if not validate_read_only_validation(data,config):
                 raise McpReleaseError("mcp_read_only_validation_not_ready")
-            print("ORDAX_MCP_READ_ONLY_VALIDATION=ELIGIBLE")
+            print("ORDAX_MCP_ATTESTED_READ_ONLY_VALIDATION=ELIGIBLE")
             return 0
         ready=validate(data,config)
     except (ValueError,KeyError,TypeError,OSError) as error:
