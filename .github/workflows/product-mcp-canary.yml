@@ -1,4 +1,4 @@
-# Product OAuth readiness regressions are mandatory.
+# Canonical Product MCP regressions are mandatory before any interactive candidate can merge.
 name: Canonical Product MCP Canary
 
 on:
@@ -6,8 +6,9 @@ on:
     paths:
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
-      - "control-plane/cloudflare/src/product_mcp_attested_device_read.ts"
+      - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
+      - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
       - "control-plane/cloudflare/src/product_central_mcp.ts"
@@ -18,7 +19,7 @@ on:
       - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
-      - "control-plane/tests/product_mcp_attested_device_read.test.mts"
+      - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_owner_grant_admin.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "control-plane/tests/product_central_mcp.test.mts"
@@ -30,8 +31,9 @@ on:
     paths:
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
-      - "control-plane/cloudflare/src/product_mcp_attested_device_read.ts"
+      - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
+      - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
       - "control-plane/cloudflare/src/product_central_mcp.ts"
@@ -42,7 +44,7 @@ on:
       - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
-      - "control-plane/tests/product_mcp_attested_device_read.test.mts"
+      - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_owner_grant_admin.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "control-plane/tests/product_central_mcp.test.mts"
@@ -55,22 +57,22 @@ permissions:
   contents: read
 
 jobs:
-  verify-canonical-readonly:
-    name: OAuth Postgres MCP, no D1
+  verify-canonical-interactive:
+    name: OAuth Postgres MCP, attested interactive candidate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - name: Install only pinned Worker Postgres dependency
+      - name: Install only pinned Worker PostgreSQL dependency
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
-      - name: Protocol, fail-closed and signed OAuth regressions
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_read.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_central_mcp.test.mts control-plane/tests/product_central_admission.test.mts control-plane/tests/product_relay_canonical_mcp.test.mts control-plane/labs/relay/scoped-mcp.test.mts
+      - name: Protocol, grants, fail-closed and signed OAuth regressions
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_central_mcp.test.mts control-plane/tests/product_central_admission.test.mts control-plane/tests/product_relay_canonical_mcp.test.mts control-plane/labs/relay/scoped-mcp.test.mts
       - name: Compile candidate with Wrangler without deploying
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.product-mcp-canary.toml --outdir .canary-bundle
-      - name: Assert bundle cannot access legacy D1 or mutating MCP surface
+      - name: Assert bundle uses only canonical attested interactive authority
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -78,9 +80,9 @@ jobs:
           scripts=list(bundle.glob('*.js'))
           assert len(scripts)==1, f'Expected one bundled entry: {scripts}'
           source=scripts[0].read_text(encoding='utf-8')
-          assert 'D1Database' not in source and 'env.DB.prepare' not in source
-          assert 'trusted_operation_required' in source
-          assert 'attested-read-only' in source
-          assert 'computer-observe' in source
-          print('ORDAX_MCP_CANARY_ATTESTED_READ_ONLY=PASS')
+          for forbidden in ['D1Database','env.DB.prepare','operatorAuthorized(','ordax-control-plane-v3']:
+              assert forbidden not in source, forbidden
+          for required in ['trusted_operation_required','attested-device-control','computer-observe','interactive-computer-control','computer.click','computer.type']:
+              assert required in source, required
+          print('ORDAX_MCP_CANARY_ATTESTED_INTERACTIVE=PASS')
           PY
