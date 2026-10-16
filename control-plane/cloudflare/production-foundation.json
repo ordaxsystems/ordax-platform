@@ -1,5 +1,5 @@
 {
-  "version": 24,
+  "version": 25,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -159,7 +159,7 @@
       "authority": "same_worker_postgresql_oauth",
       "allowed_exact_paths": [
         "/v3/product/session",
-        "/v3/product/device/setup",
+        "/v3/device/setup",
         "/v3/product/device/central-session",
         "/v3/owner/remote-authority",
         "/v3/owner/remote-grant-groups"
