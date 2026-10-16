@@ -41,9 +41,9 @@ import {
 } from "./product_owner_grant_admin.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
-const CORE_READ_TOOLS = [
+export const PRODUCT_MCP_CORE_READ_TOOLS: ReadonlySet<string> = new Set([
   "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
-] as const;
+]);
 const ATTESTED_DEVICE_READ_TOOLS: ReadonlySet<string> = new Set([
   "computer_access_status",
   "computer_active_window",
@@ -51,8 +51,8 @@ const ATTESTED_DEVICE_READ_TOOLS: ReadonlySet<string> = new Set([
   "computer_screen_info",
   "computer_windows",
 ]);
-const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
-  ...CORE_READ_TOOLS,
+export const PRODUCT_MCP_DIRECT_READ_TOOLS: ReadonlySet<string> = new Set([
+  ...PRODUCT_MCP_CORE_READ_TOOLS,
   ...ATTESTED_DEVICE_READ_TOOLS,
 ]);
 type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction">;
@@ -82,11 +82,12 @@ async function mcpToolName(request: Request): Promise<string | null> {
   }
 }
 
-/** Injecting read handlers is an internal test seam, never an HTTP option. */
+/** Injecting read handlers or a narrower tool projection is an internal test/composition seam, never an HTTP option. */
 export function createCanonicalProductMcpGateway(
   env: Env,
   reads: ReadHandlers = createCanonicalProductMcpReadHandlers(env),
   discoveryFetch: typeof fetch = fetch,
+  allowedTools: ReadonlySet<string> = PRODUCT_MCP_DIRECT_READ_TOOLS,
 ) {
   const deniedHandlers: OrdaxMcpHandlers = {
     ...reads,
@@ -163,7 +164,7 @@ export function createCanonicalProductMcpGateway(
       }
 
       let handlers = deniedHandlers;
-      if (toolName && ATTESTED_DEVICE_READ_TOOLS.has(toolName)) {
+      if (toolName && allowedTools.has(toolName) && ATTESTED_DEVICE_READ_TOOLS.has(toolName)) {
         let trusted: AttestedMcpDevice | null = null;
         try {
           const resolved = await resolveCentralSessionFromMcp(request.clone(), env);
@@ -182,7 +183,7 @@ export function createCanonicalProductMcpGateway(
           createAction: createAttestedDeviceReadActionHandler(env, trusted),
         };
       }
-      return handleOrdaxMcp(request, handlers, READ_ONLY_TOOLS);
+      return handleOrdaxMcp(request, handlers, allowedTools);
     }
     return respond({ ok: false, error: "not_found" }, 404);
   };
