@@ -1,14 +1,14 @@
-"""Canonical mutation release stays blocked; attested read-only validation is separate."""
+"""Canonical MCP: interactive candidate may deploy; production still requires independent E2E proofs."""
 import copy
 import json
 import tomllib
 import unittest
-from pathlib import Path
 
 from scripts.cloudflare.check_mcp_release import (
-    ROOT,FOUNDATION,CONFIG,McpReleaseError,validate,validate_read_only_validation,
-    REQUIRED_PROOFS,READ_ONLY_EVIDENCE
+    ROOT, FOUNDATION, CONFIG, McpReleaseError, validate, validate_interactive_candidate,
+    REQUIRED_PROOFS, VALIDATION_BASELINE_EVIDENCE,
 )
+
 
 class McpReleaseContract(unittest.TestCase):
     @classmethod
@@ -44,15 +44,15 @@ class McpReleaseContract(unittest.TestCase):
             r"^https://github\.com/ordaxsystems/ordax-platform/actions/runs/[0-9]+$",
         )
 
-    def test_real_production_state_is_blocked_not_faked_ready(self):
+    def test_candidate_has_actions_but_production_is_still_blocked(self):
         self.assertFalse(validate(self.foundation,self.config))
         release=self.foundation["mcp_release"]
         self.assertFalse(release["deployment_ready"])
-        self.assertFalse(release["supports_remote_actions"])
+        self.assertTrue(release["supports_remote_actions"])
         required_blockers={
-            "computer_observe_grant_not_authorized",
-            "attested_device_read_end_to_end_not_verified",
-            "canonical_remote_actions_not_ready",
+            "interactive_computer_grant_not_authorized",
+            "attested_interactive_end_to_end_not_verified",
+            "canonical_remote_actions_release_not_verified",
         }
         self.assertTrue(required_blockers.issubset(set(release["readiness_blockers"])))
         evidence=release.get("verified_evidence") or {}
@@ -60,52 +60,58 @@ class McpReleaseContract(unittest.TestCase):
             evidence.get("custom_domain_tls_run_url", ""),
             r"^https://github\.com/ordaxsystems/ordax-platform/actions/runs/[0-9]+$",
         )
-        self.assertEqual(
-            evidence.get("worker_version_id"),
-            "e0d2049f-adec-46db-b094-6c9f051964ef",
-        )
+        self.assertEqual(evidence.get("worker_version_id"),"e0d2049f-adec-46db-b094-6c9f051964ef")
         self.assertFalse(self.config["workers_dev"])
         self.assertFalse(self.config["preview_urls"])
 
-    def test_read_only_validation_is_eligible_while_production_remains_blocked(self):
+    def test_interactive_candidate_is_eligible_while_production_remains_blocked(self):
         self.assertFalse(validate(self.foundation,self.config))
-        self.assertTrue(validate_read_only_validation(self.foundation,self.config))
+        self.assertTrue(validate_interactive_candidate(self.foundation,self.config))
         release=self.foundation["mcp_release"]
-        self.assertEqual(release["validation_mode"],"attested-read-only")
+        self.assertEqual(release["validation_mode"],"attested-interactive-candidate")
         self.assertTrue(release["validation_deployment_ready"])
-        self.assertFalse(release["supports_remote_actions"])
-        evidence=release["read_only_validation_evidence"]
-        self.assertEqual(set(evidence),READ_ONLY_EVIDENCE)
+        self.assertTrue(release["supports_remote_actions"])
+        evidence=release["oauth_baseline_evidence"]
+        self.assertEqual(set(evidence),VALIDATION_BASELINE_EVIDENCE)
         self.assertEqual(evidence["chatgpt_oauth_client_id"],"95d41a8f-0fb8-4c4b-9757-83ba6345062d")
 
-    def test_read_only_validation_cannot_enable_remote_actions(self):
+    def test_interactive_candidate_cannot_disable_remote_actions(self):
         f=copy.deepcopy(self.foundation)
-        f["mcp_release"]["supports_remote_actions"]=True
-        with self.assertRaisesRegex(McpReleaseError,"read_only_remote_actions_must_be_disabled|remote_actions"):
-            validate_read_only_validation(f,self.config)
+        f["mcp_release"]["supports_remote_actions"]=False
+        f["mcp_release"]["readiness_blockers"].append("canonical_remote_actions_not_ready")
+        with self.assertRaisesRegex(McpReleaseError,"interactive_candidate_remote_actions_required"):
+            validate_interactive_candidate(f,self.config)
 
-    def test_read_only_validation_requires_exact_independent_evidence(self):
+    def test_interactive_candidate_requires_exact_oauth_baseline(self):
         f=copy.deepcopy(self.foundation)
-        f["mcp_release"]["read_only_validation_evidence"]={}
-        with self.assertRaisesRegex(McpReleaseError,"evidence_incomplete"):
-            validate_read_only_validation(f,self.config)
+        f["mcp_release"]["oauth_baseline_evidence"]={}
+        with self.assertRaisesRegex(McpReleaseError,"baseline_evidence_incomplete"):
+            validate_interactive_candidate(f,self.config)
         f=copy.deepcopy(self.foundation)
-        f["mcp_release"]["read_only_validation_evidence"]["candidate_run_url"]="https://evil.example/run/1"
-        with self.assertRaisesRegex(McpReleaseError,"evidence_invalid_candidate_run_url"):
-            validate_read_only_validation(f,self.config)
+        f["mcp_release"]["oauth_baseline_evidence"]["candidate_run_url"]="https://evil.example/run/1"
+        with self.assertRaisesRegex(McpReleaseError,"baseline_invalid_candidate_run_url"):
+            validate_interactive_candidate(f,self.config)
         f=copy.deepcopy(self.foundation)
-        f["mcp_release"]["read_only_validation_evidence"]["chatgpt_oauth_client_id"]="11111111-1111-4111-8111-111111111111"
+        f["mcp_release"]["oauth_baseline_evidence"]["chatgpt_oauth_client_id"]="11111111-1111-4111-8111-111111111111"
         with self.assertRaisesRegex(McpReleaseError,"chatgpt_client_invalid"):
-            validate_read_only_validation(f,self.config)
+            validate_interactive_candidate(f,self.config)
 
-    def test_read_only_validation_flag_cannot_replace_production_readiness(self):
+    def test_candidate_flag_cannot_replace_production_readiness(self):
         f=copy.deepcopy(self.foundation)
         f["mcp_release"]["validation_deployment_ready"]=False
         self.assertFalse(validate(f,self.config))
-        with self.assertRaisesRegex(McpReleaseError,"read_only_validation_not_ready"):
-            validate_read_only_validation(f,self.config)
+        with self.assertRaisesRegex(McpReleaseError,"interactive_candidate_not_ready"):
+            validate_interactive_candidate(f,self.config)
 
-    def test_bogus_enablement_without_proofs_is_rejected(self):
+    def test_candidate_must_keep_real_e2e_blocker_until_proven(self):
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["readiness_blockers"].remove("attested_interactive_end_to_end_not_verified")
+        with self.assertRaisesRegex(McpReleaseError,"interactive_e2e_blocker_missing"):
+            validate(f,self.config)
+        with self.assertRaisesRegex(McpReleaseError,"interactive_e2e_blocker_missing|candidate_e2e_blocker_missing"):
+            validate_interactive_candidate(f,self.config)
+
+    def test_bogus_production_enablement_without_proofs_is_rejected(self):
         f=copy.deepcopy(self.foundation)
         f["mcp_release"]["deployment_ready"]=True
         f["mcp_release"]["supports_remote_actions"]=True
@@ -145,10 +151,8 @@ class McpReleaseContract(unittest.TestCase):
         ):
             with self.subTest(change=change):
                 c=copy.deepcopy(self.config);c.update(change)
-                with self.assertRaises(McpReleaseError):
-                    validate(self.foundation,c)
-                with self.assertRaises(McpReleaseError):
-                    validate_read_only_validation(self.foundation,c)
+                with self.assertRaises(McpReleaseError): validate(self.foundation,c)
+                with self.assertRaises(McpReleaseError): validate_interactive_candidate(self.foundation,c)
 
     def test_alias_or_duplicate_name_is_rejected(self):
         for field,value in (
@@ -160,26 +164,26 @@ class McpReleaseContract(unittest.TestCase):
             with self.subTest(field=field):
                 f=copy.deepcopy(self.foundation)
                 f["mcp_release"][field]=value
-                with self.assertRaises(McpReleaseError):
-                    validate(f,self.config)
-                with self.assertRaises(McpReleaseError):
-                    validate_read_only_validation(f,self.config)
+                with self.assertRaises(McpReleaseError): validate(f,self.config)
+                with self.assertRaises(McpReleaseError): validate_interactive_candidate(f,self.config)
 
-    def test_no_route_to_old_worker_is_published_by_new_source(self):
+    def test_new_source_has_one_canonical_attested_action_boundary(self):
         entry=(ROOT/"control-plane/cloudflare/src/product_mcp_entry.ts").read_text("utf-8")
         config=CONFIG.read_text("utf-8")
         self.assertNotIn("src/index.ts",config)
         self.assertNotIn("D1Database",entry)
         self.assertNotIn("env.DB",entry)
         self.assertNotIn("ordax-control-plane-v3",entry)
-        self.assertIn('supports_remote_actions: false',entry)
+        self.assertIn('supports_remote_actions: true',entry)
         self.assertIn('supports_attested_remote_reads: true',entry)
         self.assertIn('trusted_operation_required',entry)
         self.assertIn('createCanonicalProductMcpReadHandlers',entry)
         self.assertIn('PRODUCT_MCP_CORE_READ_TOOLS',entry)
-        self.assertIn('PRODUCT_MCP_DIRECT_READ_TOOLS',entry)
-        self.assertIn('ATTESTED_DEVICE_READ_TOOLS',entry)
-        self.assertIn('createAttestedDeviceReadActionHandler',entry)
+        self.assertIn('PRODUCT_MCP_DIRECT_TOOLS',entry)
+        self.assertIn('ATTESTED_DEVICE_ACTION_TOOLS',entry)
+        self.assertIn('createAttestedDeviceActionHandler',entry)
+        self.assertNotIn('createAttestedDeviceReadActionHandler',entry)
+
 
 if __name__=="__main__":
     unittest.main()
