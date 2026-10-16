@@ -14,6 +14,7 @@ export const otherClient = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 export const device = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 export const secondDevice = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 export const requestId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+export const spaceId = "55555555-5555-4555-8555-555555555555";
 export const projectId = "33333333-3333-4333-8333-333333333333";
 export const effectId = "44444444-4444-4444-8444-444444444444";
 const encoder = new TextEncoder();
@@ -61,7 +62,7 @@ export function catalog() {
 
 export function actionRecord(overrides: Record<string, unknown> = {}) {
   return {
-    ok: true, request_id: requestId, device_id: device, project_id: projectId,
+    ok: true, request_id: requestId, device_id: device, space_id: spaceId, project_id: projectId,
     capability: "project.text_read", status: "running", effect_id: effectId,
     result: null, error_code: null,
     execution_runtime_kind: null, execution_agent_version: null,
