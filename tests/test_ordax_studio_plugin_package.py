@@ -24,7 +24,7 @@ READY = {
     "endpoint": "https://mcp.ordax.com.br/mcp",
     "supports_remote_actions": True,
     "blockers": [],
-    "foundation_version": 16,
+    "foundation_version": 20,
 }
 
 
@@ -77,7 +77,8 @@ class OrdaxChatGptConnectorPackageTests(unittest.TestCase):
         self.assertFalse(readiness["ready"])
         self.assertFalse(readiness["supports_remote_actions"])
         self.assertIn("canonical_remote_actions_not_ready", readiness["blockers"])
-        self.assertIn("end_to_end_chatgpt_to_device_not_verified", readiness["blockers"])
+        self.assertIn("attested_device_read_end_to_end_not_verified", readiness["blockers"])
+        self.assertIn("computer_observe_grant_not_authorized", readiness["blockers"])
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(PluginDistributionBlocked):
                 build_archive(Path(directory))
