@@ -109,7 +109,7 @@ test("model-selected device never overrides the attested Product device", async 
   assert.equal(touched, false);
 });
 
-test("missing or write-mode observation grant fails closed before enqueue", async () => {
+test("missing or write-mode observation grant fails closed with canonical owner remediation", async () => {
   for (const catalog of [
     { ok: true, targets: [{ device_id: DEVICE, grant_groups: [] }] },
     readCatalog("computer.windows", "write"),
@@ -123,9 +123,32 @@ test("missing or write-mode observation grant fails closed before enqueue", asyn
     const response = await handler(actionRequest("computer.windows"));
     const body = await response.json();
     assert.equal(response.status, 403);
-    assert.equal(body.error, "product_grant_not_resolved");
+    assert.deepEqual(body, {
+      ok: false,
+      error: "product_grant_not_resolved",
+      required_profile: "computer-observe",
+      owner_action: "authorize_in_ordax_studio",
+    });
     assert.equal(enqueued, false);
   }
+});
+
+test("enqueue and PostgreSQL grant rejection use the same canonical remediation", async () => {
+  const expected = {
+    ok: false,
+    error: "product_grant_not_resolved",
+    required_profile: "computer-observe",
+    owner_action: "authorize_in_ordax_studio",
+  };
+
+  const rejected = createAttestedDeviceReadActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => readCatalog(),
+    enqueue: async () => ({ ok: false as const, error: "product_grant_not_resolved" as const }),
+  });
+  const response = await rejected(actionRequest("computer.windows"));
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), expected);
 });
 
 test("OAuth owner/client mismatch and mutating capability both fail closed", async () => {
