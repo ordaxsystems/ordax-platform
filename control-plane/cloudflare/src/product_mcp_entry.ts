@@ -45,6 +45,17 @@ import {
 } from "./product_owner_project_scope.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
+
+// ChatGPT keeps the canonical public MCP identity on mcp.ordax.com.br. The
+// workers.dev hostname is a separate machine ingress for the Runtime only. It
+// is intentionally path-restricted so enabling it cannot create a second MCP,
+// OAuth, owner-admin or public API surface.
+export const PRODUCT_DEVICE_MACHINE_HOSTNAME = "ordax-mcp.ordaxsystems.workers.dev";
+function isProductDeviceMachinePath(pathname: string): boolean {
+  return pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH
+    || pathname.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX + "/");
+}
+
 export const PRODUCT_MCP_CORE_READ_TOOLS: ReadonlySet<string> = new Set([
   "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
 ]);
@@ -116,6 +127,9 @@ export function createCanonicalProductMcpGateway(
   };
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
+    if (url.hostname === PRODUCT_DEVICE_MACHINE_HOSTNAME && !isProductDeviceMachinePath(url.pathname)) {
+      return respond({ ok: false, error: "not_found" }, 404);
+    }
     const metadata = url.pathname === "/.well-known/oauth-protected-resource";
     if (request.method === "GET" && url.pathname === "/health") {
       return respond({

@@ -41,6 +41,13 @@ VALIDATION_BASELINE_EVIDENCE=frozenset({
 })
 CHATGPT_OAUTH_CLIENT_ID="95d41a8f-0fb8-4c4b-9757-83ba6345062d"
 RUN_URL_RE=re.compile(r"https://github\.com/ordaxsystems/ordax-platform/actions/runs/[0-9]+")
+DEVICE_MACHINE_INGRESS={
+    "hostname":"ordax-mcp.ordaxsystems.workers.dev",
+    "workers_dev_enabled":True,
+    "public_mcp_exposed":False,
+    "allowed_exact_paths":["/v3/product/device/central-session"],
+    "allowed_path_prefixes":["/v3/device/transport/"],
+}
 
 
 def validate(foundation:dict,config:dict)->bool:
@@ -59,9 +66,11 @@ def validate(foundation:dict,config:dict)->bool:
         raise McpReleaseError("mcp_transport_or_authority_not_canonical")
     if (release.get("custom_domain_required") is not True
         or release.get("workers_dev") is not False
-        or config.get("workers_dev") is not False
         or config.get("preview_urls") is not False):
-        raise McpReleaseError("mcp_workers_dev_must_be_disabled")
+        raise McpReleaseError("mcp_public_surface_must_remain_custom_domain_only")
+    machine=release.get("device_machine_ingress")
+    if machine!=DEVICE_MACHINE_INGRESS or config.get("workers_dev") is not True:
+        raise McpReleaseError("mcp_device_machine_ingress_contract_invalid")
     if any(key in config for key in (
         "d1_databases","kv_namespaces","durable_objects","r2_buckets",
         "services","routes","unsafe")):
@@ -89,6 +98,16 @@ def validate(foundation:dict,config:dict)->bool:
         "binding":"POSTGRES","id":hyperdrive.get("id")
     }] or hyperdrive.get("id")!="4b601ec5815f43259bd8040053825d2a":
         raise McpReleaseError("mcp_hyperdrive_not_canonical")
+
+    code=ENTRY.read_text("utf-8")
+    for required in (
+        'PRODUCT_DEVICE_MACHINE_HOSTNAME = "ordax-mcp.ordaxsystems.workers.dev"',
+        "isProductDeviceMachinePath",
+        "PRODUCT_DEVICE_CENTRAL_SESSION_PATH",
+        "PRODUCT_DEVICE_TRANSPORT_PREFIX",
+    ):
+        if required not in code:
+            raise McpReleaseError("mcp_device_machine_ingress_source_guard_missing")
 
     blocked=release.get("readiness_blockers")
     ready=release.get("deployment_ready")
@@ -174,6 +193,8 @@ def validate_interactive_candidate(foundation:dict,config:dict)->bool:
         "supports_remote_actions: true",
         "trusted_operation_required",
         "createCanonicalProductMcpReadHandlers",
+        "PRODUCT_DEVICE_MACHINE_HOSTNAME",
+        "isProductDeviceMachinePath",
     )
     if any(item not in code for item in required):
         raise McpReleaseError("mcp_interactive_entry_contract_missing")

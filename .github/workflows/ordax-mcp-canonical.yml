@@ -18,6 +18,7 @@ on:
       - "control-plane/cloudflare/src/product_mcp_reads.ts"
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_mcp_machine_ingress.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "scripts/cloudflare/check_mcp_release.py"
@@ -38,6 +39,7 @@ on:
       - "control-plane/cloudflare/src/product_mcp_reads.ts"
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_mcp_machine_ingress.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "scripts/cloudflare/check_mcp_release.py"
@@ -76,11 +78,11 @@ jobs:
       - name: Install pinned canonical PostgreSQL driver
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
       - name: Validate OAuth and attested interactive MCP protocol before publishing
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_machine_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
       - name: Build exact canonical Worker candidate, no deploy
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.mcp.toml --outdir .mcp-candidate-bundle
-      - name: Prove compiled candidate is interactive, attested and legacy-free
+      - name: Prove compiled candidate is interactive, attested, machine-scoped and legacy-free
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -94,9 +96,12 @@ jobs:
               'trusted_operation_required', 'attested-device-control',
               'computer-observe', 'interactive-computer-control',
               'ordax_action_status', 'computer.click', 'computer.type',
+              'ordax-mcp.ordaxsystems.workers.dev', '/v3/product/device/central-session',
+              '/v3/device/transport',
           ]:
               assert required in code, f'Missing attested interactive contract: {required}'
           print('ORDAX_CANONICAL_MCP_ATTESTED_INTERACTIVE=PASS')
+          print('ORDAX_MCP_DEVICE_MACHINE_INGRESS_GUARD=PASS')
           print('ORDAX_CANONICAL_MCP_PRODUCTION_RELEASE=BLOCKED_UNTIL_E2E')
           PY
       - name: Retain the exact verified canonical MCP bundle

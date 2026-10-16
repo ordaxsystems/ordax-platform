@@ -20,6 +20,7 @@ on:
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_mcp_machine_ingress.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "control-plane/tests/product_device_transport.test.mts"
@@ -75,13 +76,13 @@ jobs:
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
 
       - name: Re-run canonical interactive MCP contract before deploy
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_machine_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
 
       - name: Build exact candidate and prove no legacy authority
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.mcp.toml --outdir .mcp-validation-deploy-bundle
 
-      - name: Assert compiled Worker is attested interactive and D1-free
+      - name: Assert compiled Worker is attested interactive, machine-scoped and D1-free
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -90,9 +91,15 @@ jobs:
           code=scripts[0].read_text('utf-8')
           for forbidden in ['D1Database','env.DB.prepare','operatorAuthorized(','ordax-control-plane-v3']:
               assert forbidden not in code, forbidden
-          for required in ['trusted_operation_required','attested-device-control','computer-observe','interactive-computer-control','ordax_action_status','computer.click','computer.type']:
+          for required in [
+              'trusted_operation_required','attested-device-control','computer-observe',
+              'interactive-computer-control','ordax_action_status','computer.click','computer.type',
+              'ordax-mcp.ordaxsystems.workers.dev','/v3/product/device/central-session',
+              '/v3/device/transport',
+          ]:
               assert required in code, required
           print('ORDAX_MCP_ATTESTED_INTERACTIVE_BUNDLE=PASS')
+          print('ORDAX_MCP_DEVICE_MACHINE_INGRESS_GUARD=PASS')
           PY
 
       - name: Validate least-privilege deployment credential exists
@@ -135,4 +142,37 @@ jobs:
           assert ready.get('supports_attested_remote_reads') is True, ready
           assert ready.get('supports_remote_actions') is True, ready
           print('ORDAX_MCP_PUBLIC_ATTESTED_INTERACTIVE_SMOKE=PASS')
+          PY
+
+      - name: Verify workers.dev is Runtime-only and not a second MCP endpoint
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, urllib.error, urllib.request
+          base='https://ordax-mcp.ordaxsystems.workers.dev'
+          def request(path, method='GET', body=None):
+              data=None if body is None else json.dumps(body).encode()
+              req=urllib.request.Request(
+                  base+path,
+                  method=method,
+                  data=data,
+                  headers={'accept':'application/json','content-type':'application/json'},
+              )
+              try:
+                  with urllib.request.urlopen(req,timeout=15) as response:
+                      return response.status, json.load(response)
+              except urllib.error.HTTPError as error:
+                  payload=json.loads(error.read().decode() or '{}')
+                  return error.code,payload
+          status,payload=request('/mcp','POST',{'jsonrpc':'2.0','id':1,'method':'tools/list'})
+          assert status==404,(status,payload)
+          status,payload=request('/.well-known/oauth-protected-resource')
+          assert status==404,(status,payload)
+          status,payload=request('/v3/product/device/central-session')
+          assert status in (401,403),(status,payload)
+          status,payload=request('/v3/device/transport/heartbeat','POST',{
+              'status':'online','agent_version':'smoke','capabilities':[]
+          })
+          assert status in (400,401,403),(status,payload)
+          print('ORDAX_MCP_DEVICE_MACHINE_INGRESS_LIVE=PASS')
           PY
