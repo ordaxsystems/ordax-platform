@@ -17,6 +17,8 @@ type ReadDependencies = {
   ensureDiscovery?: typeof ensureProductMcpTargetDiscovery;
 };
 
+const RUNTIME_KINDS = new Set(["ordax-os", "desktop-agent", "mobile-client", "other"]);
+
 function json(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { "cache-control": "no-store" } });
 }
@@ -40,6 +42,15 @@ function timestamp(value: unknown): string | null {
     ? new Date(value).toISOString() : null;
 }
 
+function validRuntimeProvenance(action: Record<string, unknown>): boolean {
+  const kind = action.execution_runtime_kind;
+  const version = action.execution_agent_version;
+  if (kind === null && version === null) return true;
+  return typeof kind === "string" && RUNTIME_KINDS.has(kind)
+    && typeof version === "string" && version.length >= 1 && version.length <= 80
+    && version === version.trim() && !/[\x00-\x1f\x7f]/u.test(version);
+}
+
 function validAction(value: unknown, requestId: string): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const action = value as Record<string, unknown>;
@@ -53,6 +64,7 @@ function validAction(value: unknown, requestId: string): value is Record<string,
     && action.capability.length >= 2 && action.capability.length <= 120
     && /^[a-z][a-z0-9._-]+$/.test(action.capability)
     && isProductActionStatus(action.status)
+    && validRuntimeProvenance(action)
     && timestamp(action.created_at) !== null
     && [action.started_at, action.finished_at].every(item => item === null || timestamp(item) !== null)
     && (action.error_code === null || (typeof action.error_code === "string"
@@ -150,6 +162,8 @@ export function createCanonicalProductMcpReadHandlers(
           effect_id: result.effect_id,
           result: result.result,
           error_code: result.error_code,
+          execution_runtime_kind: result.execution_runtime_kind,
+          execution_agent_version: result.execution_agent_version,
           created_at: timestamp(result.created_at),
           started_at: timestamp(result.started_at),
           finished_at: timestamp(result.finished_at),
