@@ -3,7 +3,7 @@ import test from "node:test";
 import { createCanonicalProductMcpReadHandlers } from "../cloudflare/src/product_mcp_reads.ts";
 import { handleOrdaxMcp } from "../cloudflare/src/mcp_http.ts";
 import {
-  env, requestId, device, token, withIssuer, actionRecord,
+  env, requestId, device, token, withIssuer, request, actionRecord,
 } from "./product_mcp_test_fixtures.mts";
 
 async function callStatus(action: Record<string, unknown>) {
@@ -59,7 +59,7 @@ test("historical action without persisted Runtime provenance remains explicitly 
   });
 });
 
-test("half or malformed Runtime provenance fails closed before public MCP projection", async () => {
+test("half or malformed Runtime provenance fails closed without leaking internal errors", async () => {
   await withIssuer(async () => {
     for (const action of [
       actionRecord({ execution_runtime_kind: "desktop-agent", execution_agent_version: null }),
@@ -68,11 +68,22 @@ test("half or malformed Runtime provenance fails closed before public MCP projec
       actionRecord({ execution_runtime_kind: "desktop-agent", execution_agent_version: " 0.3.0" }),
       actionRecord({ execution_runtime_kind: "desktop-agent", execution_agent_version: "0.3.0\nprivate" }),
     ]) {
+      const handlers = createCanonicalProductMcpReadHandlers(env, {
+        getAction: async () => action,
+      });
+      const internal = await handlers.getAction(request(await token()), requestId);
+      assert.equal(internal.status, 502);
+      assert.deepEqual(await internal.json(), {
+        ok: false,
+        error: "product_postgres_invalid_response",
+      });
+
       const response = await callStatus(action);
       assert.equal(response.status, 200);
       const rpc = await response.json();
       assert.equal(rpc.result.isError, true);
-      assert.equal(rpc.result.structuredContent.error, "product_postgres_invalid_response");
+      assert.equal(rpc.result.structuredContent.error, "action_status_unavailable");
+      assert.equal(JSON.stringify(rpc).includes("product_postgres_invalid_response"), false);
       assert.equal(JSON.stringify(rpc).includes("private"), false);
     }
   });
