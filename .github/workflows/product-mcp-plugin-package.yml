@@ -1,4 +1,4 @@
-name: Private Product OAuth Validation Package
+name: Private Product Interactive Validation Package
 
 on:
   pull_request:
@@ -23,31 +23,34 @@ permissions:
 
 jobs:
   package:
-    name: Private OAuth validation package
+    name: Private interactive validation package
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Validate private OAuth package against canonical Product SSOT
+      - name: Validate private interactive package against canonical Product SSOT
         run: python -m unittest discover -s control-plane/tests -p test_product_plugin_ssot.py -v
-      - name: Generate private ChatGPT OAuth-validation ZIP
-        run: python scripts/cloudflare/package_product_plugin.py --out dist/ordax-product-oauth-validation-plugin.zip
-      - name: Verify canonical endpoint and read-only package
+      - name: Generate private ChatGPT interactive-validation ZIP
+        run: python scripts/cloudflare/package_product_plugin.py --out dist/ordax-product-interactive-validation-plugin.zip
+      - name: Verify canonical endpoint and interactive candidate package
         run: |
-          sha256sum dist/ordax-product-oauth-validation-plugin.zip
+          sha256sum dist/ordax-product-interactive-validation-plugin.zip
           python - <<'PY'
           import json, zipfile
-          with zipfile.ZipFile("dist/ordax-product-oauth-validation-plugin.zip") as archive:
+          with zipfile.ZipFile("dist/ordax-product-interactive-validation-plugin.zip") as archive:
               m = json.loads(archive.read("mcp.json"))
+              plugin = json.loads(archive.read("plugin.json"))
               url = m["mcpServers"]["ordax-product-canary"]["url"]
+              caps = plugin["extensions"]["com.openai"]["interface"]["capabilities"]
               assert url == "https://mcp.ordax.com.br/mcp", url
               assert "workers.dev" not in url
-              print("ORDAX_PRIVATE_OAUTH_VALIDATION_SINGLE_ENDPOINT=PASS")
+              assert caps == ["Read", "Computer Control"], caps
+              print("ORDAX_PRIVATE_INTERACTIVE_VALIDATION_SINGLE_ENDPOINT=PASS")
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: ordax-product-oauth-validation-plugin
-          path: dist/ordax-product-oauth-validation-plugin.zip
+          name: ordax-product-interactive-validation-plugin
+          path: dist/ordax-product-interactive-validation-plugin.zip
           retention-days: 7

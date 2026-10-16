@@ -1,5 +1,6 @@
-# Official MCP release candidate. No deployment keys, no old Worker,
-# no mutating remote actions before the Product trusted-session E2E gate is green.
+# Official MCP release candidate. Pull requests compile the exact canonical
+# interactive candidate but never deploy it. Production release remains blocked
+# until the real trusted-session/grant E2E evidence is promoted explicitly.
 name: OrdaX MCP Canonical Candidate
 
 on:
@@ -8,15 +9,16 @@ on:
       - "control-plane/cloudflare/wrangler.mcp.toml"
       - "control-plane/cloudflare/production-foundation.json"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
-      - "control-plane/cloudflare/src/product_mcp_attested_device_read.ts"
+      - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
+      - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_auth.ts"
       - "control-plane/cloudflare/src/product_mcp_reads.ts"
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/tests/product_mcp_entry.test.mts"
-      - "control-plane/tests/product_mcp_attested_device_read.test.mts"
+      - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "scripts/cloudflare/check_mcp_release.py"
       - "tests/test_canonical_mcp_release.py"
@@ -27,15 +29,16 @@ on:
       - "control-plane/cloudflare/wrangler.mcp.toml"
       - "control-plane/cloudflare/production-foundation.json"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
-      - "control-plane/cloudflare/src/product_mcp_attested_device_read.ts"
+      - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
+      - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_auth.ts"
       - "control-plane/cloudflare/src/product_mcp_reads.ts"
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/tests/product_mcp_entry.test.mts"
-      - "control-plane/tests/product_mcp_attested_device_read.test.mts"
+      - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "scripts/cloudflare/check_mcp_release.py"
       - "tests/test_canonical_mcp_release.py"
@@ -47,7 +50,7 @@ permissions:
 
 jobs:
   canonical-mcp:
-    name: Single OAuth + PostgreSQL MCP, no D1, no mutation deploy
+    name: Single OAuth + PostgreSQL MCP, attested interactive candidate
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -57,22 +60,27 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
-      - name: Validate official endpoint identity and release fail-closed state
+      - name: Validate candidate eligibility while production remains fail-closed
         run: |
           python -m unittest tests.test_canonical_mcp_release
+          python scripts/cloudflare/check_mcp_release.py --validation-candidate
           python scripts/cloudflare/check_mcp_release.py --inspect
-          if python scripts/cloudflare/check_mcp_release.py; then
-            echo "::error::MCP mutation release unexpectedly unblocked without real E2E"
+          set +e
+          python scripts/cloudflare/check_mcp_release.py
+          code=$?
+          set -e
+          if [[ "$code" -ne 3 ]]; then
+            echo "::error::Production release guard must remain blocked with exit 3; got $code"
             exit 1
           fi
       - name: Install pinned canonical PostgreSQL driver
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
-      - name: Validate OAuth and attested read-only MCP protocol before publishing
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_read.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
-      - name: Build final Worker using official release config, no deploy
+      - name: Validate OAuth and attested interactive MCP protocol before publishing
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
+      - name: Build exact canonical Worker candidate, no deploy
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.mcp.toml --outdir .mcp-candidate-bundle
-      - name: Prove compiled production entry contains no D1 or mutating MCP surface
+      - name: Prove compiled candidate is interactive, attested and legacy-free
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -82,10 +90,14 @@ jobs:
           code=scripts[0].read_text('utf-8')
           for forbidden in ['D1Database', 'env.DB.prepare', 'operatorAuthorized(', 'ordax-control-plane-v3']:
               assert forbidden not in code, f'Legacy authority bundled: {forbidden}'
-          for required in ['trusted_operation_required', 'attested-read-only', 'computer-observe', 'ordax_action_status']:
-              assert required in code, f'Missing attested read-only contract: {required}'
-          print('ORDAX_CANONICAL_MCP_ATTESTED_READ_ONLY=PASS')
-          print('ORDAX_CANONICAL_MCP_MUTATIONS=BLOCKED_UNTIL_E2E')
+          for required in [
+              'trusted_operation_required', 'attested-device-control',
+              'computer-observe', 'interactive-computer-control',
+              'ordax_action_status', 'computer.click', 'computer.type',
+          ]:
+              assert required in code, f'Missing attested interactive contract: {required}'
+          print('ORDAX_CANONICAL_MCP_ATTESTED_INTERACTIVE=PASS')
+          print('ORDAX_CANONICAL_MCP_PRODUCTION_RELEASE=BLOCKED_UNTIL_E2E')
           PY
       - name: Retain the exact verified canonical MCP bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
