@@ -3,7 +3,7 @@ import test from "node:test";
 import { createCanonicalProductMcpReadHandlers } from "../cloudflare/src/product_mcp_reads.ts";
 import { handleOrdaxMcp } from "../cloudflare/src/mcp_http.ts";
 import {
-  env, owner, otherOwner, client, otherClient, requestId, projectId,
+  env, owner, otherOwner, client, otherClient, requestId, spaceId, projectId,
   token, withIssuer, request, actionRecord,
 } from "./product_mcp_test_fixtures.mts";
 
@@ -55,7 +55,7 @@ test("invalid credentials and invalid request UUID are denied before reading act
   });
 });
 
-test("status preserves published UUIDs and Product result, excluding extra database columns", async () => {
+test("status preserves canonical Space/project UUIDs and Product result, excluding extra database columns", async () => {
   await withIssuer(async () => {
     const result = { ok: true, summary: "Arquivo consultado", data: { content: "texto autorizado" } };
     const handlers = createCanonicalProductMcpReadHandlers(env, { getAction: async () => actionRecord({
@@ -68,6 +68,7 @@ test("status preserves published UUIDs and Product result, excluding extra datab
     const body = await response.json();
     assert.equal(body.action.request_id, requestId);
     assert.equal(body.action.device_id, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+    assert.equal(body.action.space_id, spaceId);
     assert.equal(body.action.project_id, projectId);
     assert.equal(body.action.project, null);
     assert.equal(body.action.action, "project.text_read");
@@ -111,6 +112,7 @@ test("MCP polls the same accepted action through all statuses without dispatch o
       assert.equal(data.action.device_id, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
       assert.equal(data.action.subject_id, undefined);
       assert.equal(data.action.client_id, undefined);
+      assert.equal(data.action.space_id, spaceId);
       assert.equal(data.action.project_id, projectId);
       assert.equal(data.action.project, null);
       assert.equal(data.pending, ["queued", "leased", "running"].includes(next));
@@ -141,11 +143,12 @@ test("malformed/mismatched canonical results cannot masquerade as an accepted ac
   await withIssuer(async () => {
     for (const result of [
       {}, [], actionRecord({ ok: false }), actionRecord({ request_id: projectId }),
-      actionRecord({ device_id: "legacy-device" }), actionRecord({ project_id: "legacy-project" }),
-      actionRecord({ effect_id: null }), actionRecord({ capability: "shell; private" }),
-      actionRecord({ status: "unknown" }), actionRecord({ created_at: "not-a-date" }),
-      actionRecord({ started_at: "not-a-date" }), actionRecord({ finished_at: 42 }),
-      actionRecord({ error_code: "private\nSQL" }), actionRecord({ result: undefined }),
+      actionRecord({ device_id: "legacy-device" }), actionRecord({ space_id: "legacy-space" }),
+      actionRecord({ project_id: "legacy-project" }), actionRecord({ effect_id: null }),
+      actionRecord({ capability: "shell; private" }), actionRecord({ status: "unknown" }),
+      actionRecord({ created_at: "not-a-date" }), actionRecord({ started_at: "not-a-date" }),
+      actionRecord({ finished_at: 42 }), actionRecord({ error_code: "private\nSQL" }),
+      actionRecord({ result: undefined }),
     ]) {
       const handlers = createCanonicalProductMcpReadHandlers(env, { getAction: async () => result as any });
       const response = await handlers.getAction(request(await token()), requestId);
