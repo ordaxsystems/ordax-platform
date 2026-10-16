@@ -75,8 +75,8 @@ begin
       )
   )
   select count(*)::integer,
-         min(space_id),
-         min(project_id),
+         min(space_id::text)::uuid,
+         min(project_id::text)::uuid,
          min(repository_id),
          min(repository_full_name)
     into v_count,
