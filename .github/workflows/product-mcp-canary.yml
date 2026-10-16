@@ -6,6 +6,9 @@ on:
     paths:
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_mcp_attested_device_read.ts"
+      - "control-plane/cloudflare/src/product_action_scope.ts"
+      - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
       - "control-plane/cloudflare/src/product_central_mcp.ts"
       - "control-plane/cloudflare/src/product_central_admission.ts"
@@ -15,6 +18,7 @@ on:
       - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_mcp_attested_device_read.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "control-plane/tests/product_central_mcp.test.mts"
       - "control-plane/tests/product_central_admission.test.mts"
@@ -25,6 +29,9 @@ on:
     paths:
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_mcp_attested_device_read.ts"
+      - "control-plane/cloudflare/src/product_action_scope.ts"
+      - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
       - "control-plane/cloudflare/src/product_central_mcp.ts"
       - "control-plane/cloudflare/src/product_central_admission.ts"
@@ -34,6 +41,7 @@ on:
       - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_mcp_attested_device_read.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "control-plane/tests/product_central_mcp.test.mts"
       - "control-plane/tests/product_central_admission.test.mts"
@@ -56,11 +64,11 @@ jobs:
       - name: Install only pinned Worker Postgres dependency
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
       - name: Protocol, fail-closed and signed OAuth regressions
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_central_mcp.test.mts control-plane/tests/product_central_admission.test.mts control-plane/tests/product_relay_canonical_mcp.test.mts control-plane/labs/relay/scoped-mcp.test.mts
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_read.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_central_mcp.test.mts control-plane/tests/product_central_admission.test.mts control-plane/tests/product_relay_canonical_mcp.test.mts control-plane/labs/relay/scoped-mcp.test.mts
       - name: Compile candidate with Wrangler without deploying
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.product-mcp-canary.toml --outdir .canary-bundle
-      - name: Assert bundle cannot access legacy D1
+      - name: Assert bundle cannot access legacy D1 or mutating MCP surface
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -70,6 +78,7 @@ jobs:
           source=scripts[0].read_text(encoding='utf-8')
           assert 'D1Database' not in source and 'env.DB.prepare' not in source
           assert 'trusted_operation_required' in source
-          assert 'read-only-canary' in source
-          print('ORDAX_MCP_CANARY_D1_FREE=PASS')
+          assert 'attested-read-only' in source
+          assert 'computer-observe' in source
+          print('ORDAX_MCP_CANARY_ATTESTED_READ_ONLY=PASS')
           PY
