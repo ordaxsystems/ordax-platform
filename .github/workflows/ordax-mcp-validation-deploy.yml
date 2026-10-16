@@ -1,0 +1,138 @@
+name: Deploy OrdaX MCP Interactive Validation Candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "control-plane/cloudflare/wrangler.mcp.toml"
+      - "control-plane/cloudflare/production-foundation.json"
+      - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
+      - "control-plane/cloudflare/src/product_action_scope.ts"
+      - "control-plane/cloudflare/src/product_auth.ts"
+      - "control-plane/cloudflare/src/product_device_setup.ts"
+      - "control-plane/cloudflare/src/product_device_transport.ts"
+      - "control-plane/cloudflare/src/product_owner_grant_admin.ts"
+      - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
+      - "control-plane/cloudflare/src/product_central_device_session.ts"
+      - "control-plane/cloudflare/src/product_mcp_reads.ts"
+      - "control-plane/cloudflare/src/product_postgres_store.ts"
+      - "control-plane/cloudflare/src/mcp_http.ts"
+      - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_mcp_attested_device_action.test.mts"
+      - "control-plane/tests/product_device_setup_route.test.mts"
+      - "control-plane/tests/product_device_transport.test.mts"
+      - "control-plane/tests/product_owner_grant_admin.test.mts"
+      - "control-plane/tests/product_mcp_discovery.test.mts"
+      - "control-plane/tests/product_mcp_failure_responses.test.mts"
+      - "control-plane/tests/product_oauth_readiness.test.mts"
+      - "scripts/cloudflare/check_mcp_release.py"
+      - "tests/test_canonical_mcp_release.py"
+      - ".github/workflows/ordax-mcp-validation-deploy.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ordax-mcp-interactive-validation
+  cancel-in-progress: false
+
+jobs:
+  deploy-validation-candidate:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: cloudflare-v3
+    env:
+      CLOUDFLARE_ACCOUNT_ID: "42586bf13b61436219d21def299833e4"
+    steps:
+      - name: Checkout exact main source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Prove interactive candidate is eligible and production remains blocked
+        shell: bash
+        run: |
+          python -m unittest tests.test_canonical_mcp_release
+          python scripts/cloudflare/check_mcp_release.py --validation-candidate
+          python scripts/cloudflare/check_mcp_release.py --inspect
+          set +e
+          python scripts/cloudflare/check_mcp_release.py
+          code=$?
+          set -e
+          if [[ "$code" -ne 3 ]]; then
+            echo "::error::Production release guard must remain BLOCKED with exit 3; got $code"
+            exit 1
+          fi
+
+      - name: Install pinned canonical PostgreSQL driver
+        run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
+
+      - name: Re-run canonical interactive MCP contract before deploy
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
+
+      - name: Build exact candidate and prove no legacy authority
+        working-directory: control-plane/cloudflare
+        run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.mcp.toml --outdir .mcp-validation-deploy-bundle
+
+      - name: Assert compiled Worker is attested interactive and D1-free
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          scripts=list(Path('control-plane/cloudflare/.mcp-validation-deploy-bundle').glob('*.js'))
+          assert len(scripts)==1, scripts
+          code=scripts[0].read_text('utf-8')
+          for forbidden in ['D1Database','env.DB.prepare','operatorAuthorized(','ordax-control-plane-v3']:
+              assert forbidden not in code, forbidden
+          for required in ['trusted_operation_required','attested-device-control','computer-observe','interactive-computer-control','ordax_action_status','computer.click','computer.type']:
+              assert required in code, required
+          print('ORDAX_MCP_ATTESTED_INTERACTIVE_BUNDLE=PASS')
+          PY
+
+      - name: Validate least-privilege deployment credential exists
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if ! test -n "$CLOUDFLARE_API_TOKEN"; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not configured in cloudflare-v3 environment. No deployment attempted."
+            exit 1
+          fi
+
+      - name: Deploy canonical interactive validation candidate
+        working-directory: control-plane/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4.141.0 deploy --config wrangler.mcp.toml
+
+      - name: Verify public attested interactive health and readiness
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          base='https://mcp.ordax.com.br'
+          def get(path):
+              req=urllib.request.Request(base+path,headers={'accept':'application/json'})
+              with urllib.request.urlopen(req,timeout=15) as r:
+                  assert r.status==200, (path,r.status)
+                  return json.load(r)
+          health=get('/health')
+          assert health.get('ok') is True, health
+          assert health.get('mode')=='attested-device-control', health
+          assert health.get('supports_attested_remote_reads') is True, health
+          assert health.get('supports_remote_actions') is True, health
+          assert health.get('conversation_topology')=='user_chatgpt_direct', health
+          assert health.get('model_relay') is False, health
+          ready=get('/ready')
+          assert ready.get('ok') is True, ready
+          assert ready.get('oauth_discovery_ready') is True, ready
+          assert ready.get('supports_attested_remote_reads') is True, ready
+          assert ready.get('supports_remote_actions') is True, ready
+          print('ORDAX_MCP_PUBLIC_ATTESTED_INTERACTIVE_SMOKE=PASS')
+          PY
