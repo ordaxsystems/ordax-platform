@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Build the private ChatGPT OAuth-validation package from the Product SSOT.
+"""Build the private ChatGPT interactive-validation package from Product SSOT.
 
 This package is intentionally not the production-distribution connector. It uses
-exactly the canonical Product MCP custom domain so ChatGPT OAuth/DCR/consent can
-be validated before remote actions are enabled. It never deploys a Worker,
-creates grants, or introduces a workers.dev fallback.
+exactly the canonical Product MCP custom domain so OAuth, attested device
+binding, owner grants and the first interactive-computer tranche can be proven
+end to end before production distribution is enabled. It never deploys a
+Worker, creates grants, or introduces a workers.dev/legacy fallback.
 """
 from __future__ import annotations
 
@@ -18,7 +19,26 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "integrations/chatgpt/product-canary/manifest.json"
 FOUNDATION = ROOT / "control-plane/cloudflare/production-foundation.json"
-READ_TOOLS = ("ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status")
+VALIDATION_TOOLS = (
+    "ordax_session",
+    "ordax_profile",
+    "ordax_targets",
+    "ordax_action_status",
+    "computer_windows",
+    "computer_active_window",
+    "computer_screenshot",
+    "computer_screen_info",
+    "computer_focus_window",
+    "computer_click",
+    "computer_mouse_move",
+    "computer_drag",
+    "computer_launch_app",
+    "computer_scroll",
+    "computer_type",
+    "computer_hotkey",
+    "computer_access_status",
+    "computer_processes",
+)
 
 
 def _canonical_endpoint(foundation: dict) -> str:
@@ -38,8 +58,17 @@ def _canonical_endpoint(foundation: dict) -> str:
         raise ValueError("Canonical MCP transport/authority is invalid")
     if release.get("custom_domain_required") is not True or release.get("workers_dev") is not False:
         raise ValueError("Private validation must use the canonical custom domain")
-    if release.get("supports_remote_actions") is not False:
-        raise ValueError("Private OAuth validation package must remain read-only")
+    if release.get("validation_mode") != "attested-interactive-candidate":
+        raise ValueError("Private validation package requires the attested interactive candidate")
+    if release.get("validation_deployment_ready") is not True:
+        raise ValueError("Private interactive validation candidate is not deployable")
+    if release.get("supports_remote_actions") is not True:
+        raise ValueError("Private interactive validation package requires remote actions")
+    if release.get("deployment_ready") is not False:
+        raise ValueError("Private validation package cannot represent an already-approved production release")
+    blockers = release.get("readiness_blockers")
+    if not isinstance(blockers, list) or "attested_interactive_end_to_end_not_verified" not in blockers:
+        raise ValueError("Private validation package requires the real E2E blocker")
     endpoint = f"https://{hostname}{path}"
     parsed = urlsplit(endpoint)
     if parsed.scheme != "https" or parsed.hostname != hostname or parsed.path != path:
@@ -54,10 +83,10 @@ def build_files() -> tuple[str, dict[str, bytes]]:
     foundation = json.loads(FOUNDATION.read_text(encoding="utf-8"))
     if manifest.get("schema") != "ordax.product-chatgpt-plugin/1":
         raise ValueError("Manifesto do plugin inválido")
-    if manifest.get("status") != "private-canary" or manifest.get("worker_role") != "read-only-canary":
-        raise ValueError("Plugin não tem o escopo privado de validação")
-    if manifest.get("allowed_tools") != list(READ_TOOLS):
-        raise ValueError("Catálogo de ferramentas não corresponde à entrada MCP de leitura")
+    if manifest.get("status") != "private-canary" or manifest.get("worker_role") != "attested-interactive-validation":
+        raise ValueError("Plugin não tem o escopo privado de validação interativa")
+    if manifest.get("allowed_tools") != list(VALIDATION_TOOLS):
+        raise ValueError("Catálogo de ferramentas não corresponde ao candidato MCP interativo")
     if not re.fullmatch(r"[a-z][a-z0-9-]{3,63}", manifest.get("name", "")):
         raise ValueError("Nome interno inválido")
     if not re.fullmatch(r"\d+\.\d+\.\d+", manifest.get("version", "")):
@@ -75,7 +104,7 @@ def build_files() -> tuple[str, dict[str, bytes]]:
         "longDescription": manifest["long_description"],
         "developerName": "OrdaX",
         "category": "Developer Tools",
-        "capabilities": ["Read"],
+        "capabilities": ["Read", "Computer Control"],
     }
     plugin = {
         "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
@@ -136,7 +165,7 @@ def main() -> None:
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             archive.writestr(info, contents[path])
-    print("ORDAX_PRIVATE_OAUTH_VALIDATION_PLUGIN=PACKAGED")
+    print("ORDAX_PRIVATE_INTERACTIVE_VALIDATION_PLUGIN=PACKAGED")
     print("ENDPOINT=" + endpoint)
     print("ARCHIVE=" + str(args.out))
 
