@@ -46,13 +46,20 @@ import {
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 
-// ChatGPT keeps the canonical public MCP identity on mcp.ordax.com.br. The
-// workers.dev hostname is a separate machine ingress for the Runtime only. It
-// is intentionally path-restricted so enabling it cannot create a second MCP,
-// OAuth, owner-admin or public API surface.
-export const PRODUCT_DEVICE_MACHINE_HOSTNAME = "ordax-mcp.ordaxsystems.workers.dev";
-function isProductDeviceMachinePath(pathname: string): boolean {
-  return pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH
+// ChatGPT keeps the only public MCP identity on mcp.ordax.com.br. The
+// workers.dev hostname is a separate, path-restricted network ingress for the
+// installed Runtime and Studio when the branded custom domain is unreachable
+// from a device network. It reuses the same Worker, OAuth checks, PostgreSQL
+// authority and handlers; it is not a second MCP server or fallback authority.
+export const PRODUCT_TRUSTED_CLIENT_HOSTNAME = "ordax-mcp.ordaxsystems.workers.dev";
+export const PRODUCT_OWNER_SESSION_PATH = "/v3/product/session";
+export function isProductTrustedClientPath(pathname: string): boolean {
+  return pathname === PRODUCT_OWNER_SESSION_PATH
+    || pathname === PRODUCT_DEVICE_SETUP_PATH
+    || pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH
+    || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
+    || pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
+    || pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")
     || pathname.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX + "/");
 }
 
@@ -127,7 +134,7 @@ export function createCanonicalProductMcpGateway(
   };
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
-    if (url.hostname === PRODUCT_DEVICE_MACHINE_HOSTNAME && !isProductDeviceMachinePath(url.pathname)) {
+    if (url.hostname === PRODUCT_TRUSTED_CLIENT_HOSTNAME && !isProductTrustedClientPath(url.pathname)) {
       return respond({ ok: false, error: "not_found" }, 404);
     }
     const metadata = url.pathname === "/.well-known/oauth-protected-resource";
@@ -169,7 +176,7 @@ export function createCanonicalProductMcpGateway(
       if (!productAuthConfigured(env)) return respond({ ok: false, error: "product_auth_unconfigured" }, 503);
       return respond(resourceMetadata(url.origin, String(env.PRODUCT_AUTH_ISSUER)));
     }
-    if (request.method === "GET" && url.pathname === "/v3/product/session") {
+    if (request.method === "GET" && url.pathname === PRODUCT_OWNER_SESSION_PATH) {
       // Studio owner validation shares the same signed Product identity boundary
       // as enrollment. It does not grant MCP client permissions or remote actions.
       return productOwnerAccountSession(request, env);
