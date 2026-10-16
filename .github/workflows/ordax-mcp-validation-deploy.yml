@@ -147,32 +147,31 @@ jobs:
       - name: Verify workers.dev is Runtime-only and not a second MCP endpoint
         shell: bash
         run: |
-          python - <<'PY'
-          import json, urllib.error, urllib.request
+          set -euo pipefail
           base='https://ordax-mcp.ordaxsystems.workers.dev'
-          def request(path, method='GET', body=None):
-              data=None if body is None else json.dumps(body).encode()
-              req=urllib.request.Request(
-                  base+path,
-                  method=method,
-                  data=data,
-                  headers={'accept':'application/json','content-type':'application/json'},
-              )
-              try:
-                  with urllib.request.urlopen(req,timeout=15) as response:
-                      return response.status, json.load(response)
-              except urllib.error.HTTPError as error:
-                  payload=json.loads(error.read().decode() or '{}')
-                  return error.code,payload
-          status,payload=request('/mcp','POST',{'jsonrpc':'2.0','id':1,'method':'tools/list'})
-          assert status==404,(status,payload)
-          status,payload=request('/.well-known/oauth-protected-resource')
-          assert status==404,(status,payload)
-          status,payload=request('/v3/product/device/central-session')
-          assert status in (401,403),(status,payload)
-          status,payload=request('/v3/device/transport/heartbeat','POST',{
-              'status':'online','agent_version':'smoke','capabilities':[]
-          })
-          assert status in (400,401,403),(status,payload)
-          print('ORDAX_MCP_DEVICE_MACHINE_INGRESS_LIVE=PASS')
-          PY
+          ua='OrdaX-Device-Agent/validation-smoke'
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          request_status() {
+            local name="$1" method="$2" path="$3" body="${4:-}"
+            local args=(-sS --max-time 15 -A "$ua" -H 'accept: application/json' -o "$tmp/$name.body" -w '%{http_code}' -X "$method")
+            if [[ -n "$body" ]]; then
+              args+=(-H 'content-type: application/json' --data "$body")
+            fi
+            curl "${args[@]}" "$base$path"
+          }
+
+          status="$(request_status mcp POST /mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')"
+          test "$status" = 404 || { echo "::error::workers.dev exposed /mcp ($status)"; cat "$tmp/mcp.body"; exit 1; }
+
+          status="$(request_status oauth GET /.well-known/oauth-protected-resource)"
+          test "$status" = 404 || { echo "::error::workers.dev exposed OAuth metadata ($status)"; cat "$tmp/oauth.body"; exit 1; }
+
+          status="$(request_status session GET /v3/product/device/central-session)"
+          [[ "$status" = 401 || "$status" = 403 ]] || { echo "::error::device session route did not reach credential guard ($status)"; cat "$tmp/session.body"; exit 1; }
+
+          status="$(request_status heartbeat POST /v3/device/transport/heartbeat '{"status":"online","agent_version":"smoke","capabilities":[]}')"
+          [[ "$status" = 400 || "$status" = 401 || "$status" = 403 ]] || { echo "::error::device transport route did not reach credential/input guard ($status)"; cat "$tmp/heartbeat.body"; exit 1; }
+
+          echo 'ORDAX_MCP_DEVICE_MACHINE_INGRESS_LIVE=PASS'
