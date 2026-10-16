@@ -50,7 +50,7 @@ test("ready uses canonical discovery URL with 5s deadline and rejects redirects"
     conversation_topology: "user_chatgpt_direct",
     model_relay: false,
     supports_attested_remote_reads: true,
-    supports_remote_actions: false,
+    supports_remote_actions: true,
   });
   assert.equal(calls, 2);
 });
