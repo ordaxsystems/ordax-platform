@@ -44,12 +44,22 @@ type Dependencies = Readonly<{
 
 const QUEUE_TTL_MS = 2 * 60 * 1000;
 const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled"]);
+const REQUIRED_OBSERVE_PROFILE = "computer-observe";
 
 function json(value: unknown, status = 200): Response {
   return Response.json(value, {
     status,
     headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
   });
+}
+
+function observeGrantRequired(): Response {
+  return json({
+    ok: false,
+    error: "product_grant_not_resolved",
+    required_profile: REQUIRED_OBSERVE_PROFILE,
+    owner_action: "authorize_in_ordax_studio",
+  }, 403);
 }
 
 function isRecord(value: unknown): value is Json {
@@ -145,7 +155,7 @@ export function createAttestedDeviceReadActionHandler(
       });
       const scope = selectCanonicalRelayDeviceScope(catalog, trusted.deviceId);
       if (!scope || !scope.allowedActions.includes(body.action)) {
-        return json({ ok: false, error: "product_grant_not_resolved" }, 403);
+        return observeGrantRequired();
       }
 
       const opId = operationId().toLowerCase();
@@ -169,7 +179,7 @@ export function createAttestedDeviceReadActionHandler(
       if (result.ok === false) {
         if (result.error === "product_grant_not_resolved"
           || result.error === "product_owner_auth_ineligible") {
-          return json({ ok: false, error: "product_grant_not_resolved" }, 403);
+          return observeGrantRequired();
         }
         if (result.error === "idempotency_conflict") {
           return json({ ok: false, error: "idempotency_conflict" }, 409);
@@ -194,7 +204,7 @@ export function createAttestedDeviceReadActionHandler(
       if (error instanceof ProductPostgresError) {
         if (error.code === "product_grant_not_resolved"
           || error.code === "product_owner_auth_ineligible") {
-          return json({ ok: false, error: "product_grant_not_resolved" }, 403);
+          return observeGrantRequired();
         }
       }
       return json({ ok: false, error: "product_action_unavailable" }, 503);
