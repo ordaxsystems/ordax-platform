@@ -1,0 +1,15 @@
+# Temporary diagnostic only. No Product/OAuth/device authority is exposed.
+name = "ordax-hyperdrive-probe"
+main = "src/hyperdrive_runtime_probe.ts"
+compatibility_date = "2026-10-17"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = true
+redact_query_string = true
+
+[[hyperdrive]]
+binding = "POSTGRES"
+id = "4b601ec5815f43259bd8040053825d2a"

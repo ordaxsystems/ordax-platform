@@ -1,0 +1,76 @@
+name: Hyperdrive Runtime Probe
+
+on:
+  pull_request:
+    paths:
+      - "control-plane/cloudflare/src/hyperdrive_runtime_probe.ts"
+      - "control-plane/cloudflare/wrangler.hyperdrive-probe.toml"
+      - ".github/workflows/hyperdrive-runtime-probe.yml"
+  push:
+    branches: [main]
+    paths:
+      - "control-plane/cloudflare/src/hyperdrive_runtime_probe.ts"
+      - "control-plane/cloudflare/wrangler.hyperdrive-probe.toml"
+      - ".github/workflows/hyperdrive-runtime-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install pinned PostgreSQL dependency
+        run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Build isolated probe without deployment authority
+        working-directory: control-plane/cloudflare
+        run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.hyperdrive-probe.toml --outdir .hyperdrive-probe-bundle
+      - name: Prove probe has no Product authority
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          scripts=list(Path('control-plane/cloudflare/.hyperdrive-probe-bundle').glob('*.js'))
+          assert len(scripts)==1, scripts
+          source=scripts[0].read_text('utf-8')
+          assert 'select 1::int as ok' in source
+          for forbidden in ['product_device','remote-grant','/mcp','oauth','D1Database','DEVICE_SESSIONS']:
+              assert forbidden not in source, forbidden
+          print('ORDAX_HYPERDRIVE_PROBE_ISOLATION=PASS')
+          PY
+
+  live-probe:
+    if: github.event_name == 'push'
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: cloudflare-v3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install pinned PostgreSQL dependency
+        run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Deploy isolated probe
+        working-directory: control-plane/cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4.141.0 deploy --config wrangler.hyperdrive-probe.toml
+      - name: Execute one real Hyperdrive request
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          status="$(curl -sS --max-time 20 -o "$body" -w '%{http_code}' https://ordax-hyperdrive-probe.ordaxsystems.workers.dev/)"
+          python - "$status" "$body" <<'PY'
+          import json,sys
+          status=sys.argv[1]
+          with open(sys.argv[2],encoding='utf-8') as f:
+              payload=json.load(f)
+          safe={k:payload.get(k) for k in ('ok','phase','classification','code') if k in payload}
+          print('ORDAX_HYPERDRIVE_PROBE_HTTP='+status)
+          print('ORDAX_HYPERDRIVE_PROBE_RESULT='+json.dumps(safe,separators=(',',':'),sort_keys=True))
+          PY
