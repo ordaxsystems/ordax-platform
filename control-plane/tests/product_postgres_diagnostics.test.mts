@@ -56,3 +56,16 @@ test("Hyperdrive messages are reduced to stable non-secret classifications", () 
     assert.equal(JSON.stringify(diagnostic).includes(message as string), false);
   }
 });
+
+test("canonical PostgreSQL stores defer initial connection timeout to Hyperdrive", () => {
+  const stores = [
+    "../cloudflare/src/product_postgres_store.ts",
+    "../cloudflare/src/product_central_device_session_store.ts",
+    "../cloudflare/src/product_mcp_discovery_store.ts",
+    "../cloudflare/src/product_owner_project_scope.ts",
+  ];
+  for (const store of stores) {
+    const source = fs.readFileSync(new URL(store, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /connectionTimeoutMillis\s*:/);
+  }
+});

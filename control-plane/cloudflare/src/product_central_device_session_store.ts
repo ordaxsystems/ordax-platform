@@ -73,7 +73,6 @@ async function call<T>(env: ProductPostgresEnv, rpc: RpcName, values: JsonObject
   const spec = RPCS[rpc];
   const client = new Client({
     connectionString: connectionString(env),
-    connectionTimeoutMillis: 5_000,
     query_timeout: 10_000,
   });
   const args = spec.casts.map((cast, index) => `$${index + 1}::${cast}`).join(", ");
