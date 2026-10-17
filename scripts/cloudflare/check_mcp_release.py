@@ -210,6 +210,7 @@ def validate_interactive_candidate(foundation:dict,config:dict)->bool:
         "createAttestedDeviceActionHandler",
         "supports_attested_remote_reads: true",
         "supports_remote_actions: true",
+        "supports_project_continuity: true",
         "trusted_operation_required",
         "createCanonicalProductMcpReadHandlers",
         "PRODUCT_TRUSTED_CLIENT_HOSTNAME",
