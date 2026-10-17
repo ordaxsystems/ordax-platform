@@ -382,6 +382,9 @@ async function callRpc<T>(
     max: 1,
     connect_timeout: 5,
     idle_timeout: 1,
+    // RPC casts are explicit and text[] values are encoded below, so the
+    // Postgres.js startup type-discovery round-trip is unnecessary through Hyperdrive.
+    fetch_types: false,
     prepare: true,
   });
 
