@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   createCanonicalProductMcpGateway,
+  PRODUCT_MCP_DIRECT_TOOLS,
   PRODUCT_OWNER_SESSION_PATH,
   PRODUCT_TRUSTED_CLIENT_HOSTNAME,
 } from "../cloudflare/src/product_mcp_entry.ts";
@@ -106,5 +107,5 @@ test("canonical custom domain retains the full public MCP surface", async () => 
   }));
   assert.equal(tools.status, 200);
   const json = await tools.json();
-  assert.equal(json.result.tools.length, 18);
+  assert.equal(json.result.tools.length, PRODUCT_MCP_DIRECT_TOOLS.size);
 });
