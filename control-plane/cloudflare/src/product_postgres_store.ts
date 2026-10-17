@@ -84,6 +84,12 @@ const POSTGRES_FAILURE_SIGNAL_MARKERS = Object.freeze([
   ["prepared_statement", "prepared statement"],
   ["protocol", "protocol"],
   ["internal_error", "internal error"],
+  ["pg_connection_terminated_unexpectedly", "connection terminated unexpectedly"],
+  ["pg_connection_terminated", "connection terminated"],
+  ["pg_client_connection_error", "client has encountered a connection error"],
+  ["pg_client_closed", "client was closed and is not queryable"],
+  ["pg_cross_request_io", "cannot perform i/o on behalf of a different request"],
+  ["pg_client_reused", "client has already been connected"],
 ] as const);
 
 function postgresFailureMessage(error: unknown): string {
@@ -106,6 +112,12 @@ function classifyPostgresFailure(error: unknown): string {
   if (message.includes("server return error and closed connection")) return "hyperdrive_server_closed_connection";
   if (message.includes("failed to connect to the provided database")) return "hyperdrive_database_connect_failed";
   if (message.includes("internal error")) return "hyperdrive_internal_error";
+  if (message.includes("connection terminated unexpectedly")) return "pg_connection_terminated_unexpectedly";
+  if (message.includes("connection terminated")) return "pg_connection_terminated";
+  if (message.includes("client has encountered a connection error")) return "pg_client_connection_error";
+  if (message.includes("client was closed and is not queryable")) return "pg_client_closed";
+  if (message.includes("cannot perform i/o on behalf of a different request")) return "pg_cross_request_io";
+  if (message.includes("client has already been connected")) return "pg_client_reused";
   if (message.includes("bad hostname")) return "hyperdrive_bad_hostname";
   if (message.includes("cannot connect to the host")) return "hyperdrive_origin_unreachable";
   if (message.includes("tls handshake failed")) return "hyperdrive_tls_handshake_failed";

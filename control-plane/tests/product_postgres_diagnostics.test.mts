@@ -47,6 +47,12 @@ test("Hyperdrive messages are reduced to stable non-secret classifications", () 
     ["Server return error and closed connection.", "hyperdrive_server_closed_connection", ["server_closed_connection"]],
     ["Failed to connect to the provided database", "hyperdrive_database_connect_failed", ["database_connect"]],
     ["TLS handshake failed: cert validation failed", "hyperdrive_tls_handshake_failed", ["tls", "certificate"]],
+    ["Connection terminated unexpectedly", "pg_connection_terminated_unexpectedly", ["pg_connection_terminated_unexpectedly", "pg_connection_terminated"]],
+    ["Connection terminated", "pg_connection_terminated", ["pg_connection_terminated"]],
+    ["Client has encountered a connection error and is not queryable", "pg_client_connection_error", ["pg_client_connection_error"]],
+    ["Client was closed and is not queryable", "pg_client_closed", ["pg_client_closed"]],
+    ["Cannot perform I/O on behalf of a different request.", "pg_cross_request_io", ["pg_cross_request_io"]],
+    ["Client has already been connected. You cannot reuse a client.", "pg_client_reused", ["pg_client_reused"]],
     ["something private that must never be logged", "unclassified", []],
   ];
   for (const [message, expected, signals] of cases) {
