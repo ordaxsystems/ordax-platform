@@ -79,7 +79,7 @@ test("owner session route is exposed on canonical MCP gateway and fails closed w
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
-test("MCP discovery advertises core, observation and the complete interactive computer tranche", async () => {
+test("MCP discovery advertises core, computer control and promoted safe computer reads", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   const response = await run(new Request(MCP_URL, {
@@ -91,13 +91,16 @@ test("MCP discovery advertises core, observation and the complete interactive co
   assert.deepEqual(json.result.tools.map((t: any) => t.name), [
     "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
     "computer_windows", "computer_active_window", "computer_screenshot", "computer_screen_info",
-    "computer_focus_window", "computer_click", "computer_mouse_move", "computer_drag",
-    "computer_launch_app", "computer_scroll", "computer_type", "computer_hotkey",
-    "computer_access_status", "computer_processes",
+    "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
+    "computer_drag", "computer_launch_app", "computer_scroll", "computer_type", "computer_hotkey",
+    "computer_access_status", "computer_file_stat", "computer_directory_list", "computer_text_read",
+    "computer_search", "computer_processes",
   ]);
   const byName = new Map(json.result.tools.map((tool: any) => [tool.name, tool]));
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_screenshot") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("computer_clipboard_read") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("computer_text_read") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_click") as any).annotations.readOnlyHint, false);
   assert.equal((byName.get("computer_click") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_focus_window") as any).annotations.destructiveHint, false);
@@ -105,11 +108,11 @@ test("MCP discovery advertises core, observation and the complete interactive co
   assert.equal(calls.targets, 0);
 });
 
-test("filesystem, clipboard, process-control, browser and terminal families remain unadvertised", async () => {
+test("computer mutations, process-control, browser, terminal and project families remain unadvertised", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   for (const action of [
-    "computer_clipboard_read", "computer_clipboard_write", "computer_text_read",
+    "computer_clipboard_write", "computer_text_write", "computer_text_patch", "computer_path_remove",
     "computer_terminate_process", "browser_start", "terminal_exec", "project_text_write",
     "workspace_directory_list",
   ]) {
@@ -122,12 +125,14 @@ test("filesystem, clipboard, process-control, browser and terminal families rema
   }
 });
 
-test("attested observation and interactive tools fail closed without a verified session binding", async () => {
+test("attested device tools fail closed without a verified session binding", async () => {
   const { handlers } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   for (const [tool, args] of [
     ["computer_windows", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }],
     ["computer_click", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", x: 10, y: 20 }],
+    ["computer_text_read", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", path: "C:\\work\\x.txt" }],
+    ["computer_clipboard_read", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }],
   ] as const) {
     const response = await run(request(tool, args));
     assert.equal(response.status, 200);
@@ -170,7 +175,7 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.equal(response.status, 200);
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
-  assert.equal(json.result.structuredContent.mcp_tool_count, 18);
+  assert.equal(json.result.structuredContent.mcp_tool_count, 23);
   assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-11.1");
 });
 
