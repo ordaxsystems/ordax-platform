@@ -380,7 +380,6 @@ async function callRpc<T>(
   const query = `select public.${rpc}(${args})${resultCast} as result`;
   const client = new Client({
     connectionString,
-    connectionTimeoutMillis: 5_000,
     query_timeout: 10_000,
   });
 
