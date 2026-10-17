@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { Client } from "pg";
 import {
   authenticateProductRequest,
   type ProductAuthEnv,
@@ -56,20 +56,18 @@ export async function resolveOwnerProjectScope(
     throw new Error("owner_project_scope_invalid");
   }
 
-  const sql = postgres(connectionString, {
-    max: 1,
-    connect_timeout: 5,
-    idle_timeout: 1,
-    prepare: true,
+  const client = new Client({
+    connectionString,
+    connectionTimeoutMillis: 5_000,
+    query_timeout: 10_000,
   });
   try {
-    const rows = await sql`
-      select public.ordax_resolve_owner_project_scope_v1(
-        ${ownerUserId}::uuid,
-        ${deviceId}::uuid,
-        ${repository}::text
-      ) as result
-    `;
+    await client.connect();
+    const response = await client.query(
+      "select public.ordax_resolve_owner_project_scope_v1($1::uuid, $2::uuid, $3::text) as result",
+      [ownerUserId, deviceId, repository],
+    );
+    const rows = response.rows;
     const value = (rows[0] as { result?: unknown } | undefined)?.result;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("product_postgres_invalid_response");
@@ -80,7 +78,7 @@ export async function resolveOwnerProjectScope(
     throw new Error("product_postgres_unavailable");
   } finally {
     try {
-      await sql.end({ timeout: 1 });
+      await client.end();
     } catch {
       // Hyperdrive owns upstream pooling; cleanup must not mask the RPC result.
     }

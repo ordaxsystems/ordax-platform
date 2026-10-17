@@ -123,11 +123,11 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
 
     def test_worker_adapter_uses_hyperdrive_without_backend_secret(self) -> None:
         lowered = self.adapter.lower()
-        self.assertIn('import postgres from "postgres"', lowered)
+        self.assertIn('import { client } from "pg"', lowered)
         self.assertIn("env.postgres?.connectionstring", lowered)
-        self.assertIn("sql.unsafe", lowered)
-        self.assertIn("sql.unsafe(query, values, { prepare: true })", lowered)
-        self.assertIn("fetch_types: false", lowered)
+        self.assertIn("await client.connect()", lowered)
+        self.assertIn("client.query(query, values)", lowered)
+        self.assertNotIn("sql.unsafe", lowered)
         self.assertNotIn("supabase_server_key", lowered)
         self.assertNotIn("supabase_service_role_key", lowered)
         self.assertNotIn("/rest/v1/rpc/", lowered)

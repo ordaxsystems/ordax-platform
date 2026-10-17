@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { Client } from "pg";
 import { encodePostgresTextArrayLiteral, InvalidPostgresTextArrayError } from "./product_postgres_text_array.ts";
 import {
   canonicalRemoteClient,
@@ -378,23 +378,18 @@ async function callRpc<T>(
   const args = spec.casts.map((cast, index) => `$${index + 1}::${cast}`).join(", ");
   const resultCast = "resultCast" in spec ? `::${spec.resultCast}` : "";
   const query = `select public.${rpc}(${args})${resultCast} as result`;
-  const sql = postgres(connectionString, {
-    max: 1,
-    connect_timeout: 5,
-    idle_timeout: 1,
-    // RPC casts are explicit and text[] values are encoded below, so the
-    // Postgres.js startup type-discovery round-trip is unnecessary through Hyperdrive.
-    fetch_types: false,
-    prepare: true,
+  const client = new Client({
+    connectionString,
+    connectionTimeoutMillis: 5_000,
+    query_timeout: 10_000,
   });
 
   try {
     const values = spec.keys.map((key, index) => {
       const value = encodeRpcValue(payload[key], spec.casts[index]);
       if (spec.casts[index] !== "text[]") return value;
-      // sql.unsafe(query, values) treats sql.array() helpers as scalar values and
-      // serializes them as CSV. Bind a canonical PostgreSQL text[] literal instead;
-      // the allowlisted RPC query still owns the explicit $n::text[] cast.
+      // Bind a canonical PostgreSQL text[] literal; the allowlisted RPC owns
+      // the explicit $n::text[] cast.
       try {
         return encodePostgresTextArrayLiteral(value);
       } catch (error) {
@@ -404,9 +399,9 @@ async function callRpc<T>(
         throw error;
       }
     });
-    // Hyperdrive uses transaction pooling. postgres.js disables prepared statements
-    // for sql.unsafe() unless the per-query option explicitly re-enables them.
-    const rows = await sql.unsafe(query, values, { prepare: true });
+    await client.connect();
+    const response = await client.query(query, values);
+    const rows = response.rows;
     const row = rows[0] as { result?: T } | undefined;
     if (!row || !Object.prototype.hasOwnProperty.call(row, "result")) {
       throw new ProductPostgresError("product_postgres_invalid_response", 502);
@@ -421,7 +416,7 @@ async function callRpc<T>(
     throw new ProductPostgresError("product_postgres_unavailable", 503);
   } finally {
     try {
-      await sql.end({ timeout: 1 });
+      await client.end();
     } catch {
       // Hyperdrive owns the upstream pool; connection cleanup must not mask
       // the result of an already-completed authority call.

@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { Client } from "pg";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { ProductPostgresError, type ProductPostgresEnv } from "./product_postgres_store.ts";
 
@@ -34,17 +34,18 @@ export async function ensureProductMcpTargetDiscovery(
     throw new ProductPostgresError("product_mcp_client_identity_invalid", 400);
   }
 
-  const sql = postgres(connectionString(env), {
-    max: 1,
-    connect_timeout: 5,
-    idle_timeout: 1,
-    prepare: true,
+  const client = new Client({
+    connectionString: connectionString(env),
+    connectionTimeoutMillis: 5_000,
+    query_timeout: 10_000,
   });
   try {
-    const rows = await sql.unsafe(
+    await client.connect();
+    const response = await client.query(
       "select public.ordax_ensure_product_mcp_target_discovery_v1($1::uuid, $2::uuid) as result",
       [ownerUserId, oauthClientId],
     );
+    const rows = response.rows;
     const result = (rows[0] as { result?: DiscoveryResult } | undefined)?.result;
     if (!result || typeof result !== "object" || typeof result.ok !== "boolean") {
       throw new ProductPostgresError("product_postgres_invalid_response", 502);
@@ -55,7 +56,7 @@ export async function ensureProductMcpTargetDiscovery(
     throw new ProductPostgresError("product_postgres_unavailable", 503);
   } finally {
     try {
-      await sql.end({ timeout: 1 });
+      await client.end();
     } catch {
       // Hyperdrive owns the upstream pool.
     }
