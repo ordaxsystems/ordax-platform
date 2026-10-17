@@ -127,6 +127,7 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
         self.assertIn("env.postgres?.connectionstring", lowered)
         self.assertIn("sql.unsafe", lowered)
         self.assertIn("sql.unsafe(query, values, { prepare: true })", lowered)
+        self.assertIn("fetch_types: false", lowered)
         self.assertNotIn("supabase_server_key", lowered)
         self.assertNotIn("supabase_service_role_key", lowered)
         self.assertNotIn("/rest/v1/rpc/", lowered)
