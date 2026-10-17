@@ -20,6 +20,7 @@ test("PostgreSQL diagnostics expose only allowlisted non-secret fields", () => {
     syscall: "connect",
     cause_name: "SocketError",
     cause_code: "ETIMEDOUT",
+    classification: "origin_authentication_failed",
   });
   assert.equal(JSON.stringify(diagnostic).includes(SECRET), false);
   assert.equal(Object.hasOwn(diagnostic, "message"), false);
@@ -30,4 +31,20 @@ test("store logs only the safe diagnostic envelope before generic failure", () =
   const source = fs.readFileSync(new URL("../cloudflare/src/product_postgres_store.ts", import.meta.url), "utf8");
   assert.match(source, /console\.error\(JSON\.stringify\(safePostgresFailure\(error, rpc\)\)\)/);
   assert.doesNotMatch(source, /console\.error\([^\n]*(?:error\.message|connectionString|query|values)/);
+});
+
+
+test("Hyperdrive messages are reduced to stable non-secret classifications", () => {
+  const cases = [
+    ["Internal error.", "hyperdrive_internal_error"],
+    ["Failed to acquire a connection from the pool.", "hyperdrive_pool_acquire_failed"],
+    ["Server connection attempt failed: connection_refused", "hyperdrive_origin_connection_refused"],
+    ["TLS handshake failed: cert validation failed", "hyperdrive_tls_handshake_failed"],
+    ["something private that must never be logged", "unclassified"],
+  ];
+  for (const [message, expected] of cases) {
+    const diagnostic = safePostgresFailure(Object.assign(new Error(message), { code: "58000" }), "fixture_rpc");
+    assert.equal(diagnostic.classification, expected);
+    assert.equal(JSON.stringify(diagnostic).includes(message), false);
+  }
 });
