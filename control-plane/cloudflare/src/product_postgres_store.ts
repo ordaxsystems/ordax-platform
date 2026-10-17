@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { encodePostgresTextArrayLiteral, InvalidPostgresTextArrayError } from "./product_postgres_text_array.ts";
 import {
   canonicalRemoteClient,
   canonicalRemoteGrantGroup,
@@ -303,11 +304,17 @@ async function callRpc<T>(
     const values = spec.keys.map((key, index) => {
       const value = encodeRpcValue(payload[key], spec.casts[index]);
       if (spec.casts[index] !== "text[]") return value;
-      if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-        throw new ProductPostgresError("product_grant_invalid", 400);
+      // sql.unsafe(query, values) treats sql.array() helpers as scalar values and
+      // serializes them as CSV. Bind a canonical PostgreSQL text[] literal instead;
+      // the allowlisted RPC query still owns the explicit $n::text[] cast.
+      try {
+        return encodePostgresTextArrayLiteral(value);
+      } catch (error) {
+        if (error instanceof InvalidPostgresTextArrayError) {
+          throw new ProductPostgresError("product_grant_invalid", 400);
+        }
+        throw error;
       }
-      // Postgres.js 3.4.5 binds arrays as typed parameters, never SQL literals.
-      return sql.array(value, 25); // PostgreSQL TEXT OID
     });
     const rows = await sql.unsafe(query, values);
     const row = rows[0] as { result?: T } | undefined;
