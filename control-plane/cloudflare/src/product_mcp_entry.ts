@@ -155,7 +155,6 @@ export function createCanonicalProductMcpGateway(
         postgres_configured: productPostgresConfigured(env),
         supports_attested_remote_reads: true,
         supports_remote_actions: true,
-        supports_project_continuity: true,
       });
     }
     if (request.method === "GET" && url.pathname === "/ready") {
@@ -164,8 +163,7 @@ export function createCanonicalProductMcpGateway(
           ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
           conversation_topology: "user_chatgpt_direct", model_relay: false,
           supports_attested_remote_reads: false,
-          supports_remote_actions: false,
-          supports_project_continuity: false, error: "platform_mcp_unconfigured",
+          supports_remote_actions: false, error: "platform_mcp_unconfigured",
         }, 503);
       }
       const discovery = await checkCanonicalProductOAuthDiscovery(String(env.PRODUCT_AUTH_ISSUER), discoveryFetch);
@@ -176,7 +174,6 @@ export function createCanonicalProductMcpGateway(
         model_relay: false,
         supports_attested_remote_reads: discovery.ok,
         supports_remote_actions: discovery.ok,
-        supports_project_continuity: discovery.ok,
         ...(discovery.error ? { error: discovery.error } : {}),
         ...(discovery.upstream_http_status !== undefined ? { upstream_http_status: discovery.upstream_http_status } : {}),
         ...(discovery.failure_stage ? { failure_stage: discovery.failure_stage } : {}),
