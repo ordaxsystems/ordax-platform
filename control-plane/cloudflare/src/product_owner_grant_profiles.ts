@@ -3,6 +3,7 @@ import {
   COMPUTER_DEVICE_ACTIONS,
   OWNER_DEVICE_COMPUTER_GRANT_PROFILES,
   PROJECT_BROWSER_ACTIONS,
+  PROJECT_CONTINUITY_ACTIONS,
 } from "./product_action_scope.ts";
 
 export type OwnerGrantProfile = Readonly<{
@@ -16,6 +17,7 @@ const WRITE_ACTIONS = new Set<string>([
   "computer.mouse_move", "computer.path_move", "computer.path_remove", "computer.scroll",
   "computer.terminate_process", "computer.text_patch", "computer.text_write", "computer.type",
   "browser.click", "browser.navigate", "browser.start", "browser.stop", "browser.type",
+  "continuity.update",
 ]);
 
 export function productCapabilityAccessMode(capability: string): "read" | "write" {
@@ -41,6 +43,7 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
   ...computerProfiles,
   "app-intelligence-read": profile("device", APP_INTELLIGENCE_DEVICE_ACTIONS),
   "project-browser-automation": profile("project", PROJECT_BROWSER_ACTIONS),
+  "project-continuity": profile("project", PROJECT_CONTINUITY_ACTIONS),
 });
 
 export function ownerMcpGrantProfile(key: string): OwnerGrantProfile | null {
