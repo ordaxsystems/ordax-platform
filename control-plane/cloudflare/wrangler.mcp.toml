@@ -7,7 +7,7 @@
 # and permits only explicitly allowlisted authenticated Product handlers.
 name = "ordax-mcp"
 main = "src/product_mcp_entry.ts"
-compatibility_date = "2026-09-27"
+compatibility_date = "2026-10-17"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
