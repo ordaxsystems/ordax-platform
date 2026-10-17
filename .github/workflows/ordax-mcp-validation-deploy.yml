@@ -94,7 +94,7 @@ jobs:
           for required in [
               'trusted_operation_required','attested-device-control','computer-observe',
               'interactive-computer-control','ordax_action_status','computer.click','computer.type',
-              'ordax-mcp.ordaxsystems.workers.dev','/v3/product/session',
+              'ordax-mcp.ordaxsystems.workers.dev','/v3/product/session','/v3/device/setup',
               '/v3/product/device/central-session','/v3/device/transport','/v3/owner/remote-authority',
               '/v3/owner/remote-grant-groups',
           ]:
@@ -181,7 +181,7 @@ jobs:
 
           status="$(request_status owner_session GET /v3/product/session)"
           require_status owner_session "$status" '401 403'
-          status="$(request_status setup POST /v3/product/device/setup '{}')"
+          status="$(request_status setup POST /v3/device/setup '{}')"
           require_status setup "$status" '400 401 403'
           status="$(request_status central_session GET /v3/product/device/central-session)"
           require_status central_session "$status" '401 403'
