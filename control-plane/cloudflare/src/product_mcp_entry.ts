@@ -26,6 +26,7 @@ import {
   createAttestedDeviceActionHandler,
   type AttestedMcpDevice,
 } from "./product_mcp_attested_device_action.ts";
+import { createAttestedProjectActionHandler } from "./product_mcp_attested_project_action.ts";
 import {
   handleProductDeviceSetup,
   PRODUCT_DEVICE_SETUP_PATH,
@@ -88,9 +89,15 @@ const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_OBSERVE_TOOLS,
   ...ATTESTED_DEVICE_INTERACTIVE_TOOLS,
 ]);
+export const ATTESTED_PROJECT_CONTINUITY_TOOLS: ReadonlySet<string> = new Set([
+  "project_briefing",
+  "continuity_state",
+  "continuity_update",
+]);
 export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...PRODUCT_MCP_CORE_READ_TOOLS,
   ...ATTESTED_DEVICE_ACTION_TOOLS,
+  ...ATTESTED_PROJECT_CONTINUITY_TOOLS,
 ]);
 // Compatibility export for callers/tests that previously consumed the read-only name.
 export const PRODUCT_MCP_DIRECT_READ_TOOLS = PRODUCT_MCP_DIRECT_TOOLS;
@@ -148,6 +155,7 @@ export function createCanonicalProductMcpGateway(
         postgres_configured: productPostgresConfigured(env),
         supports_attested_remote_reads: true,
         supports_remote_actions: true,
+        supports_project_continuity: true,
       });
     }
     if (request.method === "GET" && url.pathname === "/ready") {
@@ -156,7 +164,8 @@ export function createCanonicalProductMcpGateway(
           ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
           conversation_topology: "user_chatgpt_direct", model_relay: false,
           supports_attested_remote_reads: false,
-          supports_remote_actions: false, error: "platform_mcp_unconfigured",
+          supports_remote_actions: false,
+          supports_project_continuity: false, error: "platform_mcp_unconfigured",
         }, 503);
       }
       const discovery = await checkCanonicalProductOAuthDiscovery(String(env.PRODUCT_AUTH_ISSUER), discoveryFetch);
@@ -167,6 +176,7 @@ export function createCanonicalProductMcpGateway(
         model_relay: false,
         supports_attested_remote_reads: discovery.ok,
         supports_remote_actions: discovery.ok,
+        supports_project_continuity: discovery.ok,
         ...(discovery.error ? { error: discovery.error } : {}),
         ...(discovery.upstream_http_status !== undefined ? { upstream_http_status: discovery.upstream_http_status } : {}),
         ...(discovery.failure_stage ? { failure_stage: discovery.failure_stage } : {}),
@@ -209,7 +219,9 @@ export function createCanonicalProductMcpGateway(
       }
 
       let handlers = deniedHandlers;
-      if (toolName && allowedTools.has(toolName) && ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)) {
+      const needsAttestedDevice = Boolean(toolName && allowedTools.has(toolName)
+        && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName) || ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)));
+      if (needsAttestedDevice) {
         let trusted: AttestedMcpDevice | null = null;
         try {
           const resolved = await resolveCentralSessionFromMcp(request.clone(), env);
@@ -225,7 +237,9 @@ export function createCanonicalProductMcpGateway(
         }
         handlers = {
           ...reads,
-          createAction: createAttestedDeviceActionHandler(env, trusted),
+          createAction: toolName && ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)
+            ? createAttestedProjectActionHandler(env, trusted)
+            : createAttestedDeviceActionHandler(env, trusted),
         };
       }
       return handleOrdaxMcp(request, handlers, allowedTools);
