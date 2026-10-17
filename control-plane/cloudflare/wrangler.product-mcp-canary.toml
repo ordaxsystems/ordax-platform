@@ -3,7 +3,7 @@
 # second device registry, queue, identity issuer or Relay. No D1 binding.
 name = "ordax-control-plane-v3-canary"
 main = "src/product_mcp_entry.ts"
-compatibility_date = "2026-09-27"
+compatibility_date = "2026-10-17"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
