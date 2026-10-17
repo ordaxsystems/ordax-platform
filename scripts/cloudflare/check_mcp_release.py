@@ -206,8 +206,10 @@ def validate_interactive_candidate(foundation:dict,config:dict)->bool:
     required=(
         "PRODUCT_MCP_CORE_READ_TOOLS",
         "PRODUCT_MCP_DIRECT_TOOLS",
-        "ATTESTED_DEVICE_ACTION_TOOLS",
+        "ATTESTED_ACTION_TOOLS",
         "createAttestedDeviceActionHandler",
+        "createAttestedRepositoryCatalogHandler",
+        "createAttestedProjectContinuityHandler",
         "supports_attested_remote_reads: true",
         "supports_remote_actions: true",
         "supports_project_continuity: true",
