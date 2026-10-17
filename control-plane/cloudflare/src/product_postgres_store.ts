@@ -57,6 +57,38 @@ export class ProductPostgresError extends Error {
   }
 }
 
+type SafePostgresFailure = {
+  event: "product_postgres_failure";
+  rpc: string;
+  name: string;
+  code: string | null;
+  errno: string | number | null;
+  syscall: string | null;
+  cause_name: string | null;
+  cause_code: string | null;
+};
+
+function boundedDiagnostic(value: unknown, max = 80): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= max
+    ? value : null;
+}
+
+export function safePostgresFailure(error: unknown, rpc: string): SafePostgresFailure {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const cause = record.cause && typeof record.cause === "object"
+    ? record.cause as Record<string, unknown> : {};
+  return {
+    event: "product_postgres_failure",
+    rpc,
+    name: boundedDiagnostic(record.name) ?? (error instanceof Error ? error.name : "UnknownError"),
+    code: boundedDiagnostic(record.code),
+    errno: typeof record.errno === "number" ? record.errno : boundedDiagnostic(record.errno),
+    syscall: boundedDiagnostic(record.syscall),
+    cause_name: boundedDiagnostic(cause.name),
+    cause_code: boundedDiagnostic(cause.code),
+  };
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const RPC_SPECS = {
@@ -324,6 +356,10 @@ async function callRpc<T>(
     return row.result as T;
   } catch (error) {
     if (error instanceof ProductPostgresError) throw error;
+    // The client-facing response remains deliberately generic. Emit only an
+    // allowlisted diagnostic envelope: never SQL, values, connection strings,
+    // hostnames, credentials, messages or stacks.
+    console.error(JSON.stringify(safePostgresFailure(error, rpc)));
     throw new ProductPostgresError("product_postgres_unavailable", 503);
   } finally {
     try {
