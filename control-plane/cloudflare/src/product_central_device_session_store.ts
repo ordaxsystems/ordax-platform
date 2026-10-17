@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { Client } from "pg";
 import {
   ProductPostgresError,
   type ProductPostgresEnv,
@@ -71,17 +71,18 @@ function connectionString(env: ProductPostgresEnv): string {
 
 async function call<T>(env: ProductPostgresEnv, rpc: RpcName, values: JsonObject): Promise<T> {
   const spec = RPCS[rpc];
-  const sql = postgres(connectionString(env), {
-    max: 1,
-    connect_timeout: 5,
-    idle_timeout: 1,
-    prepare: true,
+  const client = new Client({
+    connectionString: connectionString(env),
+    connectionTimeoutMillis: 5_000,
+    query_timeout: 10_000,
   });
   const args = spec.casts.map((cast, index) => `$${index + 1}::${cast}`).join(", ");
   const query = `select public.${rpc}(${args}) as result`;
   try {
     const bound = spec.keys.map(key => values[key]);
-    const rows = await sql.unsafe(query, bound);
+    await client.connect();
+    const response = await client.query(query, bound);
+    const rows = response.rows;
     const row = rows[0] as { result?: T } | undefined;
     if (!row || !Object.prototype.hasOwnProperty.call(row, "result")) {
       throw new ProductPostgresError("product_postgres_invalid_response", 502);
@@ -91,7 +92,7 @@ async function call<T>(env: ProductPostgresEnv, rpc: RpcName, values: JsonObject
     if (error instanceof ProductPostgresError) throw error;
     throw new ProductPostgresError("product_postgres_unavailable", 503);
   } finally {
-    try { await sql.end({ timeout: 1 }); } catch { /* Hyperdrive owns upstream pooling. */ }
+    try { await client.end(); } catch { /* Hyperdrive owns upstream pooling. */ }
   }
 }
 
