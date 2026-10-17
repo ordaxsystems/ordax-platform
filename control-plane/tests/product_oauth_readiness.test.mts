@@ -51,6 +51,7 @@ test("ready uses canonical discovery URL with 5s deadline and rejects redirects"
     model_relay: false,
     supports_attested_remote_reads: true,
     supports_remote_actions: true,
+    supports_project_continuity: true,
   });
   assert.equal(calls, 2);
 });
@@ -71,6 +72,7 @@ test("disabled Supabase OAuth 2.1 server does not turn configured variables into
     model_relay: false,
     supports_attested_remote_reads: false,
     supports_remote_actions: false,
+    supports_project_continuity: false,
     error: "oauth_discovery_unavailable",
     upstream_http_status: 404,
   });
@@ -155,6 +157,7 @@ test("Worker readiness distinguishes failed fetch from unreadable metadata witho
     assert.equal(body.error, "oauth_discovery_unavailable");
     assert.equal(body.supports_attested_remote_reads, false);
     assert.equal(body.supports_remote_actions, false);
+    assert.equal(body.supports_project_continuity, false);
     assert.doesNotMatch(JSON.stringify(body), /supersecret|private token/i);
   }
 });

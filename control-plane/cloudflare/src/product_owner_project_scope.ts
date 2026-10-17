@@ -23,13 +23,19 @@ const json = (body: unknown, status = 200) => Response.json(body, {
   headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
 });
 
+/**
+ * Canonical repository identity used by Product authorization and continuity.
+ * GitHub owner/repository matching is case-insensitive, so the authority key
+ * must collapse casing as well as surrounding whitespace. Display casing is
+ * not an authorization input and can be sourced separately when needed.
+ */
 export function canonicalGithubRepositoryFullName(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
   if (normalized.length < 3 || normalized.length > 140 || !GITHUB_REPOSITORY_RE.test(normalized)) {
     return null;
   }
-  return normalized;
+  return normalized.toLowerCase();
 }
 
 function configuredConnectionString(env: ProductPostgresEnv): string | null {

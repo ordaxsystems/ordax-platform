@@ -8,7 +8,7 @@
  * Central multi-client inference relay.
  *
  * Never imports the legacy D1 Worker and never makes model arguments an
- * authorization source. Device actions are dispatched only through the
+ * authorization source. Device/project actions are dispatched only through the
  * Runtime-attested Product session and current canonical PostgreSQL grants.
  */
 import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
@@ -26,6 +26,11 @@ import {
   createAttestedDeviceActionHandler,
   type AttestedMcpDevice,
 } from "./product_mcp_attested_device_action.ts";
+import { createAttestedRepositoryCatalogHandler } from "./product_mcp_attested_repository_catalog.ts";
+import {
+  ATTESTED_MCP_PROJECT_CONTINUITY_ACTIONS,
+  createAttestedProjectContinuityHandler,
+} from "./product_mcp_attested_project_continuity.ts";
 import {
   handleProductDeviceSetup,
   PRODUCT_DEVICE_SETUP_PATH,
@@ -84,13 +89,28 @@ const ATTESTED_DEVICE_INTERACTIVE_TOOLS: ReadonlySet<string> = new Set([
   "computer_type",
   "computer_hotkey",
 ]);
-const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
+const ATTESTED_DEVICE_COMPUTER_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_OBSERVE_TOOLS,
   ...ATTESTED_DEVICE_INTERACTIVE_TOOLS,
 ]);
+const ATTESTED_REPOSITORY_CATALOG_TOOLS: ReadonlySet<string> = new Set([
+  "repository_catalog",
+]);
+const ATTESTED_PROJECT_CONTINUITY_TOOLS: ReadonlySet<string> = new Set([
+  "project_briefing",
+  "continuity_state",
+  "continuity_update",
+  "handoff_create",
+  "handoff_get",
+]);
+const ATTESTED_ACTION_TOOLS: ReadonlySet<string> = new Set([
+  ...ATTESTED_DEVICE_COMPUTER_TOOLS,
+  ...ATTESTED_REPOSITORY_CATALOG_TOOLS,
+  ...ATTESTED_PROJECT_CONTINUITY_TOOLS,
+]);
 export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...PRODUCT_MCP_CORE_READ_TOOLS,
-  ...ATTESTED_DEVICE_ACTION_TOOLS,
+  ...ATTESTED_ACTION_TOOLS,
 ]);
 // Compatibility export for callers/tests that previously consumed the read-only name.
 export const PRODUCT_MCP_DIRECT_READ_TOOLS = PRODUCT_MCP_DIRECT_TOOLS;
@@ -116,6 +136,20 @@ async function mcpToolName(request: Request): Promise<string | null> {
     if (!params || typeof params !== "object" || Array.isArray(params)) return null;
     const name = (params as Record<string, unknown>).name;
     return typeof name === "string" ? name : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveTrustedDevice(request: Request, env: Env): Promise<AttestedMcpDevice | null> {
+  try {
+    const resolved = await resolveCentralSessionFromMcp(request.clone(), env);
+    if (!resolved.ok) return null;
+    return Object.freeze({
+      ownerUserId: resolved.ownerUserId,
+      clientId: resolved.clientId,
+      deviceId: resolved.deviceId,
+    });
   } catch {
     return null;
   }
@@ -148,6 +182,7 @@ export function createCanonicalProductMcpGateway(
         postgres_configured: productPostgresConfigured(env),
         supports_attested_remote_reads: true,
         supports_remote_actions: true,
+        supports_project_continuity: true,
       });
     }
     if (request.method === "GET" && url.pathname === "/ready") {
@@ -156,7 +191,9 @@ export function createCanonicalProductMcpGateway(
           ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
           conversation_topology: "user_chatgpt_direct", model_relay: false,
           supports_attested_remote_reads: false,
-          supports_remote_actions: false, error: "platform_mcp_unconfigured",
+          supports_remote_actions: false,
+          supports_project_continuity: false,
+          error: "platform_mcp_unconfigured",
         }, 503);
       }
       const discovery = await checkCanonicalProductOAuthDiscovery(String(env.PRODUCT_AUTH_ISSUER), discoveryFetch);
@@ -167,6 +204,7 @@ export function createCanonicalProductMcpGateway(
         model_relay: false,
         supports_attested_remote_reads: discovery.ok,
         supports_remote_actions: discovery.ok,
+        supports_project_continuity: discovery.ok,
         ...(discovery.error ? { error: discovery.error } : {}),
         ...(discovery.upstream_http_status !== undefined ? { upstream_http_status: discovery.upstream_http_status } : {}),
         ...(discovery.failure_stage ? { failure_stage: discovery.failure_stage } : {}),
@@ -209,24 +247,15 @@ export function createCanonicalProductMcpGateway(
       }
 
       let handlers = deniedHandlers;
-      if (toolName && allowedTools.has(toolName) && ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)) {
-        let trusted: AttestedMcpDevice | null = null;
-        try {
-          const resolved = await resolveCentralSessionFromMcp(request.clone(), env);
-          if (resolved.ok) {
-            trusted = Object.freeze({
-              ownerUserId: resolved.ownerUserId,
-              clientId: resolved.clientId,
-              deviceId: resolved.deviceId,
-            });
-          }
-        } catch {
-          trusted = null;
+      if (toolName && allowedTools.has(toolName) && ATTESTED_ACTION_TOOLS.has(toolName)) {
+        const trusted = await resolveTrustedDevice(request, env);
+        if (ATTESTED_DEVICE_COMPUTER_TOOLS.has(toolName)) {
+          handlers = { ...reads, createAction: createAttestedDeviceActionHandler(env, trusted) };
+        } else if (ATTESTED_REPOSITORY_CATALOG_TOOLS.has(toolName)) {
+          handlers = { ...reads, createAction: createAttestedRepositoryCatalogHandler(env, trusted) };
+        } else if (ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)) {
+          handlers = { ...reads, createAction: createAttestedProjectContinuityHandler(env, trusted) };
         }
-        handlers = {
-          ...reads,
-          createAction: createAttestedDeviceActionHandler(env, trusted),
-        };
       }
       return handleOrdaxMcp(request, handlers, allowedTools);
     }
