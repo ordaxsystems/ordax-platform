@@ -1,0 +1,230 @@
+name: Hyperdrive Secure Recovery
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLOUDFLARE_ACCOUNT_ID: "42586bf13b61436219d21def299833e4"
+  SUPABASE_DIRECT_HOST: "db.jhfphsjptrpmtnzkpwud.supabase.co"
+  RECOVERY_ROLE: "ordax_hyperdrive_runtime"
+  RECOVERY_HYPERDRIVE_NAME: "ordax-control-plane-postgres-recovery"
+  PROBE_WORKER_NAME: "ordax-hyperdrive-recovery-probe"
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    environment: cloudflare-v3
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Generate one-time database credential and SCRAM verifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64, hashlib, hmac, os, secrets
+
+          password = secrets.token_urlsafe(48)
+          salt = os.urandom(16)
+          iterations = 4096
+          salted = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+          client_key = hmac.new(salted, b"Client Key", hashlib.sha256).digest()
+          stored_key = hashlib.sha256(client_key).digest()
+          server_key = hmac.new(salted, b"Server Key", hashlib.sha256).digest()
+          b64 = lambda value: base64.b64encode(value).decode("ascii")
+          verifier = f"SCRAM-SHA-256${iterations}:{b64(salt)}${b64(stored_key)}:{b64(server_key)}"
+
+          password_path = os.path.join(os.environ["RUNNER_TEMP"], "ordax_hyperdrive_password")
+          verifier_path = os.path.join(os.environ["RUNNER_TEMP"], "ordax_hyperdrive_verifier.txt")
+          with open(password_path, "w", encoding="utf-8") as handle:
+              handle.write(password)
+          os.chmod(password_path, 0o600)
+          with open(verifier_path, "w", encoding="utf-8") as handle:
+              handle.write(verifier)
+          print("ORDAX_HYPERDRIVE_CREDENTIAL_GENERATED=PASS")
+          PY
+
+      - name: Publish verifier-only handoff artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ordax-hyperdrive-verifier
+          path: ${{ runner.temp }}/ordax_hyperdrive_verifier.txt
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Wait for verifier application and create fresh Hyperdrive
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, time, urllib.error, urllib.request
+
+          account = os.environ["CLOUDFLARE_ACCOUNT_ID"]
+          host = os.environ["SUPABASE_DIRECT_HOST"]
+          role = os.environ["RECOVERY_ROLE"]
+          name = os.environ["RECOVERY_HYPERDRIVE_NAME"]
+          token = os.environ["CLOUDFLARE_API_TOKEN"]
+          password_path = os.path.join(os.environ["RUNNER_TEMP"], "ordax_hyperdrive_password")
+          with open(password_path, encoding="utf-8") as handle:
+              password = handle.read().strip()
+
+          url = f"https://api.cloudflare.com/client/v4/accounts/{account}/hyperdrive/configs"
+          payload = {
+              "name": name,
+              "origin_connection_limit": 10,
+              "mtls": {"sslmode": "require"},
+              "caching": {"disabled": True},
+              "origin": {
+                  "scheme": "postgres",
+                  "database": "postgres",
+                  "user": role,
+                  "password": password,
+                  "host": host,
+                  "port": 5432,
+              },
+          }
+          headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+          for attempt in range(1, 121):
+              request = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method="POST")
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      body = json.load(response)
+                  if not body.get("success") or not body.get("result", {}).get("id"):
+                      raise RuntimeError("hyperdrive_create_unexpected_response")
+                  hyperdrive_id = body["result"]["id"]
+                  with open(os.path.join(os.environ["RUNNER_TEMP"], "ordax_hyperdrive_id"), "w", encoding="utf-8") as handle:
+                      handle.write(hyperdrive_id)
+                  print(f"ORDAX_HYPERDRIVE_RECOVERY_ID={hyperdrive_id}")
+                  print("ORDAX_HYPERDRIVE_CREATE=PASS")
+                  break
+              except urllib.error.HTTPError as exc:
+                  raw = exc.read().decode("utf-8", "replace")
+                  try:
+                      body = json.loads(raw)
+                  except json.JSONDecodeError:
+                      raise RuntimeError(f"hyperdrive_create_http_{exc.code}") from exc
+                  codes = {str(item.get("code")) for item in body.get("errors", [])}
+                  if "2013" in codes:
+                      if attempt == 1:
+                          print("ORDAX_HYPERDRIVE_WAITING_FOR_DB_VERIFIER=TRUE")
+                      time.sleep(5)
+                      continue
+                  safe_codes = ",".join(sorted(codes)) or "unknown"
+                  raise RuntimeError(f"hyperdrive_create_failed_codes={safe_codes}") from exc
+          else:
+              raise RuntimeError("hyperdrive_verifier_application_timeout")
+          PY
+
+      - name: Install pinned PostgreSQL driver for isolated probe
+        run: npm install --no-save --ignore-scripts --no-audit --no-fund pg@8.23.1
+
+      - name: Build isolated recovery probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          HYPERDRIVE_ID="$(cat "$RUNNER_TEMP/ordax_hyperdrive_id")"
+          cat > "$RUNNER_TEMP/probe.ts" <<'TS'
+          import { Client } from "pg";
+          export default {
+            async fetch(_request: Request, env: { POSTGRES: { connectionString: string } }): Promise<Response> {
+              const client = new Client({ connectionString: env.POSTGRES.connectionString });
+              let phase = "connect";
+              try {
+                await client.connect();
+                phase = "query";
+                const result = await client.query("select 1::int as ok");
+                return Response.json({ ok: result.rows?.[0]?.ok === 1, phase: "complete" });
+              } catch (error) {
+                const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+                const message = typeof record.message === "string" ? record.message.toLowerCase() : "";
+                let classification = "unclassified";
+                if (message.includes("connection terminated unexpectedly")) classification = "pg_connection_terminated_unexpectedly";
+                else if (message.includes("failed to acquire a connection from the pool")) classification = "hyperdrive_pool_acquire_failed";
+                else if (message.includes("internal error")) classification = "hyperdrive_internal_error";
+                const code = typeof record.code === "string" && record.code.length <= 32 ? record.code : null;
+                return Response.json({ ok: false, phase, classification, code }, { status: 503 });
+              } finally {
+                await client.end().catch(() => {});
+              }
+            },
+          };
+          TS
+          cat > "$RUNNER_TEMP/wrangler.recovery-probe.toml" <<EOF
+          name = "$PROBE_WORKER_NAME"
+          main = "$RUNNER_TEMP/probe.ts"
+          compatibility_date = "2026-10-17"
+          compatibility_flags = ["nodejs_compat"]
+          workers_dev = true
+          preview_urls = false
+
+          [[hyperdrive]]
+          binding = "POSTGRES"
+          id = "$HYPERDRIVE_ID"
+          EOF
+
+      - name: Deploy and execute isolated recovery probe
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.141.0 deploy --config "$RUNNER_TEMP/wrangler.recovery-probe.toml" >/dev/null
+          body="$(mktemp)"
+          status="$(curl -sS --max-time 30 -o "$body" -w '%{http_code}' "https://$PROBE_WORKER_NAME.ordaxsystems.workers.dev/")"
+          python - "$status" "$body" <<'PY'
+          import json, os, sys
+          status = sys.argv[1]
+          try:
+              with open(sys.argv[2], encoding="utf-8") as handle:
+                  payload = json.load(handle)
+          except Exception:
+              payload = {"ok": False, "phase": "http", "classification": "non_json_response"}
+          safe = {key: payload.get(key) for key in ("ok", "phase", "classification", "code") if key in payload}
+          print("ORDAX_HYPERDRIVE_PROBE_HTTP=" + status)
+          print("ORDAX_HYPERDRIVE_PROBE_RESULT=" + json.dumps(safe, separators=(",", ":"), sort_keys=True))
+          if status != "200" or payload.get("ok") is not True or payload.get("phase") != "complete":
+              raise SystemExit(1)
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "ordax_hyperdrive_probe_passed"), "w", encoding="utf-8") as handle:
+              handle.write("1")
+          PY
+
+      - name: Cleanup temporary probe Worker
+        if: always()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set +e
+          curl -sS -X DELETE \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$PROBE_WORKER_NAME?force=true" >/dev/null
+
+      - name: Remove failed recovery Hyperdrive
+        if: failure()
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set +e
+          if [ -f "$RUNNER_TEMP/ordax_hyperdrive_id" ]; then
+            HYPERDRIVE_ID="$(cat "$RUNNER_TEMP/ordax_hyperdrive_id")"
+            curl -sS -X DELETE \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/hyperdrive/configs/$HYPERDRIVE_ID" >/dev/null
+          fi
+
+      - name: Destroy runner credential material
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/ordax_hyperdrive_password" "$RUNNER_TEMP/ordax_hyperdrive_verifier.txt"
