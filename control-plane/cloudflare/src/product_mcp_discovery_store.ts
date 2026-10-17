@@ -36,7 +36,6 @@ export async function ensureProductMcpTargetDiscovery(
 
   const client = new Client({
     connectionString: connectionString(env),
-    query_timeout: 10_000,
   });
   try {
     await client.connect();

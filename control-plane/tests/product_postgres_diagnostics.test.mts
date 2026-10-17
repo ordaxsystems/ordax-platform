@@ -73,5 +73,6 @@ test("canonical PostgreSQL stores defer initial connection timeout to Hyperdrive
   for (const store of stores) {
     const source = fs.readFileSync(new URL(store, import.meta.url), "utf8");
     assert.doesNotMatch(source, /connectionTimeoutMillis\s*:/);
+    assert.doesNotMatch(source, /query_timeout\s*:/);
   }
 });
