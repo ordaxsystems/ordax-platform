@@ -66,7 +66,23 @@ type SafePostgresFailure = {
   syscall: string | null;
   cause_name: string | null;
   cause_code: string | null;
+  classification: string;
 };
+
+function classifyPostgresFailure(error: unknown): string {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const message = typeof record.message === "string" ? record.message.toLowerCase() : "";
+  if (message.includes("failed to acquire a connection from the pool")) return "hyperdrive_pool_acquire_failed";
+  if (message.includes("server connection attempt failed") && message.includes("connection_refused")) return "hyperdrive_origin_connection_refused";
+  if (message.includes("internal error")) return "hyperdrive_internal_error";
+  if (message.includes("bad hostname")) return "hyperdrive_bad_hostname";
+  if (message.includes("cannot connect to the host")) return "hyperdrive_origin_unreachable";
+  if (message.includes("tls handshake failed")) return "hyperdrive_tls_handshake_failed";
+  if (message.includes("cert validation failed")) return "hyperdrive_tls_cert_validation_failed";
+  if (message.includes("password authentication failed") || message.includes("authentication failed")) return "origin_authentication_failed";
+  if (message.includes("connection refused")) return "origin_connection_refused";
+  return "unclassified";
+}
 
 function boundedDiagnostic(value: unknown, max = 80): string | null {
   return typeof value === "string" && value.length > 0 && value.length <= max
@@ -86,6 +102,7 @@ export function safePostgresFailure(error: unknown, rpc: string): SafePostgresFa
     syscall: boundedDiagnostic(record.syscall),
     cause_name: boundedDiagnostic(cause.name),
     cause_code: boundedDiagnostic(cause.code),
+    classification: classifyPostgresFailure(error),
   };
 }
 
