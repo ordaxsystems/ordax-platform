@@ -507,7 +507,7 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         self.assertNotIn("/rest/v1/rpc/", adapter)
         self.assertIn('env.POSTGRES?.connectionString', adapter)
         self.assertIn('import postgres from "postgres"', adapter)
-        self.assertEqual(package["dependencies"]["postgres"], "3.4.5")
+        self.assertEqual(package["dependencies"]["postgres"], "3.4.9")
         self.assertNotIn("worker_hyperdrive_adapter_not_implemented", blockers)
 
         with WRANGLER.open("rb") as handle:

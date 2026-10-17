@@ -108,7 +108,7 @@
       "transport": "hyperdrive",
       "binding": "POSTGRES",
       "driver": "postgres",
-      "driver_version": "3.4.5",
+      "driver_version": "3.4.9",
       "legacy_rest_backend_secret": false,
       "direct_table_mutation": false
     }
