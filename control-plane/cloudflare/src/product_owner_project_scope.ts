@@ -58,7 +58,6 @@ export async function resolveOwnerProjectScope(
 
   const client = new Client({
     connectionString,
-    query_timeout: 10_000,
   });
   try {
     await client.connect();

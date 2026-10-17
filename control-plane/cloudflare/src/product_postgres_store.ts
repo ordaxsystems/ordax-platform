@@ -392,7 +392,6 @@ async function callRpc<T>(
   const query = `select public.${rpc}(${args})${resultCast} as result`;
   const client = new Client({
     connectionString,
-    query_timeout: 10_000,
   });
 
   let phase: "connect" | "query" | "decode" = "connect";
