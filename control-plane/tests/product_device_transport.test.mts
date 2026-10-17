@@ -49,3 +49,11 @@ test("device transport source has no D1, operator bearer, websocket queue, pairi
     "reportProductAction", "result_canonical_b64",
   ]) assert.equal(source.includes(required), true, required);
 });
+
+test("device heartbeat accepts only a compact precomputed capability digest", () => {
+  const source = fs.readFileSync(SRC, "utf8");
+  assert.equal(source.includes('body.capabilities_digest'), true);
+  assert.equal(source.includes('readBoundedJsonObject(request, 4 * 1024)'), true);
+  assert.equal(source.includes('Array.isArray(body.capabilities)'), false);
+  assert.equal(source.includes('sha256Hex(JSON.stringify(normalized))'), false);
+});
