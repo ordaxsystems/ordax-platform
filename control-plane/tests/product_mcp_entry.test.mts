@@ -34,7 +34,7 @@ test("published entry cannot accidentally import legacy D1 Worker or configure D
   assert.match(config, /id = "4b601ec5815f43259bd8040053825d2a"/);
 });
 
-test("health reports canonical attested device control without model relay", async () => {
+test("health reports canonical attested control without model relay", async () => {
   const run = createCanonicalProductMcpGateway(ENV);
   const response = await run(new Request("https://canary.example/health"));
   const status = await response.json();
@@ -46,6 +46,7 @@ test("health reports canonical attested device control without model relay", asy
     model_relay: status.model_relay,
     supports_attested_remote_reads: status.supports_attested_remote_reads,
     supports_remote_actions: status.supports_remote_actions,
+    supports_project_continuity: status.supports_project_continuity,
     auth: status.auth_configured,
     postgres: status.postgres_configured,
   }, {
@@ -54,6 +55,7 @@ test("health reports canonical attested device control without model relay", asy
     model_relay: false,
     supports_attested_remote_reads: true,
     supports_remote_actions: true,
+    supports_project_continuity: true,
     auth: true,
     postgres: true,
   });
@@ -79,7 +81,7 @@ test("owner session route is exposed on canonical MCP gateway and fails closed w
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
-test("MCP discovery advertises core, observation and the complete interactive computer tranche", async () => {
+test("MCP discovery advertises core, computer and only the bounded project continuity tranche", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   const response = await run(new Request(MCP_URL, {
@@ -94,6 +96,7 @@ test("MCP discovery advertises core, observation and the complete interactive co
     "computer_focus_window", "computer_click", "computer_mouse_move", "computer_drag",
     "computer_launch_app", "computer_scroll", "computer_type", "computer_hotkey",
     "computer_access_status", "computer_processes",
+    "project_briefing", "continuity_state", "continuity_update",
   ]);
   const byName = new Map(json.result.tools.map((tool: any) => [tool.name, tool]));
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
@@ -101,6 +104,9 @@ test("MCP discovery advertises core, observation and the complete interactive co
   assert.equal((byName.get("computer_click") as any).annotations.readOnlyHint, false);
   assert.equal((byName.get("computer_click") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_focus_window") as any).annotations.destructiveHint, false);
+  assert.equal((byName.get("project_briefing") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("continuity_state") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("continuity_update") as any).annotations.readOnlyHint, false);
   assert.equal(calls.session, 1);
   assert.equal(calls.targets, 0);
 });
@@ -111,7 +117,7 @@ test("filesystem, clipboard, process-control, browser and terminal families rema
   for (const action of [
     "computer_clipboard_read", "computer_clipboard_write", "computer_text_read",
     "computer_terminate_process", "browser_start", "terminal_exec", "project_text_write",
-    "workspace_directory_list",
+    "workspace_directory_list", "projects_list", "repository_catalog", "handoff_create",
   ]) {
     const response = await run(request(action, { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
     assert.equal(response.status, 200);
@@ -122,12 +128,15 @@ test("filesystem, clipboard, process-control, browser and terminal families rema
   }
 });
 
-test("attested observation and interactive tools fail closed without a verified session binding", async () => {
+test("attested computer and continuity tools fail closed without a verified session binding", async () => {
   const { handlers } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   for (const [tool, args] of [
     ["computer_windows", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }],
     ["computer_click", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", x: 10, y: 20 }],
+    ["project_briefing", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", project: "ordaxsystems/ordax-gpt" }],
+    ["continuity_state", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", project: "ordaxsystems/ordax-gpt" }],
+    ["continuity_update", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", project: "ordaxsystems/ordax-gpt", summary: "checkpoint" }],
   ] as const) {
     const response = await run(request(tool, args));
     assert.equal(response.status, 200);
@@ -162,7 +171,7 @@ test("unconfigured and unauthenticated clients fail closed, no legacy routes exp
   }
 });
 
-test("session reports the expanded canonical computer tool count", async () => {
+test("session reports the bounded direct Web tool count", async () => {
   const { handlers } = fakeHandlers();
   const gateway = createCanonicalProductMcpGateway(ENV, handlers);
   const response = await gateway(request("ordax_session"));
@@ -170,8 +179,8 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.equal(response.status, 200);
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
-  assert.equal(json.result.structuredContent.mcp_tool_count, 18);
-  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-11.1");
+  assert.equal(json.result.structuredContent.mcp_tool_count, 21);
+  assert.match(json.result.structuredContent.mcp_tool_surface_revision, /^2026-10-/);
 });
 
 test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {
