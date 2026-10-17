@@ -84,9 +84,20 @@ const ATTESTED_DEVICE_INTERACTIVE_TOOLS: ReadonlySet<string> = new Set([
   "computer_type",
   "computer_hotkey",
 ]);
+const ATTESTED_DEVICE_FILESYSTEM_READ_TOOLS: ReadonlySet<string> = new Set([
+  "computer_file_stat",
+  "computer_directory_list",
+  "computer_text_read",
+  "computer_search",
+]);
+const ATTESTED_DEVICE_CLIPBOARD_READ_TOOLS: ReadonlySet<string> = new Set([
+  "computer_clipboard_read",
+]);
 const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_OBSERVE_TOOLS,
   ...ATTESTED_DEVICE_INTERACTIVE_TOOLS,
+  ...ATTESTED_DEVICE_FILESYSTEM_READ_TOOLS,
+  ...ATTESTED_DEVICE_CLIPBOARD_READ_TOOLS,
 ]);
 export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...PRODUCT_MCP_CORE_READ_TOOLS,
