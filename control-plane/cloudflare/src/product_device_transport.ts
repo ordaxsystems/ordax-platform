@@ -146,19 +146,20 @@ async function wireJob(job: ProductRemoteJob): Promise<Json> {
 }
 
 async function heartbeat(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
-  const body = await readBoundedJsonObject(request, 128 * 1024);
+  // Heartbeats are intentionally compact. Capability enumeration belongs to the
+  // Connector runtime; Platform persists only its canonical SHA-256 digest.
+  // Re-hashing hundreds of capability strings on every pulse wastes Worker CPU.
+  const body = await readBoundedJsonObject(request, 4 * 1024);
   if (!body) return respond({ ok: false, error: "heartbeat_invalid" }, 400);
   const status = body.status;
   const agentVersion = typeof body.agent_version === "string" ? body.agent_version.trim() : "";
-  const actions = Array.isArray(body.capabilities) ? body.capabilities : null;
+  const capabilityDigest = typeof body.capabilities_digest === "string"
+    ? body.capabilities_digest.trim().toLowerCase() : "";
   if ((status !== "online" && status !== "busy" && status !== "offline")
       || agentVersion.length < 1 || agentVersion.length > 80
-      || !actions || actions.length > 1024
-      || !actions.every((item) => typeof item === "string" && item.length > 0 && item.length <= 160)) {
+      || !HEX64.test(capabilityDigest)) {
     return respond({ ok: false, error: "heartbeat_invalid" }, 400);
   }
-  const normalized = [...new Set(actions as string[])].sort();
-  const capabilityDigest = await sha256Hex(JSON.stringify(normalized));
   const recorded = await recordProductPresence(env, {
     deviceId,
     online: status !== "offline",
