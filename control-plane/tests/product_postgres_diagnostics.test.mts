@@ -21,6 +21,7 @@ test("PostgreSQL diagnostics expose only allowlisted non-secret fields", () => {
     cause_name: "SocketError",
     cause_code: "ETIMEDOUT",
     classification: "unclassified",
+    signals: [],
   });
   assert.equal(JSON.stringify(diagnostic).includes(SECRET), false);
   assert.equal(Object.hasOwn(diagnostic, "message"), false);
@@ -36,15 +37,19 @@ test("store logs only the safe diagnostic envelope before generic failure", () =
 
 test("Hyperdrive messages are reduced to stable non-secret classifications", () => {
   const cases = [
-    ["Internal error.", "hyperdrive_internal_error"],
-    ["Failed to acquire a connection from the pool.", "hyperdrive_pool_acquire_failed"],
-    ["Server connection attempt failed: connection_refused", "hyperdrive_origin_connection_refused"],
-    ["TLS handshake failed: cert validation failed", "hyperdrive_tls_handshake_failed"],
-    ["something private that must never be logged", "unclassified"],
+    ["Internal error.", "hyperdrive_internal_error", ["internal_error"]],
+    ["Failed to acquire a connection from the pool.", "hyperdrive_pool_acquire_failed", ["pool_acquire"]],
+    ["Server connection attempt failed: connection_refused", "hyperdrive_origin_connection_refused", ["server_connection_attempt", "connection_refused"]],
+    ["Server connection attempt failed: connection_failure", "hyperdrive_server_connection_failed", ["server_connection_attempt"]],
+    ["Server return error and closed connection.", "hyperdrive_server_closed_connection", ["server_closed_connection"]],
+    ["Failed to connect to the provided database", "hyperdrive_database_connect_failed", ["database_connect"]],
+    ["TLS handshake failed: cert validation failed", "hyperdrive_tls_handshake_failed", ["tls", "certificate"]],
+    ["something private that must never be logged", "unclassified", []],
   ];
-  for (const [message, expected] of cases) {
-    const diagnostic = safePostgresFailure(Object.assign(new Error(message), { code: "58000" }), "fixture_rpc");
+  for (const [message, expected, signals] of cases) {
+    const diagnostic = safePostgresFailure(Object.assign(new Error(message as string), { code: "58000" }), "fixture_rpc");
     assert.equal(diagnostic.classification, expected);
-    assert.equal(JSON.stringify(diagnostic).includes(message), false);
+    assert.deepEqual(diagnostic.signals, signals);
+    assert.equal(JSON.stringify(diagnostic).includes(message as string), false);
   }
 });
