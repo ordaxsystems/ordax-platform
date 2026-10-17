@@ -63,9 +63,9 @@ OAuth só deve exigir nova autorização quando a própria sessão, consentiment
 - mudanças incompatíveis precisam de migração explícita e gate de compatibilidade;
 - o botão **Atualizar ferramentas** atualiza a descoberta do cliente; ele não concede capabilities ao dispositivo.
 
-## Superfície MCP publicada em 16/10/2026
+## Superfície MCP candidata em 17/10/2026
 
-A conexão autenticada atual reporta **18 tools**. A existência de uma tool no catálogo significa que o ChatGPT conhece seu contrato; **não significa que ela esteja autorizada em todos os computadores**.
+A superfície direta candidata passa de **18 para 23 tools**. A existência de uma tool no catálogo significa que o ChatGPT conhece seu contrato; **não significa que ela esteja autorizada em todos os computadores**. As cinco novas tools são exclusivamente de leitura e continuam dependentes de grants dedicados e da política local do Runtime.
 
 ### Identidade, descoberta e continuidade
 
@@ -82,6 +82,16 @@ A conexão autenticada atual reporta **18 tools**. A existência de uma tool no 
 - `computer_screen_info` — monitores, desktop virtual e cursor;
 - `computer_access_status` — política local de acesso e roots permitidos;
 - `computer_processes` — metadados limitados de processos.
+
+### Leitura segura de clipboard e filesystem
+
+- `computer_clipboard_read` — lê texto Unicode limitado do clipboard interativo, com grant `computer-clipboard`;
+- `computer_file_stat` — consulta metadados de um path permitido pelo Runtime;
+- `computer_directory_list` — lista, de forma limitada, uma árvore sob um root permitido;
+- `computer_text_read` — lê texto UTF-8 com faixa de linhas limitada;
+- `computer_search` — busca nomes ou conteúdo limitado sob um root permitido.
+
+As quatro tools de filesystem exigem o perfil `computer-filesystem`; `computer_clipboard_read` exige `computer-clipboard`. Elas não podem reutilizar grants de observação ou interação para obter autoridade. Escrita de clipboard e mutações de filesystem permanecem fora desta tranche publicada.
 
 ### Interação tipada com o computador
 
@@ -108,7 +118,7 @@ Para uma ação local acontecer, as seguintes condições são independentes e p
 6. validação dos argumentos e limites da tool;
 7. auditoria/receipt/status da ação.
 
-Por isso, um computador pode aparecer em `ordax_targets` e ainda rejeitar clique, screenshot, digitação ou abertura de aplicativo. Isso é comportamento esperado e fail-closed.
+Por isso, um computador pode aparecer em `ordax_targets` e ainda rejeitar clique, screenshot, digitação, leitura de arquivo ou clipboard. Isso é comportamento esperado e fail-closed.
 
 ## O que ainda falta para o básico completo
 
@@ -118,7 +128,8 @@ O próximo marco não é aumentar indiscriminadamente o número de tools, e sim 
 | --- | --- | --- |
 | OAuth, sessão, targets, presença | disponível | manter isolamento, revogação e E2E |
 | Computer Control | superfície publicada | concluir grants reais e E2E por target |
-| Arquivos/projetos | fundação existente, não faz parte das 18 tools atuais | listar roots/projetos, ler, buscar, criar e editar de forma grant-scoped |
+| Arquivos no computador | leitura segura candidata | fechar E2E e, em tranche separada, mutações com grants explícitos e concorrência segura |
+| Projetos/workspace | fundação existente, ainda fora da superfície direta | listar roots/projetos e operações project-scoped sem confundir autoridade de device com project |
 | Git | ainda não faz parte da superfície atual | status, diff, branch, commit, pull/push e PR tipados |
 | Processos de desenvolvimento | parcial | iniciar/parar processo autorizado, logs, portas, health e preview |
 | Browser de testes | ainda não faz parte da superfície atual | navegar, clicar, preencher, inspecionar e validar UI sem depender de shell genérico |
@@ -128,7 +139,7 @@ O próximo marco não é aumentar indiscriminadamente o número de tools, e sim 
 | Grants/Owner UI | em evolução | perfis de capability claros, revisão, revogação e expiração |
 | Auditoria/E2E | em evolução | ChatGPT -> MCP -> gateway -> Runtime -> resultado, com identidade e provenance verificáveis |
 
-Terminal genérico não deve substituir APIs tipadas. Quando terminal for necessário, ele deve ser uma capability própria, limitada e auditável.
+Terminal genérico não deve substituir APIs tipadas. Quando terminal for necessário, ele deve ser uma capability própria, limitada e auditável. Como `terminal.exec` é project-scoped, ele não deve ser promovido pela allowlist de device: precisa de binding e autorização de projeto explícitos.
 
 ## Gate para chamar a primeira versão de “básico completo”
 

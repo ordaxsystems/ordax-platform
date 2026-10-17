@@ -58,7 +58,7 @@ const identity = async () => ({
   expiresAt: 2_000_000_000,
 });
 
-test("attested device argument allowlist covers observation plus the complete interactive tranche", () => {
+test("attested device argument allowlist covers observation, interactive and promoted safe reads", () => {
   assert.equal(validAttestedDeviceActionArguments("computer.access_status", {}), true);
   assert.equal(validAttestedDeviceActionArguments("computer.active_window", {}), true);
   assert.equal(validAttestedDeviceActionArguments("computer.screen_info", {}), true);
@@ -75,11 +75,25 @@ test("attested device argument allowlist covers observation plus the complete in
   assert.equal(validAttestedDeviceActionArguments("computer.scroll", { amount: -3, horizontal: false }), true);
   assert.equal(validAttestedDeviceActionArguments("computer.type", { text: "hello" }), true);
   assert.equal(validAttestedDeviceActionArguments("computer.hotkey", { keys: ["CTRL", "L"] }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.clipboard_read", { max_bytes: 4096 }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.file_stat", { path: "C:\\work\\file.txt" }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.directory_list", {
+    path: "C:\\work", max_depth: 2, max_entries: 200, include_hidden: false,
+  }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_read", {
+    path: "C:\\work\\file.txt", start_line: 10, end_line: 20,
+  }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.search", {
+    root: "C:\\work", query: "needle", mode: "both", max_results: 20, max_depth: 4,
+  }), true);
 
-  assert.equal(validAttestedDeviceActionArguments("computer.clipboard_read", {}), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.clipboard_write", { text: "no" }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "no" }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.click", { x: 1, y: 2, extra: true }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.hotkey", { keys: [] }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.scroll", { amount: 101 }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_read", { path: "x", start_line: 20, end_line: 10 }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.clipboard_read", { max_bytes: 1_048_577 }), false);
 });
 
 test("observation enqueue remains least-privilege read authority", async () => {
@@ -101,6 +115,41 @@ test("observation enqueue remains least-privilege read authority", async () => {
   assert.equal(observed.accessMode, "read");
   assert.deepEqual(observed.payload, { max_items: 25 });
   assert.equal(observed.idempotencyKey, `mcp-read-${OPERATION}`);
+});
+
+test("promoted filesystem read uses the dedicated filesystem profile", async () => {
+  let observed: any = null;
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("computer-filesystem", "computer.text_read", "read")),
+    enqueue: async (_env, input) => {
+      observed = input;
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => OPERATION,
+  });
+  const response = await handler(actionRequest("computer.text_read", { path: "C:\\work\\readme.txt" }));
+  assert.equal(response.status, 202);
+  assert.equal(observed.capability, "computer.text_read");
+  assert.equal(observed.accessMode, "read");
+  assert.deepEqual(observed.payload, { path: "C:\\work\\readme.txt" });
+});
+
+test("promoted clipboard read uses the dedicated clipboard profile", async () => {
+  let observed: any = null;
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("computer-clipboard", "computer.clipboard_read", "read")),
+    enqueue: async (_env, input) => {
+      observed = input;
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => OPERATION,
+  });
+  const response = await handler(actionRequest("computer.clipboard_read", { max_bytes: 8192 }));
+  assert.equal(response.status, 202);
+  assert.equal(observed.capability, "computer.clipboard_read");
+  assert.equal(observed.accessMode, "read");
 });
 
 test("interactive write enqueue requires interactive profile and preserves write access mode", async () => {
@@ -135,6 +184,29 @@ test("interactive screenshot stays read-mode but cannot borrow computer-observe"
   ), true);
 });
 
+test("filesystem and clipboard reads cannot borrow observation or interactive grants", () => {
+  assert.equal(catalogAllowsAttestedDeviceAction(
+    catalog(grantGroup("computer-observe", "computer.text_read", "read")),
+    DEVICE,
+    "computer.text_read",
+  ), false);
+  assert.equal(catalogAllowsAttestedDeviceAction(
+    catalog(grantGroup("interactive-computer-control", "computer.clipboard_read", "read")),
+    DEVICE,
+    "computer.clipboard_read",
+  ), false);
+  assert.equal(catalogAllowsAttestedDeviceAction(
+    catalog(grantGroup("computer-filesystem", "computer.text_read", "read")),
+    DEVICE,
+    "computer.text_read",
+  ), true);
+  assert.equal(catalogAllowsAttestedDeviceAction(
+    catalog(grantGroup("computer-clipboard", "computer.clipboard_read", "read")),
+    DEVICE,
+    "computer.clipboard_read",
+  ), true);
+});
+
 test("overlapping observe and interactive groups remain deterministic", () => {
   const mixed = catalog(
     grantGroup("computer-observe", "computer.windows", "read"),
@@ -149,6 +221,11 @@ test("full-computer-control is an explicit alternative authority for published a
     catalog(grantGroup("full-computer-control", "computer.hotkey", "write")),
     DEVICE,
     "computer.hotkey",
+  ), true);
+  assert.equal(catalogAllowsAttestedDeviceAction(
+    catalog(grantGroup("full-computer-control", "computer.text_read", "read")),
+    DEVICE,
+    "computer.text_read",
   ), true);
 });
 
@@ -171,6 +248,8 @@ test("missing grant returns the capability family's owner remediation without en
     ["computer.windows", {}, "computer-observe"],
     ["computer.click", { x: 1, y: 2 }, "interactive-computer-control"],
     ["computer.screenshot", {}, "interactive-computer-control"],
+    ["computer.text_read", { path: "C:\\work\\x.txt" }, "computer-filesystem"],
+    ["computer.clipboard_read", {}, "computer-clipboard"],
   ] as const) {
     let enqueued = false;
     const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
@@ -190,7 +269,7 @@ test("missing grant returns the capability family's owner remediation without en
   }
 });
 
-test("OAuth owner mismatch and unpublished capability both fail closed", async () => {
+test("OAuth owner mismatch and unpublished mutation capability both fail closed", async () => {
   const wrongIdentity = async () => ({
     ok: true as const,
     ownerUserId: "77777777-7777-4777-8777-777777777777",

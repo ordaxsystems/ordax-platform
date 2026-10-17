@@ -20,6 +20,8 @@ import {
   type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
 import {
+  CLIPBOARD_COMPUTER_CONTROL_MODE,
+  FILESYSTEM_COMPUTER_CONTROL_MODE,
   INTERACTIVE_COMPUTER_CONTROL_MODE,
   OBSERVE_COMPUTER_CONTROL_MODE,
   OWNER_DEVICE_COMPUTER_GRANT_PROFILES,
@@ -50,9 +52,20 @@ const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "fa
 const FULL_COMPUTER_CONTROL_MODE = "full-computer-control";
 const OBSERVE_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[OBSERVE_COMPUTER_CONTROL_MODE]);
 const INTERACTIVE_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[INTERACTIVE_COMPUTER_CONTROL_MODE]);
+const FILESYSTEM_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[FILESYSTEM_COMPUTER_CONTROL_MODE]);
+const CLIPBOARD_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[CLIPBOARD_COMPUTER_CONTROL_MODE]);
+const ATTESTED_FILESYSTEM_READ_ACTIONS = new Set([
+  "computer.file_stat",
+  "computer.directory_list",
+  "computer.text_read",
+  "computer.search",
+]);
+const ATTESTED_CLIPBOARD_READ_ACTIONS = new Set(["computer.clipboard_read"]);
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   ...OBSERVE_ACTIONS,
   ...INTERACTIVE_ACTIONS,
+  ...ATTESTED_FILESYSTEM_READ_ACTIONS,
+  ...ATTESTED_CLIPBOARD_READ_ACTIONS,
 ]);
 
 function json(value: unknown, status = 200): Response {
@@ -78,6 +91,12 @@ function requiredProfile(action: string): string | null {
   // shared with the broader interactive profile.
   if (OBSERVE_ACTIONS.has(action)) return OBSERVE_COMPUTER_CONTROL_MODE;
   if (INTERACTIVE_ACTIONS.has(action)) return INTERACTIVE_COMPUTER_CONTROL_MODE;
+  if (ATTESTED_FILESYSTEM_READ_ACTIONS.has(action) && FILESYSTEM_ACTIONS.has(action)) {
+    return FILESYSTEM_COMPUTER_CONTROL_MODE;
+  }
+  if (ATTESTED_CLIPBOARD_READ_ACTIONS.has(action) && CLIPBOARD_ACTIONS.has(action)) {
+    return CLIPBOARD_COMPUTER_CONTROL_MODE;
+  }
   return null;
 }
 
@@ -110,7 +129,7 @@ function validButton(value: unknown): boolean {
   return value === undefined || value === "left" || value === "right" || value === "middle";
 }
 
-/** Strict argument allowlist for the canonical observation + interactive PC tranche. */
+/** Strict argument allowlist for the published attested device tranche. */
 export function validAttestedDeviceActionArguments(action: string, value: unknown): value is Json {
   if (!ATTESTED_MCP_DEVICE_ACTIONS.has(action) || !isRecord(value)) return false;
   const keys = Object.keys(value);
@@ -130,6 +149,36 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
   if (action === "computer.screenshot") {
     return keysOnly(value, ["mode"])
       && (value.mode === undefined || value.mode === "desktop" || value.mode === "active_window");
+  }
+  if (action === "computer.clipboard_read") {
+    return keysOnly(value, ["max_bytes"])
+      && (value.max_bytes === undefined || boundedInteger(value.max_bytes, 1, 1_048_576));
+  }
+  if (action === "computer.file_stat") {
+    return keysOnly(value, ["path"]) && boundedString(value.path, 4096);
+  }
+  if (action === "computer.directory_list") {
+    return keysOnly(value, ["path", "max_depth", "max_entries", "include_hidden"])
+      && boundedString(value.path, 4096)
+      && (value.max_depth === undefined || boundedInteger(value.max_depth, 1, 12))
+      && (value.max_entries === undefined || boundedInteger(value.max_entries, 1, 5000))
+      && (value.include_hidden === undefined || typeof value.include_hidden === "boolean");
+  }
+  if (action === "computer.text_read") {
+    return keysOnly(value, ["path", "start_line", "end_line"])
+      && boundedString(value.path, 4096)
+      && (value.start_line === undefined || boundedInteger(value.start_line, 1, 10_000_000))
+      && (value.end_line === undefined || boundedInteger(value.end_line, 1, 10_000_000))
+      && (value.start_line === undefined || value.end_line === undefined || Number(value.end_line) >= Number(value.start_line));
+  }
+  if (action === "computer.search") {
+    return keysOnly(value, ["root", "query", "mode", "max_results", "max_depth", "include_hidden"])
+      && boundedString(value.root, 4096)
+      && boundedString(value.query, 4096)
+      && (value.mode === undefined || value.mode === "name" || value.mode === "content" || value.mode === "both")
+      && (value.max_results === undefined || boundedInteger(value.max_results, 1, 500))
+      && (value.max_depth === undefined || boundedInteger(value.max_depth, 1, 12))
+      && (value.include_hidden === undefined || typeof value.include_hidden === "boolean");
   }
   if (action === "computer.focus_window") {
     return keysOnly(value, ["handle"]) && boundedString(value.handle, 128);
