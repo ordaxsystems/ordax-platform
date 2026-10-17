@@ -106,5 +106,5 @@ test("canonical custom domain retains the full public MCP surface", async () => 
   }));
   assert.equal(tools.status, 200);
   const json = await tools.json();
-  assert.equal(json.result.tools.length, 18);
+  assert.equal(json.result.tools.length, 24);
 });
