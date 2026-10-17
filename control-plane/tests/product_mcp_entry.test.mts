@@ -46,7 +46,6 @@ test("health reports canonical attested control without model relay", async () =
     model_relay: status.model_relay,
     supports_attested_remote_reads: status.supports_attested_remote_reads,
     supports_remote_actions: status.supports_remote_actions,
-    supports_project_continuity: status.supports_project_continuity,
     auth: status.auth_configured,
     postgres: status.postgres_configured,
   }, {
@@ -55,7 +54,6 @@ test("health reports canonical attested control without model relay", async () =
     model_relay: false,
     supports_attested_remote_reads: true,
     supports_remote_actions: true,
-    supports_project_continuity: true,
     auth: true,
     postgres: true,
   });
@@ -92,11 +90,11 @@ test("MCP discovery advertises core, computer and only the bounded project conti
   assert.equal(response.status, 200);
   assert.deepEqual(json.result.tools.map((t: any) => t.name), [
     "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
+    "project_briefing", "continuity_state", "continuity_update",
     "computer_windows", "computer_active_window", "computer_screenshot", "computer_screen_info",
     "computer_focus_window", "computer_click", "computer_mouse_move", "computer_drag",
     "computer_launch_app", "computer_scroll", "computer_type", "computer_hotkey",
     "computer_access_status", "computer_processes",
-    "project_briefing", "continuity_state", "continuity_update",
   ]);
   const byName = new Map(json.result.tools.map((tool: any) => [tool.name, tool]));
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
