@@ -29,9 +29,13 @@ function request(repository = "ordaxsystems/ordax-runtime", deviceId = DEVICE) {
   return new Request(url, { headers: { authorization: "Bearer test" } });
 }
 
-test("GitHub repository identity is owner/repository only, never a URL or local slug", () => {
+test("GitHub repository identity is canonical owner/repository only, never a URL or local slug", () => {
   assert.equal(canonicalGithubRepositoryFullName("ordaxsystems/ordax-runtime"), "ordaxsystems/ordax-runtime");
-  assert.equal(canonicalGithubRepositoryFullName("  OrdaXSystems/ordax-runtime  "), "OrdaXSystems/ordax-runtime");
+  assert.equal(canonicalGithubRepositoryFullName("  OrdaXSystems/ordax-runtime  "), "ordaxsystems/ordax-runtime");
+  assert.equal(
+    canonicalGithubRepositoryFullName("ORDAXSYSTEMS/ORDAX-RUNTIME"),
+    canonicalGithubRepositoryFullName("ordaxsystems/ordax-runtime"),
+  );
   for (const invalid of [
     "ordax-runtime",
     "https://github.com/ordaxsystems/ordax-runtime",
