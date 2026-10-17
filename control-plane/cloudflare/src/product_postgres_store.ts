@@ -384,6 +384,7 @@ async function callRpc<T>(
     query_timeout: 10_000,
   });
 
+  let phase: "connect" | "query" | "decode" = "connect";
   try {
     const values = spec.keys.map((key, index) => {
       const value = encodeRpcValue(payload[key], spec.casts[index]);
@@ -400,7 +401,9 @@ async function callRpc<T>(
       }
     });
     await client.connect();
+    phase = "query";
     const response = await client.query(query, values);
+    phase = "decode";
     const rows = response.rows;
     const row = rows[0] as { result?: T } | undefined;
     if (!row || !Object.prototype.hasOwnProperty.call(row, "result")) {
@@ -412,7 +415,7 @@ async function callRpc<T>(
     // The client-facing response remains deliberately generic. Emit only an
     // allowlisted diagnostic envelope: never SQL, values, connection strings,
     // hostnames, credentials, messages or stacks.
-    console.error(JSON.stringify(safePostgresFailure(error, rpc)));
+    console.error(JSON.stringify({ ...safePostgresFailure(error, rpc), phase }));
     throw new ProductPostgresError("product_postgres_unavailable", 503);
   } finally {
     try {
