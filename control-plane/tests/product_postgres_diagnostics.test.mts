@@ -20,7 +20,7 @@ test("PostgreSQL diagnostics expose only allowlisted non-secret fields", () => {
     syscall: "connect",
     cause_name: "SocketError",
     cause_code: "ETIMEDOUT",
-    classification: "origin_authentication_failed",
+    classification: "unclassified",
   });
   assert.equal(JSON.stringify(diagnostic).includes(SECRET), false);
   assert.equal(Object.hasOwn(diagnostic, "message"), false);
