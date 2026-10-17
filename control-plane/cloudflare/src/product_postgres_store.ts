@@ -365,7 +365,9 @@ async function callRpc<T>(
         throw error;
       }
     });
-    const rows = await sql.unsafe(query, values);
+    // Hyperdrive uses transaction pooling. postgres.js disables prepared statements
+    // for sql.unsafe() unless the per-query option explicitly re-enables them.
+    const rows = await sql.unsafe(query, values, { prepare: true });
     const row = rows[0] as { result?: T } | undefined;
     if (!row || !Object.prototype.hasOwnProperty.call(row, "result")) {
       throw new ProductPostgresError("product_postgres_invalid_response", 502);
