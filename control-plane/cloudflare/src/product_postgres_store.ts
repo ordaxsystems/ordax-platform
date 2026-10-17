@@ -67,13 +67,44 @@ type SafePostgresFailure = {
   cause_name: string | null;
   cause_code: string | null;
   classification: string;
+  signals: string[];
 };
 
-function classifyPostgresFailure(error: unknown): string {
+const POSTGRES_FAILURE_SIGNAL_MARKERS = Object.freeze([
+  ["server_connection_attempt", "server connection attempt"],
+  ["pool_acquire", "connection from the pool"],
+  ["server_closed_connection", "server return error and closed connection"],
+  ["database_connect", "failed to connect to the provided database"],
+  ["tls", "tls"],
+  ["certificate", "cert"],
+  ["timeout", "timeout"],
+  ["connection_refused", "connection_refused"],
+  ["connection_reset", "connection reset"],
+  ["authentication", "authentication"],
+  ["prepared_statement", "prepared statement"],
+  ["protocol", "protocol"],
+  ["internal_error", "internal error"],
+] as const);
+
+function postgresFailureMessage(error: unknown): string {
   const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
-  const message = typeof record.message === "string" ? record.message.toLowerCase() : "";
+  return typeof record.message === "string" ? record.message.toLowerCase() : "";
+}
+
+function postgresFailureSignals(error: unknown): string[] {
+  const message = postgresFailureMessage(error);
+  return POSTGRES_FAILURE_SIGNAL_MARKERS
+    .filter(([, marker]) => message.includes(marker))
+    .map(([signal]) => signal);
+}
+
+function classifyPostgresFailure(error: unknown): string {
+  const message = postgresFailureMessage(error);
   if (message.includes("failed to acquire a connection from the pool")) return "hyperdrive_pool_acquire_failed";
   if (message.includes("server connection attempt failed") && message.includes("connection_refused")) return "hyperdrive_origin_connection_refused";
+  if (message.includes("server connection attempt failed")) return "hyperdrive_server_connection_failed";
+  if (message.includes("server return error and closed connection")) return "hyperdrive_server_closed_connection";
+  if (message.includes("failed to connect to the provided database")) return "hyperdrive_database_connect_failed";
   if (message.includes("internal error")) return "hyperdrive_internal_error";
   if (message.includes("bad hostname")) return "hyperdrive_bad_hostname";
   if (message.includes("cannot connect to the host")) return "hyperdrive_origin_unreachable";
@@ -81,6 +112,10 @@ function classifyPostgresFailure(error: unknown): string {
   if (message.includes("cert validation failed")) return "hyperdrive_tls_cert_validation_failed";
   if (message.includes("password authentication failed") || message.includes("authentication failed")) return "origin_authentication_failed";
   if (message.includes("connection refused")) return "origin_connection_refused";
+  if (message.includes("connection reset")) return "origin_connection_reset";
+  if (message.includes("timeout")) return "connection_timeout";
+  if (message.includes("prepared statement")) return "prepared_statement_failure";
+  if (message.includes("protocol")) return "protocol_failure";
   return "unclassified";
 }
 
@@ -103,6 +138,7 @@ export function safePostgresFailure(error: unknown, rpc: string): SafePostgresFa
     cause_name: boundedDiagnostic(cause.name),
     cause_code: boundedDiagnostic(cause.code),
     classification: classifyPostgresFailure(error),
+    signals: postgresFailureSignals(error),
   };
 }
 
