@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { createCanonicalProductMcpGateway } from "../cloudflare/src/product_mcp_entry.ts";
+import { createCanonicalProductMcpGateway, resolveOrBootstrapAttestedSession } from "../cloudflare/src/product_mcp_entry.ts";
 
 const ENV = Object.freeze({
   PRODUCT_AUTH_ISSUER: "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1",
@@ -224,4 +224,67 @@ test("MCP initialize identifies the official OrdaX Platform and never an obsolet
   assert.equal(json.result.serverInfo.version, "0.5.0");
   assert.match(json.result.instructions, /OrdaX Platform MCP/);
   assert.doesNotMatch(json.result.instructions, /Use ORDAX Studio only/);
+});
+
+test("attested session recovery auto-opens once and waits only for Runtime proof", async () => {
+  let checks = 0, opens = 0, waits = 0;
+  const resolved = await resolveOrBootstrapAttestedSession(request("computer_access_status"), ENV, {
+    resolve: async () => {
+      checks++;
+      return checks < 3 ? { ok: false, error: "central_session_unbound" }
+        : { ok: true, ownerUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            clientId: "product-client-123", deviceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" };
+    },
+    open: async () => { opens++; return Response.json({ ok: true, status: "pending" }, { status: 202 }); },
+    wait: async (milliseconds) => { assert.equal(milliseconds, 1500); waits++; },
+  });
+  assert.equal(resolved.ok, true);
+  assert.equal(checks, 3);
+  assert.equal(opens, 1);
+  assert.equal(waits, 2);
+});
+
+test("attested recovery never retries revoked, missing-marker or rejected challenges", async () => {
+  for (const error of ["central_session_marker_required", "central_session_revoked", "central_session_invalid"]) {
+    let opens = 0;
+    const result = await resolveOrBootstrapAttestedSession(request("computer_access_status"), ENV, {
+      resolve: async () => ({ ok: false, error }),
+      open: async () => { opens++; return Response.json({ ok: true }); },
+      wait: async () => { throw new Error("must_not_wait"); },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, error);
+    assert.equal(opens, 0);
+  }
+  let retries = 0;
+  const denied = await resolveOrBootstrapAttestedSession(request("computer_access_status"), ENV, {
+    resolve: async () => { retries++; return { ok: false, error: "central_session_unbound" }; },
+    open: async () => Response.json({ ok: false, error: "central_device_target_missing" }, { status: 403 }),
+    wait: async () => { throw new Error("must_not_wait"); },
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, "central_session_unbound");
+  assert.equal(retries, 1);
+});
+
+test("pending device challenge does not enqueue any action or expand grants", async () => {
+  const { handlers, calls } = fakeHandlers();
+  let checks = 0, opens = 0, waits = 0;
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+    new Set(["computer_access_status"]), {
+      resolve: async () => { checks++; return { ok: false, error: "central_session_unbound" }; },
+      open: async () => { opens++; return Response.json({ ok: true, status: "pending" }, { status: 202 }); },
+      wait: async () => { waits++; },
+    });
+  const response = await gateway(request("computer_access_status",
+    { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.equal(body.result.isError, true);
+  assert.equal(body.result.structuredContent.error, "central_session_pending");
+  assert.equal(opens, 1);
+  assert.equal(checks, 5);
+  assert.equal(waits, 4);
+  assert.equal(calls.targets, 0);
+  assert.equal(calls.getAction, 0);
 });

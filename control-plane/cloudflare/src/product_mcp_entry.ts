@@ -139,12 +139,56 @@ async function mcpToolName(request: Request): Promise<string | null> {
   }
 }
 
+/** Session recovery is only coordination. A device remains trusted exclusively
+ * after the canonical PostgreSQL binding has been confirmed by that Runtime.
+ * A missing, invalid or revoked OAuth/session identity never triggers recovery.
+ */
+type SessionRecoveryDependencies = Readonly<{
+  resolve?: typeof resolveCentralSessionFromMcp;
+  open?: typeof openCentralSessionFromMcp;
+  wait?: (milliseconds: number) => Promise<void>;
+}>;
+
+const SESSION_CONFIRMATION_ATTEMPTS = 4;
+const SESSION_CONFIRMATION_INTERVAL_MS = 1500;
+function waitForSessionConfirmation(milliseconds: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+export async function resolveOrBootstrapAttestedSession(
+  request: Request,
+  env: Env,
+  deps: SessionRecoveryDependencies = {},
+): Promise<Awaited<ReturnType<typeof resolveCentralSessionFromMcp>>> {
+  const resolve = deps.resolve ?? resolveCentralSessionFromMcp;
+  let result = await resolve(request.clone(), env);
+  if (result.ok || result.error !== "central_session_unbound") return result;
+
+  // This is the same device-confirmed challenge normally opened by ordax_session.
+  // PostgreSQL chooses an eligible target; no device_id from MCP arguments is used.
+  const opened = await (deps.open ?? openCentralSessionFromMcp)(request.clone(), env);
+  if (!opened.ok) return result;
+  const payload: unknown = await opened.clone().json().catch(() => null);
+  if (!payload || typeof payload !== "object" || (payload as Record<string, unknown>).ok !== true) {
+    return result;
+  }
+  const wait = deps.wait ?? waitForSessionConfirmation;
+  for (let attempt = 0; attempt < SESSION_CONFIRMATION_ATTEMPTS; attempt += 1) {
+    await wait(SESSION_CONFIRMATION_INTERVAL_MS);
+    result = await resolve(request.clone(), env);
+    if (result.ok || result.error !== "central_session_unbound") return result;
+  }
+  // No grant, device target or operation is inferred from a pending challenge.
+  return { ok: false as const, error: "central_session_pending" };
+}
+
 /** Injecting read handlers or a narrower tool projection is an internal test/composition seam, never an HTTP option. */
 export function createCanonicalProductMcpGateway(
   env: Env,
   reads: ReadHandlers = createCanonicalProductMcpReadHandlers(env),
   discoveryFetch: typeof fetch = fetch,
   allowedTools: ReadonlySet<string> = PRODUCT_MCP_DIRECT_TOOLS,
+  recoveryDependencies: SessionRecoveryDependencies = {},
 ) {
   const deniedHandlers: OrdaxMcpHandlers = {
     ...reads,
@@ -233,21 +277,26 @@ export function createCanonicalProductMcpGateway(
       let handlers = deniedHandlers;
       if (toolName && allowedTools.has(toolName) && ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)) {
         let trusted: AttestedMcpDevice | null = null;
+        let pending = false;
         try {
-          const resolved = await resolveCentralSessionFromMcp(request.clone(), env);
+          const resolved = await resolveOrBootstrapAttestedSession(request.clone(), env, recoveryDependencies);
           if (resolved.ok) {
             trusted = Object.freeze({
               ownerUserId: resolved.ownerUserId,
               clientId: resolved.clientId,
               deviceId: resolved.deviceId,
             });
+          } else {
+            pending = resolved.error === "central_session_pending";
           }
         } catch {
           trusted = null;
         }
         handlers = {
           ...reads,
-          createAction: createAttestedDeviceActionHandler(env, trusted),
+          createAction: pending
+            ? async () => respond({ ok: false, error: "central_session_pending" }, 409)
+            : createAttestedDeviceActionHandler(env, trusted),
         };
       }
       return handleOrdaxMcp(request, handlers, allowedTools);
