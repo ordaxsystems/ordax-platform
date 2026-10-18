@@ -34,6 +34,35 @@ test("published entry cannot accidentally import legacy D1 Worker or configure D
   assert.match(config, /id = "4b601ec5815f43259bd8040053825d2a"/);
 });
 
+test("OrdaX OS presence uses the canonical MCP PostgreSQL ingress without granting actions", async () => {
+  const { isProductTrustedClientPath } = await import("../cloudflare/src/product_mcp_entry.ts");
+  const path = "/v3/product/device/presence";
+  assert.equal(isProductTrustedClientPath(path), true);
+  const run = createCanonicalProductMcpGateway(ENV);
+  const origin = "https://ordax-mcp.ordaxsystems.workers.dev";
+  const response = await run(new Request(origin + path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      online: true, runtime_kind: "ordax-os",
+      agent_version: "ordax-os", capability_digest: null,
+    }),
+  }));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { ok: false, error: "product_device_unauthorized" });
+
+  // Public MCP discovery is not expanded by the device-only route.
+  const { handlers } = fakeHandlers();
+  const tools = await createCanonicalProductMcpGateway(ENV, handlers)(
+    new Request("https://mcp.ordax.com.br/mcp", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    }),
+  );
+  const list = await tools.json() as any;
+  assert.equal(list.result.tools.some((tool: any) => tool.name.includes("presence")), false);
+});
+
 test("health reports canonical attested device control without model relay", async () => {
   const run = createCanonicalProductMcpGateway(ENV);
   const response = await run(new Request("https://canary.example/health"));
