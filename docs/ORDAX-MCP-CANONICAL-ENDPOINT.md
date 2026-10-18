@@ -86,7 +86,15 @@ As 30 tools atualmente observadas no MCP de produção são:
 
 **Candidato de integração (ainda não promovido):** `terminal_exec`, `process_status`, `process_list`, `process_logs`, `process_start`, `process_write_stdin` e `process_stop` são ações de projeto, não herdam `full-computer-control`; exigem a prova canônica do Git origin, a associação Space/projeto, o perfil Owner `project-native-terminal` ou `project-native-process` e Runtime com suporte à atestação. Essa fronteira reutiliza o executor `terminal.exec`/supervisor `process.*` existente. O candidato não cria outro daemon, MCP ou banco de grants. Um terminal não deve ser simulado por `computer_type`.
 
-**Ordem de liberação:** (1) Runtime com contrato de projeto comprovado; (2) Studio com consentimento e grants PostgreSQL explícitos; (3) canary E2E autenticado executando argv inofensivo; (4) verificação de receipts e revogação; (5) promoção da Platform e atualização de ferramentas no ChatGPT. O merge isolado da Platform não comprova disponibilidade de execução.
+**Ordem de liberação:** (1) Runtime com contrato de projeto comprovado; (2) autorização Owner explícita via Studio **apenas no Windows** e, no OrdaX OS, via gerenciador de permissões **do próprio sistema**; (3) canary E2E autenticado executando argv inofensivo; (4) verificação de receipts e revogação; (5) promoção da Platform e atualização de ferramentas no ChatGPT. O merge isolado da Platform não comprova disponibilidade de execução.
+
+### Autoridade e superfícies por sistema
+
+- **OrdaX OS:** o sistema operacional é dono da política e dos serviços locais de permissões. O aplicativo Studio consome contratos públicos e não concede privilégios por conta própria, nem é dependência de boot, de uso da IA ou do MCP. A interface de consentimento Owner faz parte do sistema, não do Studio.
+- **Windows com OrdaX Runtime:** o Studio fornece uma interface de autorização para o proprietário do PC, utilizando os endpoints Owner e a autoridade PostgreSQL já existentes; não é um segundo serviço de autorização nem um substituto da política Windows/Runtime.
+- **Ambos:** grants remotos pertencem à autoridade Product/Platform e são associados a conta, cliente MCP, dispositivo, Space/projeto e capacidade. A política local do host é outra condição necessária. `full_access` local não cria automaticamente um grant de terminal remoto. O MCP nunca autoriza a si próprio.
+- A resposta do MCP **não deve exigir Studio no OrdaX OS** nem assumir a presença de um aplicativo first-party para conceder permissão. Dicas de autorização devem apontar o responsável correto pelo ambiente. O texto de hints do catálogo é apenas orientação, não um mecanismo de concessão.
+
 
 A publicação de uma tool só torna seu contrato descobrível pelo cliente. A execução continua condicionada a OAuth, target, grant, sessão atestada, Runtime online, política local e validação dos argumentos.
 
