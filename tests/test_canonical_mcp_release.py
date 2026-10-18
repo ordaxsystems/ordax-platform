@@ -203,6 +203,31 @@ class McpReleaseContract(unittest.TestCase):
                 with self.assertRaises(McpReleaseError): validate(f,self.config)
                 with self.assertRaises(McpReleaseError): validate_interactive_candidate(f,self.config)
 
+    def test_target_discovery_postgres_changes_trigger_every_mcp_release_gate(self):
+        # The target-discovery grant RPC is part of the canonical MCP read
+        # authority. An edit to this store must never evade canary, bundle,
+        # or the explicitly gated interactive validation deployment.
+        workflows = (
+            (".github/workflows/product-mcp-canary.yml", 2),
+            (".github/workflows/ordax-mcp-canonical.yml", 2),
+            (".github/workflows/ordax-mcp-validation-deploy.yml", 1),
+        )
+        for name, expected_path_counts in workflows:
+            with self.subTest(workflow=name):
+                source = (ROOT / name).read_text(encoding="utf-8")
+                self.assertEqual(
+                    source.count('- "control-plane/cloudflare/src/product_mcp_discovery_store.ts"'),
+                    expected_path_counts,
+                )
+                self.assertEqual(
+                    source.count('- "control-plane/tests/product_mcp_discovery_store.test.mts"'),
+                    expected_path_counts,
+                )
+                self.assertRegex(
+                    source,
+                    r"(?m)^\s*run: node --test[^\n]*control-plane/tests/product_mcp_discovery_store\.test\.mts",
+                )
+
     def test_new_source_has_one_canonical_attested_action_boundary(self):
         entry=(ROOT/"control-plane/cloudflare/src/product_mcp_entry.ts").read_text("utf-8")
         config=CONFIG.read_text("utf-8")
