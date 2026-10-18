@@ -62,7 +62,10 @@ const ATTESTED_FILESYSTEM_READ_ACTIONS = new Set([
   "computer.text_read",
   "computer.search",
 ]);
-const ATTESTED_FILESYSTEM_WRITE_ACTIONS = new Set(["computer.text_write", "computer.text_patch"]);
+const ATTESTED_FILESYSTEM_WRITE_ACTIONS = new Set([
+  "computer.text_write", "computer.text_patch",
+  "computer.directory_create", "computer.path_move", "computer.path_remove",
+]);
 const ATTESTED_CLIPBOARD_READ_ACTIONS = new Set(["computer.clipboard_read"]);
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   ...OBSERVE_ACTIONS,
@@ -95,7 +98,10 @@ function requiredProfile(action: string): string | null {
   // shared with the broader interactive profile.
   if (OBSERVE_ACTIONS.has(action)) return OBSERVE_COMPUTER_CONTROL_MODE;
   if (INTERACTIVE_ACTIONS.has(action)) return INTERACTIVE_COMPUTER_CONTROL_MODE;
-  // Text editing never requires a delete/move/full-filesystem grant.
+  // Full filesystem mutations use the existing owner filesystem grant;
+  // text create/patch also support the independent text-edit grant.
+  if (action === "computer.directory_create" || action === "computer.path_move"
+    || action === "computer.path_remove") return FILESYSTEM_COMPUTER_CONTROL_MODE;
   if (TEXT_EDIT_ACTIONS.has(action)) return TEXT_EDIT_COMPUTER_CONTROL_MODE;
   if (ATTESTED_FILESYSTEM_READ_ACTIONS.has(action) && FILESYSTEM_ACTIONS.has(action)) {
     return FILESYSTEM_COMPUTER_CONTROL_MODE;
@@ -176,6 +182,26 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
       && (value.start_line === undefined || boundedInteger(value.start_line, 1, 10_000_000))
       && (value.end_line === undefined || boundedInteger(value.end_line, 1, 10_000_000))
       && (value.start_line === undefined || value.end_line === undefined || Number(value.end_line) >= Number(value.start_line));
+  }
+  if (action === "computer.directory_create") {
+    return keysOnly(value, ["path", "parents"])
+      && boundedString(value.path, 4096)
+      && (value.parents === undefined || typeof value.parents === "boolean");
+  }
+  if (action === "computer.path_move") {
+    return keysOnly(value, ["source", "destination", "overwrite", "expected_sha256"])
+      && boundedString(value.source, 4096) && boundedString(value.destination, 4096)
+      && value.source !== value.destination
+      && (value.overwrite === undefined || typeof value.overwrite === "boolean")
+      && (value.expected_sha256 === undefined
+        || (typeof value.expected_sha256 === "string" && /^[0-9a-f]{64}$/.test(value.expected_sha256)));
+  }
+  if (action === "computer.path_remove") {
+    return keysOnly(value, ["path", "recursive", "expected_sha256"])
+      && boundedString(value.path, 4096)
+      && (value.recursive === undefined || typeof value.recursive === "boolean")
+      && (value.expected_sha256 === undefined
+        || (typeof value.expected_sha256 === "string" && /^[0-9a-f]{64}$/.test(value.expected_sha256)));
   }
   if (action === "computer.text_write") {
     const hash = typeof value.expected_sha256 === "string"
