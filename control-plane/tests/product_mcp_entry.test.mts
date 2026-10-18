@@ -108,6 +108,25 @@ test("owner session route is exposed on canonical MCP gateway and fails closed w
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
+test("Windows Owner project-scope read is admitted on trusted Worker ingress without bypassing OAuth", async () => {
+  const { isProductTrustedClientPath } = await import("../cloudflare/src/product_mcp_entry.ts");
+  const path = "/v3/owner/project-scope";
+  assert.equal(isProductTrustedClientPath(path), true);
+  assert.equal(isProductTrustedClientPath("/v3/owner/project-scope/another"), false);
+  const gateway = createCanonicalProductMcpGateway(ENV);
+  const response = await gateway(new Request(
+    "https://ordax-mcp.ordaxsystems.workers.dev" + path
+    + "?device_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa&repository_full_name=ordaxsystems%2Fordax-os",
+  ));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { ok: false, error: "product_auth_required" });
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const forbidden = await gateway(new Request(
+    "https://ordax-mcp.ordaxsystems.workers.dev/v3/owner/project-scope/another",
+  ));
+  assert.equal(forbidden.status, 404);
+});
+
 test("MCP discovery advertises core, computer control and promoted safe computer reads", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
