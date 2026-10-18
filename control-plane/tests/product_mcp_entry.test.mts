@@ -121,9 +121,11 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
     "computer_windows", "computer_active_window", "computer_screenshot", "computer_screen_info",
     "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
-    "computer_drag", "computer_launch_app", "computer_scroll", "computer_type", "computer_hotkey",
+    "computer_drag", "computer_clipboard_write", "computer_launch_app",
+    "computer_scroll", "computer_type", "computer_hotkey",
     "computer_access_status", "computer_file_stat", "computer_directory_list", "computer_text_read",
-    "computer_search", "computer_processes", "computer_text_write", "computer_text_patch",
+    "computer_search", "computer_processes", "computer_terminate_process",
+    "computer_text_write", "computer_text_patch",
     "computer_directory_create", "computer_path_move", "computer_path_remove",
   ]);
   const byName = new Map(json.result.tools.map((tool: any) => [tool.name, tool]));
@@ -139,6 +141,8 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal((byName.get("computer_directory_create") as any).annotations.destructiveHint, false);
   assert.equal((byName.get("computer_path_move") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_path_remove") as any).annotations.destructiveHint, true);
+  assert.equal((byName.get("computer_clipboard_write") as any).annotations.destructiveHint, false);
+  assert.equal((byName.get("computer_terminate_process") as any).annotations.destructiveHint, true);
   assert.equal(calls.session, 1);
   assert.equal(calls.targets, 0);
 });
@@ -147,7 +151,6 @@ test("unrelated mutations, process control, browser, terminal and project tools 
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   for (const action of [
-    "computer_clipboard_write", "computer_terminate_process",
     "browser_start", "terminal_exec", "project_text_write",
     "workspace_directory_list",
   ]) {
@@ -212,8 +215,8 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.equal(response.status, 200);
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
-  assert.equal(json.result.structuredContent.mcp_tool_count, 28);
-  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-18.1");
+  assert.equal(json.result.structuredContent.mcp_tool_count, 30);
+  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-18.2");
 });
 
 test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {

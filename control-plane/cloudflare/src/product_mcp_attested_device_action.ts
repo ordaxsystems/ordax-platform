@@ -25,6 +25,7 @@ import {
   TEXT_EDIT_COMPUTER_CONTROL_MODE,
   INTERACTIVE_COMPUTER_CONTROL_MODE,
   OBSERVE_COMPUTER_CONTROL_MODE,
+  PROCESS_COMPUTER_CONTROL_MODE,
   OWNER_DEVICE_COMPUTER_GRANT_PROFILES,
 } from "./product_action_scope.ts";
 import { productCapabilityAccessMode } from "./product_owner_grant_profiles.ts";
@@ -56,6 +57,7 @@ const INTERACTIVE_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES
 const FILESYSTEM_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[FILESYSTEM_COMPUTER_CONTROL_MODE]);
 const TEXT_EDIT_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[TEXT_EDIT_COMPUTER_CONTROL_MODE]);
 const CLIPBOARD_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[CLIPBOARD_COMPUTER_CONTROL_MODE]);
+const PROCESS_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[PROCESS_COMPUTER_CONTROL_MODE]);
 const ATTESTED_FILESYSTEM_READ_ACTIONS = new Set([
   "computer.file_stat",
   "computer.directory_list",
@@ -66,13 +68,15 @@ const ATTESTED_FILESYSTEM_WRITE_ACTIONS = new Set([
   "computer.text_write", "computer.text_patch",
   "computer.directory_create", "computer.path_move", "computer.path_remove",
 ]);
-const ATTESTED_CLIPBOARD_READ_ACTIONS = new Set(["computer.clipboard_read"]);
+const ATTESTED_CLIPBOARD_ACTIONS = new Set(["computer.clipboard_read", "computer.clipboard_write"]);
+const ATTESTED_PROCESS_MUTATION_ACTIONS = new Set(["computer.terminate_process"]);
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   ...OBSERVE_ACTIONS,
   ...INTERACTIVE_ACTIONS,
   ...ATTESTED_FILESYSTEM_READ_ACTIONS,
   ...ATTESTED_FILESYSTEM_WRITE_ACTIONS,
-  ...ATTESTED_CLIPBOARD_READ_ACTIONS,
+  ...ATTESTED_CLIPBOARD_ACTIONS,
+  ...ATTESTED_PROCESS_MUTATION_ACTIONS,
 ]);
 
 function json(value: unknown, status = 200): Response {
@@ -106,8 +110,11 @@ function requiredProfile(action: string): string | null {
   if (ATTESTED_FILESYSTEM_READ_ACTIONS.has(action) && FILESYSTEM_ACTIONS.has(action)) {
     return FILESYSTEM_COMPUTER_CONTROL_MODE;
   }
-  if (ATTESTED_CLIPBOARD_READ_ACTIONS.has(action) && CLIPBOARD_ACTIONS.has(action)) {
+  if (ATTESTED_CLIPBOARD_ACTIONS.has(action) && CLIPBOARD_ACTIONS.has(action)) {
     return CLIPBOARD_COMPUTER_CONTROL_MODE;
+  }
+  if (ATTESTED_PROCESS_MUTATION_ACTIONS.has(action) && PROCESS_ACTIONS.has(action)) {
+    return PROCESS_COMPUTER_CONTROL_MODE;
   }
   return null;
 }
@@ -165,6 +172,18 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
   if (action === "computer.clipboard_read") {
     return keysOnly(value, ["max_bytes"])
       && (value.max_bytes === undefined || boundedInteger(value.max_bytes, 1, 1_048_576));
+  }
+  if (action === "computer.clipboard_write") {
+    return keysOnly(value, ["text"])
+      && boundedString(value.text, 8192, true)
+      && new TextEncoder().encode(value.text).byteLength <= 8192;
+  }
+  if (action === "computer.terminate_process") {
+    return keysOnly(value, ["pid", "expected_name", "force", "tree"])
+      && boundedInteger(value.pid, 1, 2_147_483_647)
+      && boundedString(value.expected_name, 260)
+      && (value.force === undefined || typeof value.force === "boolean")
+      && (value.tree === undefined || typeof value.tree === "boolean");
   }
   if (action === "computer.file_stat") {
     return keysOnly(value, ["path"]) && boundedString(value.path, 4096);

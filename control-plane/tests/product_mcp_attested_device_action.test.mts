@@ -87,7 +87,19 @@ test("attested device argument allowlist covers observation, interactive and pro
     root: "C:\\work", query: "needle", mode: "both", max_results: 20, max_depth: 4,
   }), true);
 
-  assert.equal(validAttestedDeviceActionArguments("computer.clipboard_write", { text: "no" }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.clipboard_write", { text: "hello" }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.clipboard_write", { text: "" }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.clipboard_write", { text: "x".repeat(8193) }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.clipboard_write", { text: "📝".repeat(2100) }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.clipboard_write", { text: "x", extra: true }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.terminate_process",
+    { pid: 1234, expected_name: "notepad.exe", force: false, tree: false }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.terminate_process",
+    { pid: 0, expected_name: "notepad.exe" }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.terminate_process",
+    { pid: 1234, expected_name: "" }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.terminate_process",
+    { pid: 1234, expected_name: "notepad.exe", force: "yes" }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.directory_create", {
     path: "C:\\work\\new", parents: true,
   }), true);
@@ -362,7 +374,7 @@ test("OAuth owner mismatch and unpublished mutation capability both fail closed"
   assert.equal((await denied.json()).error, "trusted_operation_required");
 
   const unpublished = createAttestedDeviceActionHandler(ENV, TRUSTED, { authenticate: identity });
-  const blocked = await unpublished(actionRequest("computer.clipboard_write", { text: "no" }));
+  const blocked = await unpublished(actionRequest("computer.activity_status", {}));
   assert.equal(blocked.status, 400);
   assert.equal((await blocked.json()).error, "product_device_action_invalid");
 });
@@ -413,4 +425,34 @@ test("filesystem mutation rejects read grants, observation grants and unsigned d
   const response = await denied(actionRequest("computer.path_remove", { path: "C:/scratch/important" }));
   assert.equal(response.status, 403);
   assert.equal(dispatched, false);
+});
+
+test("Owner clipboard and guarded process control enqueue exact write authority", async () => {
+  for (const [action, args, profile] of [
+    ["computer.clipboard_write", { text: "hello from owner" }, "computer-clipboard"],
+    ["computer.terminate_process", { pid: 4321, expected_name: "notepad.exe", force: false, tree: false }, "computer-process-control"],
+  ] as const) {
+    let observed: any = null;
+    const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+      authenticate: identity,
+      listTargets: async () => catalog(grantGroup(profile, action, "write")),
+      enqueue: async (_env, input) => {
+        observed = input;
+        return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+      },
+      operationId: () => OPERATION,
+    });
+    const response = await handler(actionRequest(action, args));
+    assert.equal(response.status, 202, action);
+    assert.equal(observed.capability, action);
+    assert.equal(observed.accessMode, "write");
+    assert.equal(observed.deviceId, DEVICE);
+    assert.deepEqual(observed.payload, args);
+    assert.equal(catalogAllowsAttestedDeviceAction(
+      catalog(grantGroup(profile, action, "read")), DEVICE, action), false);
+    assert.equal(catalogAllowsAttestedDeviceAction(
+      catalog(grantGroup("computer-observe", action, "write")), DEVICE, action), false);
+    assert.equal(catalogAllowsAttestedDeviceAction(
+      catalog(grantGroup("full-computer-control", action, "write")), DEVICE, action), true);
+  }
 });

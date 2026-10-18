@@ -52,7 +52,7 @@ const REPLACEMENTS = {
   },
 };
 
-const MCP_TOOL_SURFACE_REVISION = "2026-10-18.1";
+const MCP_TOOL_SURFACE_REVISION = "2026-10-18.2";
 
 const TOOLS: ToolSpec[] = [
   { name: "ordax_session", description: "Inspect whether the current ORDAX Product connection is authenticated." },
