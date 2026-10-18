@@ -184,7 +184,7 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
     return keysOnly(value, ["path", "content", "expected_sha256", "create"])
       && boundedString(value.path, 4096)
       && typeof value.content === "string" && value.content.length <= 8192
-      && !/[\\x00]/u.test(value.content)
+      && !value.content.includes(String.fromCharCode(0))
       && (value.create === undefined || typeof value.create === "boolean")
       // A new file may omit the SHA; replacing one must supply it. The local
       // ActionRegistry always rechecks existence, SHA and allowed roots.
@@ -201,7 +201,7 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
         && keysOnly(item, ["old", "new", "expected_count"])
         && boundedString(item.old, 1024)
         && typeof item.new === "string" && item.new.length <= 4096
-        && !/[\\x00]/u.test(item.new)
+        && !item.new.includes(String.fromCharCode(0))
         && (item.expected_count === undefined || boundedInteger(item.expected_count, 1, 100)));
   }
   if (action === "computer.search") {
