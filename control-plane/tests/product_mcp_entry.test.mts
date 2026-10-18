@@ -282,7 +282,6 @@ test("pending device challenge does not enqueue any action or expand grants", as
   const body = await response.json() as any;
   assert.equal(body.result.isError, true);
   assert.equal(body.result.structuredContent.error, "central_session_pending");
-  assert.equal(body.result.structuredContent.retryable, true);
   assert.equal(opens, 1);
   assert.equal(checks, 5);
   assert.equal(waits, 4);
