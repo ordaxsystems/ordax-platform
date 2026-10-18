@@ -6,6 +6,8 @@ A autoridade arquitetural de produção está em `production-foundation.json`. E
 
 ## Gateway Product MCP vigente (implementação canônica)
 
+**Diagnóstico de `ordax_targets`:** falhas da leitura canônica preservam apenas o código público validado (`product_mcp_oauth_consent_required`, `product_target_discovery_grant_failed`, `product_targets_unavailable`, entre outros). Mensagens internas, SQL, stack traces e campos extras do backend nunca são retransmitidos ao cliente MCP; um código inválido é substituído por `targets_unavailable`. Essa projeção não altera grants, identidade nem política de autorização.
+
 O endpoint direto do ChatGPT é servido por `src/product_mcp_entry.ts` e `src/mcp_http.ts`. A lista publicada de ferramentas e sua revisão são derivadas **exclusivamente desse código**, não desta documentação nem do catálogo do Runtime. As operações tipadas do computador reutilizam o validador `src/product_mcp_attested_device_action.ts`, os perfis em `src/product_owner_grant_profiles.ts` e a fila PostgreSQL. A autoridade Owner é configurada via `/v3/owner/remote-authority` e `/v3/owner/remote-grant-groups`, sem escrita de grants pelo modelo.
 
 As ações de clipboard e encerramento de processo utilizam implementações já existentes no Runtime. Escrever o clipboard requer grant de escrita `computer-clipboard` ou `full-computer-control`. Encerrar processos requer `computer-process-control` ou `full-computer-control`, PID + nome esperado, e o Runtime volta a verificar a identidade e recusa processos protegidos. Nenhuma das duas ferramentas cria permissões por conta própria. Os testes da entrada e do handler são os gates de consistência da superfície publicada e de separação de grants.

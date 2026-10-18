@@ -689,7 +689,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   if (name === "ordax_targets") {
     const response = await handlers.targets(cloneWithAuth(source, new URL("/v3/product/targets", source.url).toString(), "GET"));
     const payload = await bodyJson(response);
-    const projected = response.ok ? sanitizeTargets(payload) : { ok: false, error: "targets_unavailable" };
+    const projected = response.ok ? sanitizeTargets(payload) : { ok: false, error: publicErrorCode(payload.error, "targets_unavailable") };
     return textToolResult(projected, projected.ok !== true);
   }
   if (name === "ordax_action_status") {

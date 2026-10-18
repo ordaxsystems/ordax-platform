@@ -213,6 +213,27 @@ test("reading authorized targets requires the same session but never invents dev
   assert.equal(calls.targets, 1);
 });
 
+test("targets reports safe upstream failure reasons rather than hiding actionable grant errors", async () => {
+  for (const [status, upstream, expected] of [
+    [403, "product_mcp_oauth_consent_required", "product_mcp_oauth_consent_required"],
+    [403, "product_target_discovery_grant_failed", "product_target_discovery_grant_failed"],
+    [503, "product_targets_unavailable", "product_targets_unavailable"],
+    [502, "product_postgres_invalid_response", "product_postgres_invalid_response"],
+    [500, "private:postgres-exception/password", "targets_unavailable"],
+  ] as const) {
+    const { handlers } = fakeHandlers();
+    handlers.targets = async () => Response.json(
+      { ok: false, error: upstream, internal_detail: "do-not-expose" }, { status },
+    );
+    const response = await createCanonicalProductMcpGateway(ENV, handlers)(request("ordax_targets"));
+    const json = await response.json() as any;
+    assert.equal(response.status, 200);
+    assert.equal(json.result.isError, true);
+    assert.deepEqual(json.result.structuredContent, { ok: false, error: expected });
+    assert.ok(!JSON.stringify(json).includes("do-not-expose"));
+  }
+});
+
 test("unconfigured and unauthenticated clients fail closed, no legacy routes exposed", async () => {
   const gateway = createCanonicalProductMcpGateway({});
   const response = await gateway(request("ordax_targets"));
