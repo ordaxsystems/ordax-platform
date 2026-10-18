@@ -88,6 +88,25 @@ test("attested device argument allowlist covers observation, interactive and pro
   }), true);
 
   assert.equal(validAttestedDeviceActionArguments("computer.clipboard_write", { text: "no" }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.directory_create", {
+    path: "C:\\work\\new", parents: true,
+  }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.path_move", {
+    source: "C:\\work\\old.txt", destination: "C:\\work\\new.txt",
+    expected_sha256: "a".repeat(64),
+  }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.path_remove", {
+    path: "C:\\work\\old.txt", recursive: false,
+  }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.path_move", {
+    source: "same", destination: "same",
+  }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.path_remove", {
+    path: "x", recursive: "true",
+  }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.path_move", {
+    source: "x", destination: "y", expected_sha256: "not-a-hash",
+  }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "no" }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "new", create: true }), true);
   assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "updated", expected_sha256: "a".repeat(64) }), true);
@@ -346,4 +365,52 @@ test("OAuth owner mismatch and unpublished mutation capability both fail closed"
   const blocked = await unpublished(actionRequest("computer.clipboard_write", { text: "no" }));
   assert.equal(blocked.status, 400);
   assert.equal((await blocked.json()).error, "product_device_action_invalid");
+});
+
+test("canonical filesystem owner grant dispatches typed create move remove as writes", async () => {
+  for (const [action, args] of [
+    ["computer.directory_create", { path: "C:/scratch/new", parents: true }],
+    ["computer.path_move", { source: "C:/scratch/a", destination: "C:/scratch/b", overwrite: false }],
+    ["computer.path_remove", { path: "C:/scratch/a", recursive: false }],
+  ] as const) {
+    let observed: any = null;
+    const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+      authenticate: identity,
+      listTargets: async () => catalog(grantGroup("computer-filesystem", action, "write")),
+      enqueue: async (_env, input) => {
+        observed = input;
+        return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+      },
+      operationId: () => OPERATION,
+    });
+    const response = await handler(actionRequest(action, args));
+    assert.equal(response.status, 202, action);
+    assert.equal(observed.capability, action);
+    assert.equal(observed.accessMode, "write");
+    assert.equal(observed.deviceId, DEVICE);
+    assert.equal(observed.projectId, null);
+    assert.deepEqual(observed.payload, args);
+  }
+});
+
+test("filesystem mutation rejects read grants, observation grants and unsigned device context", async () => {
+  for (const action of ["computer.directory_create", "computer.path_move", "computer.path_remove"]) {
+    assert.equal(catalogAllowsAttestedDeviceAction(
+      catalog(grantGroup("computer-filesystem", action, "read")), DEVICE, action), false);
+    assert.equal(catalogAllowsAttestedDeviceAction(
+      catalog(grantGroup("computer-observe", action, "write")), DEVICE, action), false);
+    assert.equal(catalogAllowsAttestedDeviceAction(
+      catalog(grantGroup("full-computer-control", action, "write")), DEVICE, action), true);
+  }
+  let dispatched = false;
+  const denied = createAttestedDeviceActionHandler(ENV, null, {
+    authenticate: identity,
+    enqueue: async () => {
+      dispatched = true;
+      throw new Error("must_not_dispatch");
+    },
+  });
+  const response = await denied(actionRequest("computer.path_remove", { path: "C:/scratch/important" }));
+  assert.equal(response.status, 403);
+  assert.equal(dispatched, false);
 });

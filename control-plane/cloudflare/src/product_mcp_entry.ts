@@ -96,6 +96,11 @@ const ATTESTED_DEVICE_TEXT_EDIT_TOOLS: ReadonlySet<string> = new Set([
   "computer_text_write",
   "computer_text_patch",
 ]);
+const ATTESTED_DEVICE_FILESYSTEM_MUTATION_TOOLS: ReadonlySet<string> = new Set([
+  "computer_directory_create",
+  "computer_path_move",
+  "computer_path_remove",
+]);
 const ATTESTED_DEVICE_CLIPBOARD_READ_TOOLS: ReadonlySet<string> = new Set([
   "computer_clipboard_read",
 ]);
@@ -104,6 +109,7 @@ const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_INTERACTIVE_TOOLS,
   ...ATTESTED_DEVICE_FILESYSTEM_READ_TOOLS,
   ...ATTESTED_DEVICE_TEXT_EDIT_TOOLS,
+  ...ATTESTED_DEVICE_FILESYSTEM_MUTATION_TOOLS,
   ...ATTESTED_DEVICE_CLIPBOARD_READ_TOOLS,
 ]);
 export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
