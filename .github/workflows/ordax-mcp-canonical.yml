@@ -13,6 +13,7 @@ on:
       - "control-plane/cloudflare/src/product_action_scope.ts"
       - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
+      - "control-plane/cloudflare/src/product_device_transport.ts"
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_auth.ts"
       - "control-plane/cloudflare/src/product_mcp_reads.ts"
@@ -21,6 +22,7 @@ on:
       - "control-plane/tests/product_mcp_trusted_client_ingress.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
+      - "control-plane/tests/product_device_transport.test.mts"
       - "scripts/cloudflare/check_mcp_release.py"
       - "tests/test_canonical_mcp_release.py"
       - ".github/workflows/ordax-mcp-canonical.yml"
@@ -34,6 +36,7 @@ on:
       - "control-plane/cloudflare/src/product_action_scope.ts"
       - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
+      - "control-plane/cloudflare/src/product_device_transport.ts"
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_auth.ts"
       - "control-plane/cloudflare/src/product_mcp_reads.ts"
@@ -42,6 +45,7 @@ on:
       - "control-plane/tests/product_mcp_trusted_client_ingress.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
+      - "control-plane/tests/product_device_transport.test.mts"
       - "scripts/cloudflare/check_mcp_release.py"
       - "tests/test_canonical_mcp_release.py"
       - ".github/workflows/ordax-mcp-canonical.yml"
@@ -78,7 +82,7 @@ jobs:
       - name: Install pinned canonical PostgreSQL driver
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
       - name: Validate OAuth, trusted ingress and attested interactive MCP protocol
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_trusted_client_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
+        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_trusted_client_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
       - name: Build exact canonical Worker candidate, no deploy
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.mcp.toml --outdir .mcp-candidate-bundle
