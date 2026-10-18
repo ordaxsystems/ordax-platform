@@ -12,6 +12,7 @@
  * Runtime-attested Product session and current canonical PostgreSQL grants.
  */
 import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
+import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
 import { productAuthConfigured, productOwnerAccountSession, type ProductAuthEnv } from "./product_auth.ts";
 import { productPostgresConfigured, type ProductPostgresEnv } from "./product_postgres_store.ts";
@@ -56,6 +57,7 @@ export const PRODUCT_OWNER_SESSION_PATH = "/v3/product/session";
 export function isProductTrustedClientPath(pathname: string): boolean {
   return pathname === PRODUCT_OWNER_SESSION_PATH
     || pathname === PRODUCT_DEVICE_SETUP_PATH
+    || pathname === PRODUCT_DEVICE_PRESENCE_PATH
     || pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
     || pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
@@ -199,6 +201,10 @@ export function createCanonicalProductMcpGateway(
     }
     if (url.pathname === PRODUCT_DEVICE_SETUP_PATH) {
       return handleProductDeviceSetup(request, env);
+    }
+    if (url.pathname === PRODUCT_DEVICE_PRESENCE_PATH) {
+      // Same PostgreSQL device identity as MCP targets; never the legacy D1 writer.
+      return handleProductDevicePresence(request, env);
     }
     if (url.pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH) {
       return handleProductDeviceCentralSession(request, env);
