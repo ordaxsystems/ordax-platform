@@ -93,6 +93,7 @@ export function projectBindingMatchesScope(
 /** MCP authorization profile hints; not grant writers or an authorization authority. */
 export const INTERACTIVE_COMPUTER_CONTROL_MODE = "interactive-computer-control";
 export const FILESYSTEM_COMPUTER_CONTROL_MODE = "computer-filesystem";
+export const TEXT_EDIT_COMPUTER_CONTROL_MODE = "computer-text-edit";
 export const CLIPBOARD_COMPUTER_CONTROL_MODE = "computer-clipboard";
 export const PROCESS_COMPUTER_CONTROL_MODE = "computer-process-control";
 export const OBSERVE_COMPUTER_CONTROL_MODE = "computer-observe";
@@ -114,6 +115,15 @@ export const OWNER_DEVICE_COMPUTER_GRANT_PROFILES: Readonly<Record<string, reado
     "computer.scroll",
     "computer.type",
     "computer.windows",
+  ],
+  // Independent least-privilege grant: text read/write/patch only. No delete,
+  // move, arbitrary process, shell, browser, or unbounded filesystem access.
+  [TEXT_EDIT_COMPUTER_CONTROL_MODE]: [
+    "computer.directory_list",
+    "computer.file_stat",
+    "computer.text_read",
+    "computer.text_write",
+    "computer.text_patch",
   ],
   [FILESYSTEM_COMPUTER_CONTROL_MODE]: [
     "computer.access_status",
