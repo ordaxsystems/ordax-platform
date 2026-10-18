@@ -194,15 +194,22 @@ async function heartbeat(request: Request, env: ProductPostgresEnv, deviceId: st
   const status = body.status;
   const agentVersion = typeof body.agent_version === "string" ? body.agent_version.trim() : "";
   const capabilityDigest = await canonicalDeviceHeartbeatDigest(body);
+  // Older desktop Runtime heartbeats intentionally omit provenance and remain
+  // "desktop-agent". A Native OS Runtime must declare its actual kind; this
+  // metadata is never a capability grant or an attested action session.
+  const runtimeKind = body.runtime_kind === undefined ? "desktop-agent" : body.runtime_kind;
   if ((status !== "online" && status !== "busy" && status !== "offline")
       || agentVersion.length < 1 || agentVersion.length > 80
-      || capabilityDigest === null) {
+      || capabilityDigest === null
+      || typeof runtimeKind !== "string"
+      || !RUNTIME_KINDS.has(runtimeKind as RuntimeKind)
+      || (body.runtime_kind !== undefined && !Object.prototype.hasOwnProperty.call(body, "capabilities_digest"))) {
     return respond({ ok: false, error: "heartbeat_invalid" }, 400);
   }
   const recorded = await recordProductPresence(env, {
     deviceId,
     online: status !== "offline",
-    runtimeKind: "desktop-agent",
+    runtimeKind: runtimeKind as RuntimeKind,
     agentVersion,
     capabilityDigest,
     force: status === "offline",
