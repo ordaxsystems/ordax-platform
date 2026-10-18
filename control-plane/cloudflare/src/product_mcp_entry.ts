@@ -295,7 +295,7 @@ export function createCanonicalProductMcpGateway(
         handlers = {
           ...reads,
           createAction: pending
-            ? async () => respond({ ok: false, error: "central_session_pending", retryable: true }, 409)
+            ? async () => respond({ ok: false, error: "central_session_pending" }, 409)
             : createAttestedDeviceActionHandler(env, trusted),
         };
       }
