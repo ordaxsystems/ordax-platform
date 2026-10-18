@@ -22,6 +22,7 @@ import {
 import {
   CLIPBOARD_COMPUTER_CONTROL_MODE,
   FILESYSTEM_COMPUTER_CONTROL_MODE,
+  TEXT_EDIT_COMPUTER_CONTROL_MODE,
   INTERACTIVE_COMPUTER_CONTROL_MODE,
   OBSERVE_COMPUTER_CONTROL_MODE,
   OWNER_DEVICE_COMPUTER_GRANT_PROFILES,
@@ -53,6 +54,7 @@ const FULL_COMPUTER_CONTROL_MODE = "full-computer-control";
 const OBSERVE_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[OBSERVE_COMPUTER_CONTROL_MODE]);
 const INTERACTIVE_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[INTERACTIVE_COMPUTER_CONTROL_MODE]);
 const FILESYSTEM_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[FILESYSTEM_COMPUTER_CONTROL_MODE]);
+const TEXT_EDIT_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[TEXT_EDIT_COMPUTER_CONTROL_MODE]);
 const CLIPBOARD_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[CLIPBOARD_COMPUTER_CONTROL_MODE]);
 const ATTESTED_FILESYSTEM_READ_ACTIONS = new Set([
   "computer.file_stat",
@@ -60,11 +62,13 @@ const ATTESTED_FILESYSTEM_READ_ACTIONS = new Set([
   "computer.text_read",
   "computer.search",
 ]);
+const ATTESTED_FILESYSTEM_WRITE_ACTIONS = new Set(["computer.text_write", "computer.text_patch"]);
 const ATTESTED_CLIPBOARD_READ_ACTIONS = new Set(["computer.clipboard_read"]);
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   ...OBSERVE_ACTIONS,
   ...INTERACTIVE_ACTIONS,
   ...ATTESTED_FILESYSTEM_READ_ACTIONS,
+  ...ATTESTED_FILESYSTEM_WRITE_ACTIONS,
   ...ATTESTED_CLIPBOARD_READ_ACTIONS,
 ]);
 
@@ -91,6 +95,8 @@ function requiredProfile(action: string): string | null {
   // shared with the broader interactive profile.
   if (OBSERVE_ACTIONS.has(action)) return OBSERVE_COMPUTER_CONTROL_MODE;
   if (INTERACTIVE_ACTIONS.has(action)) return INTERACTIVE_COMPUTER_CONTROL_MODE;
+  // Text editing never requires a delete/move/full-filesystem grant.
+  if (TEXT_EDIT_ACTIONS.has(action)) return TEXT_EDIT_COMPUTER_CONTROL_MODE;
   if (ATTESTED_FILESYSTEM_READ_ACTIONS.has(action) && FILESYSTEM_ACTIONS.has(action)) {
     return FILESYSTEM_COMPUTER_CONTROL_MODE;
   }
@@ -170,6 +176,33 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
       && (value.start_line === undefined || boundedInteger(value.start_line, 1, 10_000_000))
       && (value.end_line === undefined || boundedInteger(value.end_line, 1, 10_000_000))
       && (value.start_line === undefined || value.end_line === undefined || Number(value.end_line) >= Number(value.start_line));
+  }
+  if (action === "computer.text_write") {
+    const hash = typeof value.expected_sha256 === "string"
+      && /^[0-9a-f]{64}$/.test(value.expected_sha256);
+    const create = value.create === true;
+    return keysOnly(value, ["path", "content", "expected_sha256", "create"])
+      && boundedString(value.path, 4096)
+      && typeof value.content === "string" && value.content.length <= 8192
+      && !value.content.includes(String.fromCharCode(0))
+      && (value.create === undefined || typeof value.create === "boolean")
+      // A new file may omit the SHA; replacing one must supply it. The local
+      // ActionRegistry always rechecks existence, SHA and allowed roots.
+      && (hash || (create && (value.expected_sha256 === undefined || value.expected_sha256 === "")));
+  }
+  if (action === "computer.text_patch") {
+    return keysOnly(value, ["path", "expected_sha256", "replacements"])
+      && boundedString(value.path, 4096)
+      && typeof value.expected_sha256 === "string"
+      && /^[0-9a-f]{64}$/.test(value.expected_sha256)
+      && Array.isArray(value.replacements) && value.replacements.length >= 1
+      && value.replacements.length <= 16
+      && value.replacements.every((item: unknown) => isRecord(item)
+        && keysOnly(item, ["old", "new", "expected_count"])
+        && boundedString(item.old, 1024)
+        && typeof item.new === "string" && item.new.length <= 4096
+        && !item.new.includes(String.fromCharCode(0))
+        && (item.expected_count === undefined || boundedInteger(item.expected_count, 1, 100)));
   }
   if (action === "computer.search") {
     return keysOnly(value, ["root", "query", "mode", "max_results", "max_depth", "include_hidden"])
@@ -284,7 +317,9 @@ export function catalogAllowsAttestedDeviceAction(
     if (expires !== undefined && expires !== null
       && (typeof expires !== "string" || !Number.isFinite(Date.parse(expires)))) return false;
     if (typeof expires === "string" && Date.parse(expires) <= Date.now()) continue;
-    if (rawGroup.profile_key !== profile && rawGroup.profile_key !== FULL_COMPUTER_CONTROL_MODE) continue;
+    if (rawGroup.profile_key !== profile && rawGroup.profile_key !== FULL_COMPUTER_CONTROL_MODE
+      && !(profile === TEXT_EDIT_COMPUTER_CONTROL_MODE
+        && rawGroup.profile_key === FILESYSTEM_COMPUTER_CONTROL_MODE)) continue;
 
     const seen = new Set<string>();
     for (const rawCapability of rawGroup.capabilities) {

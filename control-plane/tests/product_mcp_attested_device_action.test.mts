@@ -89,6 +89,20 @@ test("attested device argument allowlist covers observation, interactive and pro
 
   assert.equal(validAttestedDeviceActionArguments("computer.clipboard_write", { text: "no" }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "no" }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "new", create: true }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "updated", expected_sha256: "a".repeat(64) }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_patch", {
+    path: "x", expected_sha256: "a".repeat(64), replacements: [{ old: "before", new: "after", expected_count: 1 }],
+  }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "changed", expected_sha256: "A".repeat(64) }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: ("bad" + String.fromCharCode(0) + "text"), create: true }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "x".repeat(8193), create: true }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_patch", {
+    path: "x", expected_sha256: "a".repeat(64), replacements: Array.from({ length: 17 }, () => ({ old: "x", new: "y" })),
+  }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_patch", {
+    path: "x", expected_sha256: "a".repeat(64), replacements: [{ old: "x", new: "y", extra: "no" }],
+  }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.click", { x: 1, y: 2, extra: true }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.hotkey", { keys: [] }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.scroll", { amount: 101 }), false);
@@ -133,6 +147,50 @@ test("promoted filesystem read uses the dedicated filesystem profile", async () 
   assert.equal(observed.capability, "computer.text_read");
   assert.equal(observed.accessMode, "read");
   assert.deepEqual(observed.payload, { path: "C:\\work\\readme.txt" });
+});
+
+test("typed text create and patch are independently granted and preserve write scope", async () => {
+  for (const [action, args] of [
+    ["computer.text_write", { path: "/safe/notes.txt", content: "created", create: true }],
+    ["computer.text_patch", { path: "/safe/notes.txt", expected_sha256: "a".repeat(64), replacements: [{ old: "old", new: "new" }] }],
+  ] as const) {
+    let observed: any = null;
+    const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+      authenticate: identity,
+      listTargets: async () => catalog(grantGroup("computer-text-edit", action, "write")),
+      enqueue: async (_env, input) => {
+        observed = input;
+        return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+      },
+      operationId: () => OPERATION,
+    });
+    const response = await handler(actionRequest(action, args));
+    assert.equal(response.status, 202, action);
+    assert.equal(observed.capability, action);
+    assert.equal(observed.accessMode, "write");
+    assert.equal(observed.projectId, null);
+    assert.equal(observed.deviceId, DEVICE);
+    assert.equal(observed.idempotencyKey, `mcp-write-${OPERATION}`);
+    assert.deepEqual(observed.payload, args);
+  }
+});
+
+test("computer-text-edit cannot borrow observation, interactive or wrong access mode", () => {
+  for (const action of ["computer.text_write", "computer.text_patch"]) {
+    for (const group of [
+      grantGroup("computer-observe", action, "write"),
+      grantGroup("interactive-computer-control", action, "write"),
+      grantGroup("computer-text-edit", action, "read"),
+    ]) {
+      assert.equal(catalogAllowsAttestedDeviceAction(catalog(group), DEVICE, action), false, group.profile_key);
+    }
+    assert.equal(catalogAllowsAttestedDeviceAction(
+      catalog(grantGroup("computer-text-edit", action, "write")), DEVICE, action,
+    ), true);
+    assert.equal(catalogAllowsAttestedDeviceAction(
+      catalog(grantGroup("computer-filesystem", action, "write")), DEVICE, action,
+    ), true); // explicitly granted legacy superset, not an automatic grant
+  }
 });
 
 test("promoted clipboard read uses the dedicated clipboard profile", async () => {
@@ -248,7 +306,9 @@ test("missing grant returns the capability family's owner remediation without en
     ["computer.windows", {}, "computer-observe"],
     ["computer.click", { x: 1, y: 2 }, "interactive-computer-control"],
     ["computer.screenshot", {}, "interactive-computer-control"],
-    ["computer.text_read", { path: "C:\\work\\x.txt" }, "computer-filesystem"],
+    ["computer.text_read", { path: "C:\\work\\x.txt" }, "computer-text-edit"],
+    ["computer.text_write", { path: "/safe/new.txt", content: "new", create: true }, "computer-text-edit"],
+    ["computer.text_patch", { path: "/safe/x.txt", expected_sha256: "a".repeat(64), replacements: [{ old: "x", new: "y" }] }, "computer-text-edit"],
     ["computer.clipboard_read", {}, "computer-clipboard"],
   ] as const) {
     let enqueued = false;

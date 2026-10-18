@@ -94,7 +94,7 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
     "computer_drag", "computer_launch_app", "computer_scroll", "computer_type", "computer_hotkey",
     "computer_access_status", "computer_file_stat", "computer_directory_list", "computer_text_read",
-    "computer_search", "computer_processes",
+    "computer_search", "computer_processes", "computer_text_write", "computer_text_patch",
   ]);
   const byName = new Map(json.result.tools.map((tool: any) => [tool.name, tool]));
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
@@ -102,17 +102,19 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal((byName.get("computer_clipboard_read") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_text_read") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_click") as any).annotations.readOnlyHint, false);
+  assert.equal((byName.get("computer_text_write") as any).annotations.destructiveHint, true);
+  assert.equal((byName.get("computer_text_patch") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_click") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_focus_window") as any).annotations.destructiveHint, false);
   assert.equal(calls.session, 1);
   assert.equal(calls.targets, 0);
 });
 
-test("computer mutations, process-control, browser, terminal and project families remain unadvertised", async () => {
+test("unrelated mutations, process control, browser, terminal and project tools remain unpublished", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   for (const action of [
-    "computer_clipboard_write", "computer_text_write", "computer_text_patch", "computer_path_remove",
+    "computer_clipboard_write", "computer_path_remove",
     "computer_terminate_process", "browser_start", "terminal_exec", "project_text_write",
     "workspace_directory_list",
   ]) {
@@ -132,6 +134,8 @@ test("attested device tools fail closed without a verified session binding", asy
     ["computer_windows", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }],
     ["computer_click", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", x: 10, y: 20 }],
     ["computer_text_read", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", path: "C:\\work\\x.txt" }],
+    ["computer_text_write", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", path: "/allowed/demo.txt", content: "a", create: true }],
+    ["computer_text_patch", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", path: "/allowed/demo.txt", expected_sha256: "a".repeat(64), replacements: [{ old: "a", new: "b" }] }],
     ["computer_clipboard_read", { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }],
   ] as const) {
     const response = await run(request(tool, args));
@@ -175,8 +179,8 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.equal(response.status, 200);
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
-  assert.equal(json.result.structuredContent.mcp_tool_count, 23);
-  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-11.1");
+  assert.equal(json.result.structuredContent.mcp_tool_count, 25);
+  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-17.1");
 });
 
 test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {

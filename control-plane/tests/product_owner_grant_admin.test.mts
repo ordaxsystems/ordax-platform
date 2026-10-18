@@ -11,6 +11,7 @@ import {
 import {
   COMPUTER_DEVICE_ACTIONS,
   OBSERVE_COMPUTER_CONTROL_MODE,
+  TEXT_EDIT_COMPUTER_CONTROL_MODE,
   PROJECT_BROWSER_ACTIONS,
 } from "../cloudflare/src/product_action_scope.ts";
 
@@ -35,6 +36,22 @@ test("owner grant profiles are explicit and observation remains least privilege"
   assert.equal(observe.capabilities.some((item)=>[
     "computer.click","computer.screenshot","computer.terminate_process","computer.type",
   ].includes(item.capability)),false);
+
+  const textEdit=OWNER_MCP_GRANT_PROFILES[TEXT_EDIT_COMPUTER_CONTROL_MODE];
+  assert.equal(textEdit.scope,"device");
+  assert.deepEqual(textEdit.capabilities, [
+    {capability:"computer.directory_list",accessMode:"read"},
+    {capability:"computer.file_stat",accessMode:"read"},
+    {capability:"computer.text_patch",accessMode:"write"},
+    {capability:"computer.text_read",accessMode:"read"},
+    {capability:"computer.text_write",accessMode:"write"},
+  ]);
+  for (const excluded of [
+    "computer.path_remove", "computer.path_move", "computer.terminate_process",
+    "computer.clipboard_read", "computer.click", "computer.screenshot",
+  ]) {
+    assert.equal(textEdit.capabilities.some(item => item.capability===excluded), false);
+  }
 
   const browser=OWNER_MCP_GRANT_PROFILES["project-browser-automation"];
   assert.equal(browser.scope,"project");
