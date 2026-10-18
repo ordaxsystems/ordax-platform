@@ -149,8 +149,11 @@ type SessionRecoveryDependencies = Readonly<{
   wait?: (milliseconds: number) => Promise<void>;
 }>;
 
-const SESSION_CONFIRMATION_ATTEMPTS = 4;
-const SESSION_CONFIRMATION_INTERVAL_MS = 1500;
+// The installed Runtime 1.30.3 polls challenges every 20 seconds. Keep one
+// bounded legacy compatibility window until managed Runtime upgrades converge
+// on the existing five-second heartbeat. Device confirmation is still required.
+const SESSION_CONFIRMATION_ATTEMPTS = 12;
+const SESSION_CONFIRMATION_INTERVAL_MS = 2000;
 function waitForSessionConfirmation(milliseconds: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
