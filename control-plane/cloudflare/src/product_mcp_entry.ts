@@ -60,6 +60,7 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_DEVICE_SETUP_PATH
     || pathname === PRODUCT_DEVICE_PRESENCE_PATH
     || pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH
+    || pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
     || pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
     || pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")
