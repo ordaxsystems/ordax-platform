@@ -119,6 +119,8 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal(response.status, 200);
   assert.deepEqual(json.result.tools.map((t: any) => t.name), [
     "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
+    "terminal_exec", "process_status", "process_list", "process_logs",
+    "process_start", "process_write_stdin", "process_stop",
     "computer_windows", "computer_active_window", "computer_screenshot", "computer_screen_info",
     "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
     "computer_drag", "computer_clipboard_write", "computer_launch_app",
@@ -127,8 +129,6 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_search", "computer_processes", "computer_terminate_process",
     "computer_text_write", "computer_text_patch",
     "computer_directory_create", "computer_path_move", "computer_path_remove",
-    "terminal_exec", "process_status", "process_list", "process_logs",
-    "process_start", "process_write_stdin", "process_stop",
   ]);
   const byName = new Map(json.result.tools.map((tool: any) => [tool.name, tool]));
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
