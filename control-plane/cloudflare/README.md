@@ -4,6 +4,14 @@ Este diretório contém a camada Cloudflare do Control Plane remoto do OrdaX.
 
 A autoridade arquitetural de produção está em `production-foundation.json`. Este README explica o contrato; quando houver divergência, o arquivo de foundation e os testes associados prevalecem.
 
+## Gateway Product MCP vigente (implementação canônica)
+
+O endpoint direto do ChatGPT é servido por `src/product_mcp_entry.ts` e `src/mcp_http.ts`. A lista publicada de ferramentas e sua revisão são derivadas **exclusivamente desse código**, não desta documentação nem do catálogo do Runtime. As operações tipadas do computador reutilizam o validador `src/product_mcp_attested_device_action.ts`, os perfis em `src/product_owner_grant_profiles.ts` e a fila PostgreSQL. A autoridade Owner é configurada via `/v3/owner/remote-authority` e `/v3/owner/remote-grant-groups`, sem escrita de grants pelo modelo.
+
+As ações de clipboard e encerramento de processo utilizam implementações já existentes no Runtime. Escrever o clipboard requer grant de escrita `computer-clipboard` ou `full-computer-control`. Encerrar processos requer `computer-process-control` ou `full-computer-control`, PID + nome esperado, e o Runtime volta a verificar a identidade e recusa processos protegidos. Nenhuma das duas ferramentas cria permissões por conta própria. Os testes da entrada e do handler são os gates de consistência da superfície publicada e de separação de grants.
+
+A documentação abaixo contém registros históricos da transição D1→PostgreSQL; afirmações antigas de "endpoint ainda não ativado" não descrevem o gateway Product MCP direto atualmente em produção. Não ressuscitar handlers antigos nem derivar autoridade de perfis locais ou argumentos do modelo.
+
 ## Arquitetura canônica de produção
 
 - **Cloudflare Worker**: edge/API boundary, autenticação de requests, gateway HTTP, WebSocket handoff e integração com os serviços do Control Plane.
