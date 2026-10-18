@@ -9,6 +9,31 @@ from tests.test_cloudflare_deploy_gate import gate
 
 
 class DeviceTransportContractTests(unittest.TestCase):
+    def test_product_heartbeat_distinguishes_native_os_from_windows_without_grants(self):
+        """Authenticated heartbeat provenance is metadata, not action authority."""
+        root = Path(__file__).resolve().parents[1]
+        source = (
+            root / "control-plane/cloudflare/src/product_device_transport.ts"
+        ).read_text(encoding="utf-8")
+        block = source.split("async function heartbeat(", 1)[1].split(
+            "async function claim(", 1
+        )[0]
+        self.assertIn(
+            'const runtimeKind = body.runtime_kind === undefined ? "desktop-agent" : body.runtime_kind',
+            block,
+        )
+        self.assertIn("RUNTIME_KINDS.has(runtimeKind as RuntimeKind)", block)
+        self.assertIn(
+            'Object.prototype.hasOwnProperty.call(body, "capabilities_digest")',
+            block,
+        )
+        self.assertIn("runtimeKind: runtimeKind as RuntimeKind", block)
+        self.assertIn("const capabilityDigest = await canonicalDeviceHeartbeatDigest(body)", block)
+        self.assertIn("recordProductPresence(env,", block)
+        self.assertNotIn("createProductGrant", block)
+        self.assertNotIn("dispatch", block)
+        self.assertIn('new Set<RuntimeKind>(["ordax-os", "desktop-agent", "mobile-client", "other"])', source)
+
     def test_worker_fences_expired_running_job_after_runtime_identity_changes(self) -> None:
         root = Path(__file__).resolve().parents[1]
         worker = (
