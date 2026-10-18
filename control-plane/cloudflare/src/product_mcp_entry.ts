@@ -27,6 +27,7 @@ import {
   createAttestedDeviceActionHandler,
   type AttestedMcpDevice,
 } from "./product_mcp_attested_device_action.ts";
+import { createAttestedProjectActionHandler } from "./product_mcp_attested_project_action.ts";
 import {
   handleProductDeviceSetup,
   PRODUCT_DEVICE_SETUP_PATH,
@@ -117,9 +118,14 @@ const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_CLIPBOARD_TOOLS,
   ...ATTESTED_DEVICE_PROCESS_TOOLS,
 ]);
+export const ATTESTED_PROJECT_NATIVE_TOOLS: ReadonlySet<string> = new Set([
+  "terminal_exec", "process_start", "process_status", "process_list",
+  "process_logs", "process_write_stdin", "process_stop",
+]);
 export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...PRODUCT_MCP_CORE_READ_TOOLS,
   ...ATTESTED_DEVICE_ACTION_TOOLS,
+  ...ATTESTED_PROJECT_NATIVE_TOOLS,
 ]);
 // Compatibility export for callers/tests that previously consumed the read-only name.
 export const PRODUCT_MCP_DIRECT_READ_TOOLS = PRODUCT_MCP_DIRECT_TOOLS;
@@ -289,7 +295,8 @@ export function createCanonicalProductMcpGateway(
       }
 
       let handlers = deniedHandlers;
-      if (toolName && allowedTools.has(toolName) && ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)) {
+      if (toolName && allowedTools.has(toolName)
+        && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName) || ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName))) {
         let trusted: AttestedMcpDevice | null = null;
         let pending = false;
         try {
@@ -310,7 +317,9 @@ export function createCanonicalProductMcpGateway(
           ...reads,
           createAction: pending
             ? async () => respond({ ok: false, error: "central_session_pending" }, 409)
-            : createAttestedDeviceActionHandler(env, trusted),
+            : ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
+              ? createAttestedProjectActionHandler(env, trusted)
+              : createAttestedDeviceActionHandler(env, trusted),
         };
       }
       return handleOrdaxMcp(request, handlers, allowedTools);
