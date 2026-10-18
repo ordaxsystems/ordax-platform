@@ -108,6 +108,25 @@ test("owner session route is exposed on canonical MCP gateway and fails closed w
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
+test("Windows Owner project-scope read is admitted on trusted Worker ingress without bypassing OAuth", async () => {
+  const { isProductTrustedClientPath } = await import("../cloudflare/src/product_mcp_entry.ts");
+  const path = "/v3/owner/project-scope";
+  assert.equal(isProductTrustedClientPath(path), true);
+  assert.equal(isProductTrustedClientPath("/v3/owner/project-scope/another"), false);
+  const gateway = createCanonicalProductMcpGateway(ENV);
+  const response = await gateway(new Request(
+    "https://ordax-mcp.ordaxsystems.workers.dev" + path
+    + "?device_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa&repository_full_name=ordaxsystems%2Fordax-os",
+  ));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { ok: false, error: "product_auth_required" });
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const forbidden = await gateway(new Request(
+    "https://ordax-mcp.ordaxsystems.workers.dev/v3/owner/project-scope/another",
+  ));
+  assert.equal(forbidden.status, 404);
+});
+
 test("MCP discovery advertises core, computer control and promoted safe computer reads", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
@@ -119,6 +138,8 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal(response.status, 200);
   assert.deepEqual(json.result.tools.map((t: any) => t.name), [
     "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
+    "terminal_exec", "process_status", "process_list", "process_logs",
+    "process_start", "process_write_stdin", "process_stop",
     "computer_windows", "computer_active_window", "computer_screenshot", "computer_screen_info",
     "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
     "computer_drag", "computer_clipboard_write", "computer_launch_app",
@@ -147,11 +168,11 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal(calls.targets, 0);
 });
 
-test("unrelated mutations, process control, browser, terminal and project tools remain unpublished", async () => {
+test("unrelated browser and project tools remain unpublished", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   for (const action of [
-    "browser_start", "terminal_exec", "project_text_write",
+    "browser_start", "project_text_write",
     "workspace_directory_list",
   ]) {
     const response = await run(request(action, { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
@@ -215,8 +236,8 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.equal(response.status, 200);
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
-  assert.equal(json.result.structuredContent.mcp_tool_count, 30);
-  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-18.2");
+  assert.equal(json.result.structuredContent.mcp_tool_count, 37);
+  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-18.3");
 });
 
 test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {

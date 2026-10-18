@@ -43,19 +43,21 @@ class McpOwnerGrantHintContractTests(unittest.TestCase):
         ):
             self.assertIn(f'"{action}"', self.source)
         self.assertIn('profile: "project-browser-automation"', self.source)
-        self.assertIn('BROWSER_GRANT_SURFACE = "ORDAX Studio > Navegador gerenciado"', self.source)
+        self.assertIn('BROWSER_GRANT_SURFACE = "OrdaX OS: Permissões do sistema | Windows: ORDAX Studio > Navegador gerenciado"', self.source)
 
     def test_app_intelligence_actions_use_dedicated_read_profile(self) -> None:
         for action in ("intelligence.app_catalog", "intelligence.app_detail"):
             self.assertIn(f'"{action}"', self.source)
         self.assertIn('profile: "app-intelligence-read"', self.source)
         self.assertIn(
-            'APP_INTELLIGENCE_GRANT_SURFACE = "ORDAX Studio > Inteligência de aplicativos"',
+            'APP_INTELLIGENCE_GRANT_SURFACE = "OrdaX OS: Permissões do sistema | Windows: ORDAX Studio > Inteligência de aplicativos"',
             self.source,
         )
 
-    def test_authorization_surface_is_owner_facing_studio(self) -> None:
-        self.assertIn('COMPUTER_GRANT_SURFACE = "ORDAX Studio > Acesso ao computador"', self.source)
+    def test_authorization_surface_is_owner_facing_for_native_os_and_windows(self) -> None:
+        self.assertIn('COMPUTER_GRANT_SURFACE = "OrdaX OS: Permissões do sistema | Windows: ORDAX Studio > Acesso ao computador"', self.source)
+        self.assertIn('PROJECT_GRANT_SURFACE = "OrdaX OS: Permissões do sistema e Spaces | Windows: ORDAX Studio > Autorizações MCP de projetos"', self.source)
+        self.assertNotIn('COMPUTER_GRANT_SURFACE = "ORDAX Studio >', self.source)
         self.assertIn('authorization_surface: hint.surface', self.source)
         self.assertIn('authorization_required: true', self.source)
 

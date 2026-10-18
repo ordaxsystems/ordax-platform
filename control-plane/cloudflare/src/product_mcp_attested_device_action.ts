@@ -124,7 +124,8 @@ function grantRequired(action: string): Response {
     ok: false,
     error: "product_grant_not_resolved",
     required_profile: requiredProfile(action),
-    owner_action: "authorize_in_ordax_studio",
+    // Native OS uses the system Owner permissions UI; Windows uses Studio.
+    owner_action: "authorize_in_ordax_owner_permissions",
   }, 403);
 }
 
