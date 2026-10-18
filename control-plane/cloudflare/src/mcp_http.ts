@@ -587,6 +587,7 @@ type OwnerGrantHint = {
 const COMPUTER_GRANT_SURFACE = "ORDAX Studio > Acesso ao computador";
 const BROWSER_GRANT_SURFACE = "ORDAX Studio > Navegador gerenciado";
 const APP_INTELLIGENCE_GRANT_SURFACE = "ORDAX Studio > Inteligência de aplicativos";
+const PROJECT_GRANT_SURFACE = "ORDAX Studio > Autorizações MCP de projetos";
 
 const OWNER_GRANT_HINT_BY_ACTION = new Map<string, OwnerGrantHint>([
   ...[
@@ -607,6 +608,11 @@ const OWNER_GRANT_HINT_BY_ACTION = new Map<string, OwnerGrantHint>([
     "browser.stop",
     "browser.type",
   ].map((action) => [action, { profile: "project-browser-automation", surface: BROWSER_GRANT_SURFACE }] as const),
+  ["terminal.exec"].map((action) =>
+    [action, { profile: "project-native-terminal", surface: PROJECT_GRANT_SURFACE }] as const),
+  ["process.start", "process.status", "process.list", "process.logs",
+    "process.write_stdin", "process.stop"].map((action) =>
+    [action, { profile: "project-native-process", surface: PROJECT_GRANT_SURFACE }] as const),
 ]);
 
 function authorizationHintForAction(action: string): JsonObject | null {
