@@ -236,7 +236,7 @@ test("attested session recovery auto-opens once and waits only for Runtime proof
             clientId: "product-client-123", deviceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" };
     },
     open: async () => { opens++; return Response.json({ ok: true, status: "pending" }, { status: 202 }); },
-    wait: async (milliseconds) => { assert.equal(milliseconds, 1500); waits++; },
+    wait: async (milliseconds) => { assert.equal(milliseconds, 2000); waits++; },
   });
   assert.equal(resolved.ok, true);
   assert.equal(checks, 3);
@@ -283,8 +283,26 @@ test("pending device challenge does not enqueue any action or expand grants", as
   assert.equal(body.result.isError, true);
   assert.equal(body.result.structuredContent.error, "central_session_pending");
   assert.equal(opens, 1);
-  assert.equal(checks, 5);
-  assert.equal(waits, 4);
+  assert.equal(checks, 13);
+  assert.equal(waits, 12);
   assert.equal(calls.targets, 0);
   assert.equal(calls.getAction, 0);
+});
+
+test("first device operation waits through installed 20-second Runtime cadence", async () => {
+  let checks = 0, opens = 0, waits = 0;
+  const confirmed = await resolveOrBootstrapAttestedSession(request("computer_directory_list"), ENV, {
+    resolve: async () => {
+      checks++;
+      return checks < 12 ? { ok: false, error: "central_session_unbound" } :
+        { ok: true, ownerUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          clientId: "product-client-123", deviceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" };
+    },
+    open: async () => { opens++; return Response.json({ ok: true, status: "pending" }, { status: 202 }); },
+    wait: async (milliseconds) => { assert.equal(milliseconds, 2000); waits++; },
+  });
+  assert.equal(confirmed.ok, true);
+  assert.equal(opens, 1);
+  assert.equal(waits, 11);
+  assert.equal(checks, 12);
 });
