@@ -6,6 +6,7 @@ on:
     paths:
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_mcp_discovery_store.ts"
       - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
       - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
@@ -20,6 +21,7 @@ on:
       - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_mcp_discovery_store.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_owner_grant_admin.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
@@ -33,6 +35,7 @@ on:
     paths:
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_mcp_discovery_store.ts"
       - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
       - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
@@ -47,6 +50,7 @@ on:
       - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_mcp_discovery_store.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_owner_grant_admin.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
@@ -72,7 +76,7 @@ jobs:
       - name: Install only pinned Worker PostgreSQL dependency
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
       - name: Protocol, grants, fail-closed and signed OAuth regressions
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_central_mcp.test.mts control-plane/tests/product_central_admission.test.mts control-plane/tests/product_relay_canonical_mcp.test.mts control-plane/labs/relay/scoped-mcp.test.mts
+        run: node --test control-plane/tests/product_mcp_discovery_store.test.mts control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_central_mcp.test.mts control-plane/tests/product_central_admission.test.mts control-plane/tests/product_relay_canonical_mcp.test.mts control-plane/labs/relay/scoped-mcp.test.mts
       - name: Compile candidate with Wrangler without deploying
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.product-mcp-canary.toml --outdir .canary-bundle
