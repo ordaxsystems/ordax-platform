@@ -127,6 +127,8 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_search", "computer_processes", "computer_terminate_process",
     "computer_text_write", "computer_text_patch",
     "computer_directory_create", "computer_path_move", "computer_path_remove",
+    "terminal_exec", "process_status", "process_list", "process_logs",
+    "process_start", "process_write_stdin", "process_stop",
   ]);
   const byName = new Map(json.result.tools.map((tool: any) => [tool.name, tool]));
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
@@ -147,11 +149,11 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal(calls.targets, 0);
 });
 
-test("unrelated mutations, process control, browser, terminal and project tools remain unpublished", async () => {
+test("unrelated browser and project tools remain unpublished", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
   for (const action of [
-    "browser_start", "terminal_exec", "project_text_write",
+    "browser_start", "project_text_write",
     "workspace_directory_list",
   ]) {
     const response = await run(request(action, { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
@@ -215,8 +217,8 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.equal(response.status, 200);
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
-  assert.equal(json.result.structuredContent.mcp_tool_count, 30);
-  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-18.2");
+  assert.equal(json.result.structuredContent.mcp_tool_count, 37);
+  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-18.3");
 });
 
 test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {
