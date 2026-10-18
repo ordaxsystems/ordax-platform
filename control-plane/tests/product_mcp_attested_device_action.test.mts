@@ -95,7 +95,7 @@ test("attested device argument allowlist covers observation, interactive and pro
     path: "x", expected_sha256: "a".repeat(64), replacements: [{ old: "before", new: "after", expected_count: 1 }],
   }), true);
   assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "changed", expected_sha256: "A".repeat(64) }), false);
-  assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "bad\\u0000text", create: true }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: ("bad" + String.fromCharCode(0) + "text"), create: true }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.text_write", { path: "x", content: "x".repeat(8193), create: true }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.text_patch", {
     path: "x", expected_sha256: "a".repeat(64), replacements: Array.from({ length: 17 }, () => ({ old: "x", new: "y" })),
