@@ -174,7 +174,8 @@ function grantRequired(action: string): Response {
     ok: false,
     error: "product_grant_not_resolved",
     required_profile: profileForAction(action),
-    owner_action: "authorize_in_ordax_studio",
+    // Do not require Windows Studio on native OrdaX OS devices.
+    owner_action: "authorize_in_ordax_owner_permissions",
   }, 403);
 }
 
