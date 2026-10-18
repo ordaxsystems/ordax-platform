@@ -101,8 +101,12 @@ const ATTESTED_DEVICE_FILESYSTEM_MUTATION_TOOLS: ReadonlySet<string> = new Set([
   "computer_path_move",
   "computer_path_remove",
 ]);
-const ATTESTED_DEVICE_CLIPBOARD_READ_TOOLS: ReadonlySet<string> = new Set([
+const ATTESTED_DEVICE_CLIPBOARD_TOOLS: ReadonlySet<string> = new Set([
   "computer_clipboard_read",
+  "computer_clipboard_write",
+]);
+const ATTESTED_DEVICE_PROCESS_TOOLS: ReadonlySet<string> = new Set([
+  "computer_terminate_process",
 ]);
 const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_OBSERVE_TOOLS,
@@ -110,7 +114,8 @@ const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_FILESYSTEM_READ_TOOLS,
   ...ATTESTED_DEVICE_TEXT_EDIT_TOOLS,
   ...ATTESTED_DEVICE_FILESYSTEM_MUTATION_TOOLS,
-  ...ATTESTED_DEVICE_CLIPBOARD_READ_TOOLS,
+  ...ATTESTED_DEVICE_CLIPBOARD_TOOLS,
+  ...ATTESTED_DEVICE_PROCESS_TOOLS,
 ]);
 export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...PRODUCT_MCP_CORE_READ_TOOLS,
