@@ -354,7 +354,7 @@ test("missing grant returns the capability family's owner remediation without en
       ok: false,
       error: "product_grant_not_resolved",
       required_profile: expectedProfile,
-      owner_action: "authorize_in_ordax_studio",
+      owner_action: "authorize_in_ordax_owner_permissions",
     });
     assert.equal(enqueued, false);
   }
