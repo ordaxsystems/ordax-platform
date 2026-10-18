@@ -48,7 +48,9 @@ test("trusted ingress hides every public or unrelated surface", async () => {
     ["/ready", undefined],
     ["/.well-known/oauth-protected-resource", undefined],
     ["/v3/product/targets", undefined],
-    [PRODUCT_OWNER_PROJECT_SCOPE_PATH, undefined],
+    // Project scope is an authenticated Owner read used by Windows Studio,
+    // not a public route. Only its exact path is admitted.
+    [`${PRODUCT_OWNER_PROJECT_SCOPE_PATH}/unknown`, undefined],
     ["/mcp", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -66,6 +68,7 @@ test("trusted ingress reaches only authenticated Runtime and owner-grant handler
   const gateway = createCanonicalProductMcpGateway(ENV, fakeReads);
   const requests: Array<[string, RequestInit | undefined]> = [
     [PRODUCT_OWNER_SESSION_PATH, undefined],
+    [`${PRODUCT_OWNER_PROJECT_SCOPE_PATH}?device_id=${DEVICE_ID}&repository_full_name=ordaxsystems%2Fordax-os`, undefined],
     [PRODUCT_DEVICE_SETUP_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
