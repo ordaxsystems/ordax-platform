@@ -4,24 +4,7 @@ compatibility_date = "2026-10-17"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-[[d1_databases]]
-binding = "DB"
-database_name = "ordax-control-plane-v3-ci"
-database_id = "00000000000000000000000000000000"
-
 [[hyperdrive]]
 binding = "POSTGRES"
 id = "00000000000000000000000000000000"
-
-[[r2_buckets]]
-binding = "ARTIFACTS"
-bucket_name = "ordax-device-artifacts-ci"
-
-[[durable_objects.bindings]]
-name = "DEVICE_SESSIONS"
-class_name = "DeviceSession"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["DeviceSession"]
 
