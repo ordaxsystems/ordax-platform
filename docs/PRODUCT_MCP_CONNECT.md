@@ -309,3 +309,11 @@ Inventário de **conceitos**, não nova SSOT de produto: as fontes canônicas pe
 5. **Migrações futuras:** se a auditoria de tráfego e IDs provar incongruência, planejar migration aditiva versionada, tradução limitada de versões dos clientes e provas de revogação, concorrência, multiusuário, consentimento e rollback. Não renomear a quente nem habilitar comandos somente para desbloquear o onboarding.
 
 A PR `ordax-platform#222` continua **bloqueada por design** até conclusão dessas provas. Testes estáticos/CI e FKs reais são evidência de modelo, **não** demonstração de sincronismo E2E ou de migrações implantadas em todos os destinos.
+
+## Catálogo publicado e sessão conectada
+
+A projeção Product MCP canônica de 19/10/2026 publica **44 ferramentas**, mas essa contagem é **somente do servidor**. Existem dois grupos distintos de execução nativa: sete ferramentas de **dispositivo** (`computer_terminal_exec`, `computer_process_*`) e sete ferramentas de **projeto** (`terminal_exec`, `process_*`). As primeiras não recebem projeto sintético; as últimas continuam dependendo do vínculo de Projeto e Space autorizado.
+
+Uma conexão do ChatGPT já aberta pode expor uma versão anterior. Nesta conversa, `ordax_session` anunciou 44 ferramentas e a sessão disponibilizou 37; faltavam exatamente as sete operações nativas de dispositivo. O incidente está registrado na [issue #216](https://github.com/ordaxsystems/ordax-platform/issues/216). Compare os **nomes** realmente retornados em `tools/list` na mesma identidade OAuth e URL canônica com os nomes disponibilizados no cliente. Uma mera contagem não aprova funcionalidade nem autorização.
+
+Atualize a conexão pela ação oficial de reconectar/recarregar o plugin ChatGPT. Não registre outro MCP, não altere endpoint ou OAuth, não modifique `tools.listChanged` sem implementar corretamente as notificações MCP e não crie grants só para forçar a exibição. Após a reconexão, exigem-se separadamente presença do Runtime compatível, política local, consentimento e grants Owner, teste negativo e prova E2E real.
