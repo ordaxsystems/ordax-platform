@@ -102,6 +102,16 @@ test("readiness classifies failed connect, query and malformed result without di
   }
 });
 
+test("a client constructor failure is a generic readiness error and does not expose secrets", async () => {
+  const result = await checkCanonicalProductPostgresReadiness(ENV, () => {
+    throw new Error(SECRET);
+  });
+  assert.deepEqual(result, {
+    ok: false, error: "product_postgres_unavailable", failure_stage: "connect",
+  });
+  assert.equal(JSON.stringify(result).includes(SECRET), false);
+});
+
 test("invalid DB config fails without opening a connection", async () => {
   let opened = false;
   const res = await checkCanonicalProductPostgresReadiness({}, () => {
