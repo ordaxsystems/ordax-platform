@@ -93,6 +93,7 @@ jobs:
           python -m unittest tests.test_central_device_session_contract tests.test_product_action_scope_contract tests.test_cloudflare_device_scope_wiring tests.test_owner_device_computer_grants_contract tests.test_owner_device_intelligence_grants_contract tests.test_mcp_owner_grant_hint_contract tests.test_product_auth_contract tests.test_product_oauth_metadata tests.test_product_device_pairing_contract tests.test_product_link_aware_grants tests.test_product_grant_sql_runtime tests.test_central_durable_authority tests.test_openai_plugin_annotation_evidence tests.test_openai_review_grant_workflow tests.test_cloudflare_account_resolution tests.test_legacy_mcp_retirement tests.test_cloudflare_deploy_gate tests.test_cloudflare_deploy_source_freshness tests.test_least_privilege_production_deploy tests.test_secure_secret_cutover_script tests.test_product_postgres_authority tests.test_product_postgres_device_identity tests.test_repository_namespace_migration
 
       - name: Verify canonical MCP surface revision exists
-        run: node --test control-plane/tests/product_mcp_surface_revision.test.mts
+        run: |
+          node --test control-plane/tests/product_mcp_surface_revision.test.mts
           test -f control-plane/cloudflare/src/index.ts
           test -f control-plane/cloudflare/migrations/0008_product_device_owner.sql
