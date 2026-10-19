@@ -41,6 +41,9 @@ class CloudflareDirectDeployGateTests(unittest.TestCase):
     def test_ready_foundation_requires_no_d1_binding(self):
         self.foundation["deployment_ready"] = True
         self.foundation["readiness_blockers"] = []
+        # The canonical configuration has no D1. Reintroducing the old
+        # binding must still cause the release gate to fail closed.
+        self.wrangler["d1_databases"] = [{"binding": "DB", "database_name": "retired"}]
         with self.assertRaisesRegex(gate.DeployGateError, "D1 binding"):
             self.validate()
 
@@ -113,9 +116,8 @@ class CloudflareDirectDeployGateTests(unittest.TestCase):
             blocker for blocker in self.foundation["readiness_blockers"]
             if blocker != "worker_d1_cutover_incomplete"
         ]
-        with self.assertRaisesRegex(gate.DeployGateError, "D1 cutover blocker"):
-            self.validate()
-        self.wrangler.pop("d1_databases", None)
+        # A deleted D1 authority is not itself a reason to block development;
+        # any reintroduced D1 reference without a blocker is forbidden.
         with self.assertRaisesRegex(gate.DeployGateError, "D1 cutover blocker"):
             self.validate("const db = env['DB']")
         self.assertFalse(self.validate("export default {}"))
