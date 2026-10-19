@@ -261,7 +261,7 @@ Este documento é o contrato de **integração MCP**, não uma segunda definiç�
 | Perfil do usuário | preferências e configuração da conta | Profile Pack versionado |
 | Profile Pack | composição versionada de apps/templates/Intelligence para um Space | identidade, Space ou fonte de dados do negócio |
 | Space | ambiente de trabalho persistente, com membros, recursos e vários projetos; `ordax_spaces` | área visual chamada “workspace”, diretório local ou repositório GitHub |
-| Projeto canônico | recurso do Space com identidade `ordax_projects.id` | slug local do Runtime ou nome de repositório |
+| Projeto canônico | recurso do Space com identidade `ordax_projects.project_id` | slug local do Runtime ou nome de repositório |
 | Repositório GitHub | origem externa verificada do projeto; `ordax_project_connections` | prova de autorização por si só |
 | Dispositivo/Target | equipamento autorizado e atestado, com presença distinta de identidade | Space ou projeto |
 | Grant | autorização por capability/cliente/escopo/dispositivo | vínculo de projeto, acesso de membro ou política local do Runtime |
@@ -273,3 +273,5 @@ Este documento é o contrato de **integração MCP**, não uma segunda definiç�
 **Operações MCP:** `ordax_session`, `ordax_profile`, `ordax_targets` e `ordax_action_status` são escopadas pela conta/cliente e seus próprios controles, **sem requisito de Space ou Projeto**. `computer_processes` pertence à família de observação do dispositivo, com autorização e confirmação do Runtime; não é `process_list`. `process_list` e `terminal_exec` são ações de **projeto canônico verificado**, cuja autorização atual exige um Space persistente, vínculo de repositório e duas associações dispositivo/Space e dispositivo/projeto, além de grant específico, atestação e política local. `space_id` opcional no schema não cria Space e não remove esses requisitos.
 
 **Gate #220 / PR #222:** nenhum cadastro fictício deve ser produzido para desbloquear uma operação de dispositivo. O contrato de onboarding Owner é design-only até confirmação de equivalência com `ordax_spaces` do OS, verificação real do GitHub e testes de identidade, revogação, concorrência e E2E. Não habilitar cadastro, merge de migrações ou grants automáticos por mera passagem em teste estático. Ferramentas básicas/observação devem continuar independentes de vínculo artificial de projeto. Não alterar o contrato `ordax_profile` nem os nomes das ferramentas sem migração compatível.
+
+**Verificação de metadados do banco ativo (19/10/2026, somente leitura):** chaves reais `public.ordax_spaces.space_id` e `public.ordax_projects.project_id`; as RPCs `ordax_create_space_v1`, `ordax_create_project_v1` e `ordax_resolve_owner_project_scope_v1` estão presentes. A presença de nomes iguais no OS/Platform não prova por si só uma única rota de implantação para todos os consumidores; confirmar migrations, leitura `/account/spaces` e sessão real antes de liberar o onboarding da #220.
