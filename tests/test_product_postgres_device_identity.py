@@ -107,13 +107,9 @@ class ProductPostgresDeviceIdentityTests(unittest.TestCase):
             config_path = ROOT / "control-plane/cloudflare" / file_name
             with config_path.open("rb") as stream:
                 config = tomllib.load(stream)
-            self.assertEqual(
-                [
-                    (binding["name"], binding["class_name"])
-                    for binding in config["durable_objects"]["bindings"]
-                ],
-                [("DEVICE_SESSIONS", "DeviceSession")],
-            )
+            self.assertFalse(config.get("durable_objects", {}).get("bindings", []))
+            self.assertFalse(config.get("d1_databases", []))
+            self.assertFalse(config.get("r2_buckets", []))
             self.assertFalse(
                 any(
                     "EnrollmentSession" in migration.get("new_sqlite_classes", [])
