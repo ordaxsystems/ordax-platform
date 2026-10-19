@@ -230,8 +230,8 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
       || !Number.isFinite(value.wait_seconds) || value.wait_seconds < 0.1 || value.wait_seconds > 5)) return false;
     if (value.env !== undefined && (!isRecord(value.env) || Object.keys(value.env).length > 64
       || !Object.entries(value.env).every(([key, val]) => key.length > 0 && key.length <= 128
-        && !/[=\\x00]/u.test(key) && typeof val === "string" && val.length <= 8192
-        && !val.includes("\\x00")))) return false;
+        && !/[=\x00]/u.test(key) && typeof val === "string" && val.length <= 8192
+        && !val.includes("\x00")))) return false;
     return true;
   }
   if (action === "computer.file_stat") {
