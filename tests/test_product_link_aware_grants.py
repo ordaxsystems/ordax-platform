@@ -23,16 +23,12 @@ class ProductLinkAwareGrantContractTests(unittest.TestCase):
         self.assertNotIn('return revokeProductGrant(',LEGACY)
 
     def test_legacy_endpoints_cannot_mint_or_revoke(self):
-        start=LEGACY.index('url.pathname === "/v3/product/audit"')
-        end=LEGACY.index('if (request.method === "POST" && url.pathname === "/v3/jobs")',start)
-        retired=LEGACY[start:end]
-        for path in ('/v3/product/audit','/v3/product-grants',
-                     '/v3/product-grants/from-link','/v3/product-grants/resolve'):
-            self.assertIn(f'"{path}"',retired)
-        self.assertIn('parts[1] === "product-grants"',retired)
-        self.assertIn('410',retired)
-        self.assertNotIn('env.DB',retired)
-        self.assertNotIn('operatorAuthorized',retired)
+        self.assertIn('path.startsWith("/v3/product-grants")', LEGACY)
+        self.assertIn('path === "/v3/product/audit"', LEGACY)
+        self.assertIn('error:"legacy_endpoint_retired"', LEGACY)
+        self.assertIn('410', LEGACY)
+        self.assertNotIn('env.DB', LEGACY)
+        self.assertNotIn('operatorAuthorized', LEGACY)
 
     def test_authority_uses_exact_space_and_oauth_client(self):
         for p in (

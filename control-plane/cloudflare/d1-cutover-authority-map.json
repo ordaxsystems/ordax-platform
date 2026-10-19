@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "legacy_binding": "DB",
   "tracking_issue": 42,
   "policy": {
@@ -51,39 +51,44 @@
     },
     {
       "id": "shared_device_registry",
-      "legacy_tables": [
-        "ordax_devices"
-      ],
+      "legacy_tables": [],
       "target_authority": "postgresql",
-      "authority_state": "partial",
-      "cutover_strategy": "split_product_identity_from_engineering_runtime_identity_before_removing_d1",
+      "authority_state": "retired",
+      "cutover_strategy": "remove_legacy_d1_device_registry; keep_postgres_product_device_enrollment",
       "target_contracts": [
         "public.ordax_product_devices",
         "public.ordax_device_presence",
         "private.ordax_product_device_credentials"
+      ],
+      "retired_tables": [
+        "ordax_devices"
       ]
     },
     {
       "id": "engineering_runtime_jobs",
-      "legacy_tables": [
+      "legacy_tables": [],
+      "target_authority": "postgresql",
+      "authority_state": "retired",
+      "cutover_strategy": "retire_d1_queue_surface; native owner PostgreSQL lifecycle is isolated and opt-in until identity authority proven",
+      "target_contracts": [
+        "native/ordax-owner-recovery/postgres_lifecycle.go"
+      ],
+      "retired_tables": [
         "ordax_jobs",
         "ordax_job_events"
-      ],
-      "target_authority": "postgresql",
-      "authority_state": "missing",
-      "cutover_strategy": "define_dedicated_engineering_runtime_authority_or_deprecate_legacy_queue",
-      "target_contracts": []
+      ]
     },
     {
       "id": "artifact_metadata",
-      "legacy_tables": [
+      "legacy_tables": [],
+      "target_authority": "postgresql_plus_r2",
+      "authority_state": "retired",
+      "cutover_strategy": "retire_d1_artifact_endpoints_pending_canonical_r2_postgres_artifact_implementation",
+      "target_contracts": [],
+      "retired_tables": [
         "ordax_artifacts",
         "ordax_artifact_uploads"
-      ],
-      "target_authority": "postgresql_plus_r2",
-      "authority_state": "missing",
-      "cutover_strategy": "store_bytes_in_r2_and_persistent_metadata_in_postgresql",
-      "target_contracts": []
+      ]
     }
   ],
   "exit_criteria": [
@@ -96,6 +101,6 @@
   ],
   "source_root": "control-plane/cloudflare/src",
   "legacy_source_callsite_ceilings": {
-    "index.ts": 29
+    "index.ts": 0
   }
 }
