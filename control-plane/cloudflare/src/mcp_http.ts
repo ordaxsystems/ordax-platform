@@ -28,9 +28,9 @@ const OAUTH_SCOPES = ["openid", "email", "offline_access"];
 const NUMBER = { type: "number" };
 const BOOLEAN = { type: "boolean" };
 const DEVICE = { type: "string", description: "ORDAX device UUID returned by ordax_targets." };
-const PROJECT = { type: "string", description: "Registered ORDAX project slug." };
-const REPOSITORY_PROJECT = { type: "string", pattern: "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$", description: "Canonical GitHub owner/repository bound to this ORDAX project; never a local directory or slug." };
-const SPACE = { type: "string", description: "Optional Product Space id used by the grant." };
+const PROJECT = { type: "string", description: "Local Runtime project slug; not a Space UUID, canonical cloud Project ID, or GitHub repository identity." };
+const REPOSITORY_PROJECT = { type: "string", pattern: "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$", description: "Verified GitHub owner/repository connected to one canonical ORDAX Project; not a local path, slug, Space or authorization grant." };
+const SPACE = { type: "string", description: "Optional canonical OrdaX Space UUID for scope disambiguation. Omission never bypasses account, device, project, grant or Runtime policy." };
 const WAIT = { type: "integer", minimum: 0, maximum: 20000, default: 8000, description: "How long the gateway waits for completion before returning a request_id." };
 const STRING_ARRAY = { type: "array", items: STRING, minItems: 1, maxItems: 256 };
 const ENV_OBJECT = { type: "object", maxProperties: 64, additionalProperties: { anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }] } };
@@ -55,7 +55,7 @@ const REPLACEMENTS = {
 
 const TOOLS: ToolSpec[] = [
   { name: "ordax_session", description: "Inspect whether the current ORDAX Product connection is authenticated." },
-  { name: "ordax_profile", description: "Return the stable opaque profile id represented by the authenticated ORDAX credentials." },
+  { name: "ordax_profile", description: "Return the authenticated OrdaX account subject id for connector identity display. Compatibility tool: not an OS Profile, Profile Pack, Space or preferences." },
   { name: "ordax_targets", description: "List authorized ORDAX devices, reported presence, Spaces and grants. Offline devices require their Runtime to reconnect for local work; unknown presence is not proof of connectivity. This does not discover cloud executors or synchronize repository files." },
   { name: "ordax_action_status", description: "Read the status/result of a previously queued ORDAX action.", properties: { request_id: STRING }, required: ["request_id"] },
   { name: "app_intelligence_catalog", description: "Read the compact version-bound App Intelligence catalog from the connected ORDAX device. Use this only to discover which app semantics are available; it grants no execution authority.", action: "intelligence.app_catalog", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
@@ -584,7 +584,7 @@ function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
         ? {
             type: "object",
             properties: {
-              id: { type: "string", minLength: 1, pattern: "\\S" },
+              id: { type: "string", minLength: 1, pattern: "\\S", description: "Opaque authenticated account subject ID; not a Profile Pack or Space ID." },
             },
             required: ["id"],
             additionalProperties: false,

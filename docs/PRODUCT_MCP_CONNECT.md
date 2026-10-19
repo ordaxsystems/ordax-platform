@@ -249,3 +249,71 @@ Ver [ORDAX-AI-CONNECTION-MODES.md](ORDAX-AI-CONNECTION-MODES.md).
 - config MCP de empacotamento: `plugins/ordax-chatgpt/mcp.json`.
 
 Documentos datados de canary/review permanecem como evidência histórica. Quando houver conflito entre uma evidência histórica e o SSOT atual, o `mcp_release` atual e estes documentos canônicos prevalecem.
+
+## Nomenclatura e limites de escopo — 2026-10-19
+
+Este documento é o contrato de **integração MCP**, não uma segunda definição de Space/Perfil. A definição funcional de Space e de Profile Pack permanece em `ordaxsystems/ordax-os/docs/SPACES-AND-PROFILES.md` e `docs/contracts/spaces-and-profile-packs.json`; a autoridade persistente de Conta, Space, Projeto e grants é o PostgreSQL canônico da Platform, com RPCs restritas.
+
+| Conceito | Identidade / responsabilidade | Não confundir com |
+| --- | --- | --- |
+| Conta OrdaX | sujeito autenticado no provedor de identidade do produto; `session.subject_id` | Profile Pack, Space, credencial do dispositivo |
+| `ordax_profile` | nome MCP histórico para o **identificador opaco da conta** (metadado de perfil do conector ChatGPT) | Perfil de preferências, Profile Pack ou Space |
+| Perfil do usuário | preferências e configuração da conta | Profile Pack versionado |
+| Profile Pack | composição versionada de apps/templates/Intelligence para um Space | identidade, Space ou fonte de dados do negócio |
+| Space | ambiente de trabalho persistente, com membros, recursos e vários projetos; `ordax_spaces` | área visual chamada “workspace”, diretório local ou repositório GitHub |
+| Projeto canônico | recurso do Space com identidade `ordax_projects.project_id` | slug local do Runtime ou nome de repositório |
+| Repositório GitHub | origem externa verificada do projeto; `ordax_project_connections` | prova de autorização por si só |
+| Dispositivo/Target | equipamento autorizado e atestado, com presença distinta de identidade | Space ou projeto |
+| Grant | autorização por capability/cliente/escopo/dispositivo | vínculo de projeto, acesso de membro ou política local do Runtime |
+| Capability / MCP Tool | capacidade definida pelo serviço e sua projeção pública no MCP | app instalado, entitlement ou grant |
+| App / Module / Service | respectivamente produto instalável, componente funcional e serviço de execução/autoridade | tool MCP ou Profile Pack |
+
+**Regra de não duplicação:** Platform e OS não podem manter dois Spaces persistentes com identidades incompatíveis. A Surface `ordax.spaces/1` é uma projeção de leitura; `ordax_spaces` e a autoridade RPC existente são a referência de identidade. Projetos locais usam identidade/estado próprios e somente uma **associação explícita** pode ligá-los ao projeto canônico; não fazer equivalência por slug, diretório ou nome GitHub. Fluxos específicos de Flow podem possuir um projeto de conversa próprio, mas não podem usá-lo automaticamente como grant de projeto Runtime.
+
+**Operações MCP:** `ordax_session`, `ordax_profile`, `ordax_targets` e `ordax_action_status` são escopadas pela conta/cliente e seus próprios controles, **sem requisito de Space ou Projeto**. `computer_processes` pertence à família de observação do dispositivo, com autorização e confirmação do Runtime; não é `process_list`. `process_list` e `terminal_exec` são ações de **projeto canônico verificado**, cuja autorização atual exige um Space persistente, vínculo de repositório e duas associações dispositivo/Space e dispositivo/projeto, além de grant específico, atestação e política local. `space_id` opcional no schema não cria Space e não remove esses requisitos.
+
+**Gate #220 / PR #222:** nenhum cadastro fictício deve ser produzido para desbloquear uma operação de dispositivo. O contrato de onboarding Owner é design-only até confirmação de equivalência com `ordax_spaces` do OS, verificação real do GitHub e testes de identidade, revogação, concorrência e E2E. Não habilitar cadastro, merge de migrações ou grants automáticos por mera passagem em teste estático. Ferramentas básicas/observação devem continuar independentes de vínculo artificial de projeto. Não alterar o contrato `ordax_profile` nem os nomes das ferramentas sem migração compatível.
+
+**Verificação de metadados do banco ativo (19/10/2026, somente leitura):** chaves reais `public.ordax_spaces.space_id` e `public.ordax_projects.project_id`; as RPCs `ordax_create_space_v1`, `ordax_create_project_v1` e `ordax_resolve_owner_project_scope_v1` estão presentes. A presença de nomes iguais no OS/Platform não prova por si só uma única rota de implantação para todos os consumidores; confirmar migrations, leitura `/account/spaces` e sessão real antes de liberar o onboarding da #220.
+
+## Inventário de nomes e compatibilidade — 2026-10-19
+
+Inventário de **conceitos**, não nova SSOT de produto: as fontes canônicas permanecem nas autoridades e contratos indicados. Identidades verificadas por leitura dos repositórios e **metadados** (sem linhas de usuário) do PostgreSQL Product ativo.
+
+| Conceito | Nome atual / ambiguidade encontrada | Nome canônico / experiência | Fonte de verdade | Ação de compatibilidade |
+| --- | --- | --- | --- | --- |
+| Identidade | Account, profile, Owner subject, `ordax_profile` | **Conta OrdaX** / account subject | OAuth Platform, `session.subject_id` | preservar nome/output de `ordax_profile` como compatibilidade ChatGPT, corrigir descrição |
+| Preferências da conta | Profile, Account Profile | **Perfil** / account preferences | autoridade de conta OS/Platform | distinguir de Profile Pack e Space, sem novo registro |
+| Composição de vertical | Profile, Pack, Professional Profile | **Pacote de perfil** / Profile Pack versionado | `ordax.profile-packs/1` OS | nunca usar como espaço persistente nem grant |
+| Ambiente de atividade | Space, Workspace, espaço de trabalho | **Espaço** / Space | `ordax_spaces.space_id`, `ordax.spaces/1` como projeção | reconciliar `/account/spaces` e autenticação do OS com o mesmo UUID; não criar outra tabela |
+| Tipo de atividade | profile kind, Space type | **Tipo de espaço** / `domain + subtype` | `ordax_spaces.domain/subtype`, catálogo semântico OS | não inferir providers/entitlement por nome |
+| Trabalho persistente cloud | Project, repo, workspace | **Projeto** / Project | `ordax_projects.project_id`, RPCs Platform | preservar FK para Space; não equiparar a slug/diretório |
+| Trabalho local | Project, `project-N`, slug, Workspace | **Projeto local** / local Runtime project | `ordax.project-catalog/1` (OS), Runtime workspace | associação explícita e verificável ao cloud Project quando necessária |
+| Código externo | project/repository, GitHub account | **Repositório** / repository | GitHub ID/install + `ordax_project_connections` | nunca autorizar por nome de repositório fornecido pelo modelo |
+| Máquina | Target, Device, PC | **Dispositivo** / Device | `ordax_product_devices` + Runtime credentials | identidade, presença, operação e grant são gates separados |
+| Space ⇄ máquina | Space device, target Space | **Associação Espaço–dispositivo** | `ordax_space_devices` | exigir onde operação é escopada pelo Space; não propagar a leitura básica de device |
+| Projeto ⇄ máquina | Device project binding, local project ref | **Vínculo Projeto–dispositivo** | `ordax_device_project_bindings` | sem binding implícito por caminho |
+| Responsável | Owner (Space), Owner (device), operator | **Proprietário** com tipo de autoridade explícito | `ordax_spaces.owner_user_id`, identidade dispositivo e grants próprios | não conceder acesso por simples rótulo Owner |
+| Permissões | Grant, role, capability, entitlement | **Permissão/grant** da ação com escopo | Platform authorization + Runtime policy | não confundir papel de membro, entitlement, capability e grant |
+| Produto instalável | App, Module, Tool, Service | **Aplicativo** / App (Loja) | Store verified catalog / OS app SDK | módulo é componente, MCP tool é entrada, serviço é executor/autoridade |
+| Ferramenta exposta | MCP tool, capability | **Ferramenta MCP** / Tool | `mcp_http.ts` + projection Product | manter nomes públicos e schemas compatíveis |
+| Chat Flow | Flow Project, Task, Run | **Projeto de conversa**, **Tarefa**, **Execução** | OrdaX Flow owner (não Project Runtime) | `/v1/projects` não cria `ordax_projects`; vinculação futura explícita |
+| Área do Studio | Workspace, Project view, Central | **Pasta/Área de trabalho** | Studio UI; Runtime local | nunca usar `Workspace` como alias técnico de Space |
+
+### Matriz de consumidores e sequência sem alteração destrutiva
+
+1. **Identidade e schema:** confirmar roteamento autenticado `/account/spaces` do OS, o mesmo `space_id` no banco da Platform, sem migração por nomes. Comparar migrations instaladas contra fontes versionadas: as RPCs recentes `ordax_mutate_space_lifecycle_v1` / `ordax_mutate_space_membership_v1` do OS ainda não foram observadas no banco consultado.
+2. **Apps/Studio:** manter `workspace.project_create` e `projects.list` para projeto **local**. Um futuro vínculo cloud reutiliza `ordax_projects`, `ordax_project_connections` e bindings existentes sob autorização do Owner; não transformar cliques de criação local em SQL implicitamente.
+3. **MCP:** Core `ordax_session/ordax_profile/ordax_targets/ordax_action_status` permanece independente de Space/Projeto. Computer Control observa/opera o dispositivo com OAuth/atestação/grant/política local conforme ação. Native `terminal_exec` e `process_list` resolvem Projeto + Space canônicos e a permissão exata.
+4. **Runtime/Flow:** Runtime mantém executor local e valida policy; Flow mantém Tasks/chat/Hub sem requisito de boot OS, Studio ou MCP básico.
+5. **Migrações futuras:** se a auditoria de tráfego e IDs provar incongruência, planejar migration aditiva versionada, tradução limitada de versões dos clientes e provas de revogação, concorrência, multiusuário, consentimento e rollback. Não renomear a quente nem habilitar comandos somente para desbloquear o onboarding.
+
+A PR `ordax-platform#222` continua **bloqueada por design** até conclusão dessas provas. Testes estáticos/CI e FKs reais são evidência de modelo, **não** demonstração de sincronismo E2E ou de migrações implantadas em todos os destinos.
+
+## Catálogo publicado e sessão conectada
+
+A projeção Product MCP canônica de 19/10/2026 publica **44 ferramentas**, mas essa contagem é **somente do servidor**. Existem dois grupos distintos de execução nativa: sete ferramentas de **dispositivo** (`computer_terminal_exec`, `computer_process_*`) e sete ferramentas de **projeto** (`terminal_exec`, `process_*`). As primeiras não recebem projeto sintético; as últimas continuam dependendo do vínculo de Projeto e Space autorizado.
+
+Uma conexão do ChatGPT já aberta pode expor uma versão anterior. Nesta conversa, `ordax_session` anunciou 44 ferramentas e a sessão disponibilizou 37; faltavam exatamente as sete operações nativas de dispositivo. O incidente está registrado na [issue #216](https://github.com/ordaxsystems/ordax-platform/issues/216). Compare os **nomes** realmente retornados em `tools/list` na mesma identidade OAuth e URL canônica com os nomes disponibilizados no cliente. Uma mera contagem não aprova funcionalidade nem autorização.
+
+Atualize a conexão pela ação oficial de reconectar/recarregar o plugin ChatGPT. Não registre outro MCP, não altere endpoint ou OAuth, não modifique `tools.listChanged` sem implementar corretamente as notificações MCP e não crie grants só para forçar a exibição. Após a reconexão, exigem-se separadamente presença do Runtime compatível, política local, consentimento e grants Owner, teste negativo e prova E2E real.
