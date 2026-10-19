@@ -71,6 +71,7 @@ const ATTESTED_FILESYSTEM_WRITE_ACTIONS = new Set([
 const ATTESTED_CLIPBOARD_ACTIONS = new Set(["computer.clipboard_read", "computer.clipboard_write"]);
 const ATTESTED_PROCESS_MUTATION_ACTIONS = new Set(["computer.terminate_process"]);
 const ATTESTED_TERMINAL_ACTIONS = new Set(["computer.terminal_exec"]);
+const ATTESTED_DEVICE_PROCESS_ACTIONS = new Set(["computer.process_start", "computer.process_status", "computer.process_list", "computer.process_logs", "computer.process_write_stdin", "computer.process_stop"]);
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   ...OBSERVE_ACTIONS,
   ...INTERACTIVE_ACTIONS,
@@ -79,6 +80,7 @@ export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   ...ATTESTED_CLIPBOARD_ACTIONS,
   ...ATTESTED_PROCESS_MUTATION_ACTIONS,
   ...ATTESTED_TERMINAL_ACTIONS,
+  ...ATTESTED_DEVICE_PROCESS_ACTIONS,
 ]);
 
 function json(value: unknown, status = 200): Response {
@@ -103,6 +105,7 @@ function requiredProfile(action: string): string | null {
   // Observation remains the least-privilege answer for the five capabilities
   // shared with the broader interactive profile.
   if (action === "computer.terminal_exec") return "device-native-terminal";
+  if (ATTESTED_DEVICE_PROCESS_ACTIONS.has(action)) return "device-native-process";
   if (OBSERVE_ACTIONS.has(action)) return OBSERVE_COMPUTER_CONTROL_MODE;
   if (INTERACTIVE_ACTIONS.has(action)) return INTERACTIVE_COMPUTER_CONTROL_MODE;
   // Full filesystem mutations use the existing owner filesystem grant;
@@ -205,6 +208,31 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
       && Array.isArray(value.argv) && value.argv.length >= 1 && value.argv.length <= 256
       && value.argv.every((arg: unknown) => boundedString(arg, 8192));
     return value.shell === true && boundedString(value.command, 32768);
+  }
+  if (ATTESTED_DEVICE_PROCESS_ACTIONS.has(action)) {
+    const identifierValid = isCanonicalUuid(value.process_id);
+    if (action === "computer.process_list") return keysOnly(value, []);
+    if (action === "computer.process_status" || action === "computer.process_stop")
+      return keysOnly(value, ["process_id"]) && identifierValid;
+    if (action === "computer.process_logs")
+      return keysOnly(value, ["process_id", "max_bytes"]) && identifierValid
+        && (value.max_bytes === undefined || boundedInteger(value.max_bytes, 1024, 262144));
+    if (action === "computer.process_write_stdin")
+      return keysOnly(value, ["process_id", "text", "newline"]) && identifierValid
+        && boundedString(value.text, 65536, true)
+        && new TextEncoder().encode(value.text).byteLength <= 65536
+        && (value.newline === undefined || typeof value.newline === "boolean");
+    if (!keysOnly(value, ["argv", "cwd", "env", "wait_seconds"])) return false;
+    if (!Array.isArray(value.argv) || value.argv.length < 1 || value.argv.length > 128
+      || !value.argv.every((item: unknown) => boundedString(item, 8192))) return false;
+    if (value.cwd !== undefined && !boundedString(value.cwd, 4096)) return false;
+    if (value.wait_seconds !== undefined && (typeof value.wait_seconds !== "number"
+      || !Number.isFinite(value.wait_seconds) || value.wait_seconds < 0.1 || value.wait_seconds > 5)) return false;
+    if (value.env !== undefined && (!isRecord(value.env) || Object.keys(value.env).length > 64
+      || !Object.entries(value.env).every(([key, val]) => key.length > 0 && key.length <= 128
+        && !/[=\\x00]/u.test(key) && typeof val === "string" && val.length <= 8192
+        && !val.includes("\\x00")))) return false;
+    return true;
   }
   if (action === "computer.file_stat") {
     return keysOnly(value, ["path"]) && boundedString(value.path, 4096);
