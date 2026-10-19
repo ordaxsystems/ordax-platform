@@ -39,11 +39,7 @@ LEGACY_D1_MIGRATION_ALLOWLIST = {
     "0007_product_device_pairing.sql",
     "0008_product_device_owner.sql",
 }
-LEGACY_OPERATOR_HANDLER_ALLOWLIST = {
-    "provisionDevice",
-    "enqueueJob",
-    "getJob",
-}
+LEGACY_OPERATOR_HANDLER_ALLOWLIST = set()
 
 
 class CloudflareAccountResolutionContractTests(unittest.TestCase):
@@ -401,9 +397,9 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         self.assertNotIn("artifacts_deleted:", source)
         self.assertNotIn("multipart_uploads_aborted:", source)
         self.assertNotIn("deleteDevice", LEGACY_OPERATOR_HANDLER_ALLOWLIST)
-        self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 35)
-        self.assertEqual(sum(cutover["legacy_source_callsite_ceilings"].values()), 35)
-        self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 35)
+        self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 29)
+        self.assertEqual(sum(cutover["legacy_source_callsite_ceilings"].values()), 29)
+        self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 29)
         self.assertFalse(foundation["deployment_ready"])
         self.assertIn(
             "engineering_device_deletion_lifecycle_not_ready",
