@@ -138,7 +138,10 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal(response.status, 200);
   assert.deepEqual(json.result.tools.map((t: any) => t.name), [
     "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
-    "terminal_exec", "process_status", "process_list", "process_logs",
+    "computer_terminal_exec", "terminal_exec",
+    "computer_process_status", "computer_process_list", "computer_process_logs",
+    "computer_process_start", "computer_process_write_stdin", "computer_process_stop",
+    "process_status", "process_list", "process_logs",
     "process_start", "process_write_stdin", "process_stop",
     "computer_windows", "computer_active_window", "computer_screenshot", "computer_screen_info",
     "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
@@ -164,6 +167,9 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal((byName.get("computer_path_remove") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_clipboard_write") as any).annotations.destructiveHint, false);
   assert.equal((byName.get("computer_terminate_process") as any).annotations.destructiveHint, true);
+  assert.equal((byName.get("computer_terminal_exec") as any).annotations.destructiveHint, true);
+  assert.equal((byName.get("computer_process_start") as any).annotations.destructiveHint, true);
+  assert.equal((byName.get("computer_process_status") as any).annotations.readOnlyHint, true);
   assert.equal(calls.session, 1);
   assert.equal(calls.targets, 0);
 });
