@@ -1,4 +1,4 @@
-import { Client } from "pg";
+import { openPostgresSession } from "./data_postgres_driver.ts";
 import { encodePostgresTextArrayLiteral, InvalidPostgresTextArrayError } from "./product_postgres_text_array.ts";
 import {
   canonicalRemoteClient,
@@ -388,7 +388,7 @@ type ReadinessClient = {
 export async function checkCanonicalProductPostgresReadiness(
   env: ProductPostgresEnv,
   createClient: (connectionString: string) => ReadinessClient =
-    connectionString => new Client({ connectionString }),
+    connectionString => openPostgresSession(connectionString),
 ): Promise<ProductPostgresReadiness> {
   const connectionString = configuredConnectionString(env);
   if (!connectionString) return { ok: false, error: "product_postgres_unconfigured" };
@@ -435,9 +435,7 @@ async function callRpc<T>(
   const args = spec.casts.map((cast, index) => `$${index + 1}::${cast}`).join(", ");
   const resultCast = "resultCast" in spec ? `::${spec.resultCast}` : "";
   const query = `select public.${rpc}(${args})${resultCast} as result`;
-  const client = new Client({
-    connectionString,
-  });
+  const client = openPostgresSession(connectionString);
 
   let phase: "connect" | "query" | "decode" = "connect";
   try {
