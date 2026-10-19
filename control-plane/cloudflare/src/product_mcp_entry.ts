@@ -110,6 +110,15 @@ const ATTESTED_DEVICE_CLIPBOARD_TOOLS: ReadonlySet<string> = new Set([
 const ATTESTED_DEVICE_PROCESS_TOOLS: ReadonlySet<string> = new Set([
   "computer_terminate_process",
 ]);
+const ATTESTED_DEVICE_NATIVE_EXECUTION_TOOLS: ReadonlySet<string> = new Set([
+  "computer_terminal_exec",
+  "computer_process_start",
+  "computer_process_status",
+  "computer_process_list",
+  "computer_process_logs",
+  "computer_process_write_stdin",
+  "computer_process_stop",
+]);
 const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_OBSERVE_TOOLS,
   ...ATTESTED_DEVICE_INTERACTIVE_TOOLS,
@@ -118,6 +127,7 @@ const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_FILESYSTEM_MUTATION_TOOLS,
   ...ATTESTED_DEVICE_CLIPBOARD_TOOLS,
   ...ATTESTED_DEVICE_PROCESS_TOOLS,
+  ...ATTESTED_DEVICE_NATIVE_EXECUTION_TOOLS,
 ]);
 export const ATTESTED_PROJECT_NATIVE_TOOLS: ReadonlySet<string> = new Set([
   "terminal_exec", "process_start", "process_status", "process_list",

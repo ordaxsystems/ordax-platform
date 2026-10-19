@@ -58,6 +58,55 @@ const identity = async () => ({
   expiresAt: 2_000_000_000,
 });
 
+test("device process lifecycle validates payload and grant scope independently", async () => {
+  const proc = "66666666-6666-4666-8666-666666666666";
+  const cases: Array<[string, Record<string, unknown>, "read" | "write"]> = [
+    ["computer.process_start", { argv: ["node", "--version"] }, "write"],
+    ["computer.process_status", { process_id: proc }, "read"],
+    ["computer.process_list", {}, "read"],
+    ["computer.process_logs", { process_id: proc, max_bytes: 4096 }, "read"],
+    ["computer.process_write_stdin", { process_id: proc, text: "hello", newline: true }, "write"],
+    ["computer.process_stop", { process_id: proc }, "write"],
+  ];
+  for (const [action, args, mode] of cases) {
+    assert.equal(validAttestedDeviceActionArguments(action, args), true, action);
+    let calls = 0;
+    const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+      authenticate: identity,
+      listTargets: async () => catalog(grantGroup("device-native-process", action, mode)),
+      enqueue: async (_env, input) => {
+        calls++;
+        assert.equal(input.capability, action);
+        assert.equal(input.projectId, null);
+        assert.equal(input.accessMode, mode);
+        return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+      },
+    });
+    assert.equal((await handler(actionRequest(action, args))).status, 202, action);
+    assert.equal(calls, 1);
+    const wrong = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+      authenticate: identity,
+      listTargets: async () => catalog(grantGroup("computer-process-control", action, mode)),
+      enqueue: async () => { throw Error("wrong profile must not enqueue"); },
+    });
+    assert.equal((await wrong(actionRequest(action, args))).status, 403, action);
+  }
+
+  const bad: Array<[string, Record<string, unknown>]> = [
+    ["computer.process_start", { argv: [] }],
+    ["computer.process_start", { argv: ["node"], project: "made-up" }],
+    ["computer.process_start", { argv: ["node"], wait_seconds: 20 }],
+    ["computer.process_list", { project: "fake" }],
+    ["computer.process_status", { process_id: "../escape" }],
+    ["computer.process_logs", { process_id: proc, max_bytes: 99999999 }],
+    ["computer.process_write_stdin", { process_id: proc, text: "A".repeat(66000) }],
+    ["computer.process_stop", { process_id: "" }],
+  ];
+  for (const [action, args] of bad) {
+    assert.equal(validAttestedDeviceActionArguments(action, args), false, action);
+  }
+});
+
 test("device terminal requires its own Owner grant and no project binding", async () => {
   assert.equal(validAttestedDeviceActionArguments("computer.terminal_exec", {
     argv: ["node", "--version"], cwd: "C:\\\\projects", timeout_seconds: 30,

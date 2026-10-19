@@ -94,6 +94,6 @@ jobs:
 
       - name: Verify canonical MCP surface revision exists
         run: |
-          grep -Eq '^const MCP_TOOL_SURFACE_REVISION = "[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+";' control-plane/cloudflare/src/mcp_http.ts
+          node --test control-plane/tests/product_mcp_surface_revision.test.mts
           test -f control-plane/cloudflare/src/index.ts
           test -f control-plane/cloudflare/migrations/0008_product_device_owner.sql

@@ -53,8 +53,6 @@ const REPLACEMENTS = {
   },
 };
 
-const MCP_TOOL_SURFACE_REVISION = "2026-10-18.3";
-
 const TOOLS: ToolSpec[] = [
   { name: "ordax_session", description: "Inspect whether the current ORDAX Product connection is authenticated." },
   { name: "ordax_profile", description: "Return the stable opaque profile id represented by the authenticated ORDAX credentials." },
@@ -92,6 +90,12 @@ const TOOLS: ToolSpec[] = [
   { name: "git_command", description: "Run an approved Git subcommand against a granted project. Repository hooks may execute, but credential/config inspection is blocked and authenticated remote URLs are redacted.", action: "git.command", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, args: { type: "array", items: STRING, minItems: 1, maxItems: 128 }, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "args"] },
   { name: "computer_terminal_exec", description: "Execute a bounded native terminal command on the authorized computer without requiring a project. Requires explicit Owner device-native-terminal or full-computer-control grant.", action: "computer.terminal_exec", properties: { device_id: DEVICE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, env: ENV_OBJECT, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "terminal_exec", description: "Execute a foreground command with the local OS user's permissions. Requires an explicit terminal.exec grant.", action: "terminal.exec", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, env: ENV_OBJECT, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
+  { name: "computer_process_status", description: "Inspect an ORDAX-owned device process.", action: "computer.process_status", properties: { device_id: DEVICE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id"] },
+  { name: "computer_process_list", description: "List supervised device processes.", action: "computer.process_list", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "computer_process_logs", description: "Read bounded logs from an ORDAX-owned device process.", action: "computer.process_logs", properties: { device_id: DEVICE, process_id: STRING, max_bytes: { type: "integer", minimum: 1024, maximum: 262144 }, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id"] },
+  { name: "computer_process_start", description: "Start a supervised process on the authorized device under an explicit Owner grant.", action: "computer.process_start", properties: { device_id: DEVICE, argv: PROCESS_ARGV, cwd: STRING, env: PROCESS_ENV_OBJECT, wait_seconds: { type: "number", minimum: 0.1, maximum: 5 }, wait_for_completion_ms: WAIT }, required: ["device_id", "argv"] },
+  { name: "computer_process_write_stdin", description: "Write bounded stdin to an ORDAX-owned device process.", action: "computer.process_write_stdin", properties: { device_id: DEVICE, process_id: STRING, text: PROCESS_STDIN_TEXT, newline: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id", "text"] },
+  { name: "computer_process_stop", description: "Stop a supervised process owned by ORDAX on the authorized device.", action: "computer.process_stop", properties: { device_id: DEVICE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id"] },
   { name: "process_status", description: "Inspect one ORDAX-owned persistent process.", action: "process.status", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "process_id"] },
   { name: "process_list", description: "List ORDAX-owned persistent processes for a granted project.", action: "process.list", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "process_logs", description: "Read a bounded log tail from an ORDAX-owned persistent process.", action: "process.logs", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, process_id: STRING, max_bytes: { type: "integer", minimum: 1024, maximum: 262144 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "process_id"] },
@@ -190,6 +194,9 @@ const READ_ONLY_TOOLS = new Set([
   "computer_text_read",
   "computer_search",
   "computer_processes",
+  "computer_process_status",
+  "computer_process_list",
+  "computer_process_logs",
   "process_status",
   "process_list",
   "process_logs",
@@ -206,6 +213,9 @@ const DESTRUCTIVE_TOOLS = new Set([
   "git_command",
   "terminal_exec",
   "computer_terminal_exec",
+  "computer_process_start",
+  "computer_process_write_stdin",
+  "computer_process_stop",
   "process_start",
   "process_write_stdin",
   "process_stop",
@@ -247,6 +257,8 @@ const OPEN_WORLD_TOOLS = new Set([
   "git_command",
   "terminal_exec",
   "computer_terminal_exec",
+  "computer_process_start",
+  "computer_process_write_stdin",
   "process_start",
   "process_write_stdin",
   "browser_snapshot",
@@ -300,6 +312,12 @@ const TOOL_TITLES: Record<string, string> = {
   git_command: "Run Git command",
   terminal_exec: "Run project command",
   computer_terminal_exec: "Execute device command",
+  computer_process_status: "Inspect device process",
+  computer_process_list: "List device processes",
+  computer_process_logs: "Read device process logs",
+  computer_process_start: "Start device process",
+  computer_process_write_stdin: "Send device process input",
+  computer_process_stop: "Stop device process",
   process_status: "Inspect persistent process",
   process_list: "List persistent processes",
   process_logs: "Read persistent process logs",
@@ -579,6 +597,23 @@ function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
   });
 }
 
+/**
+ * Deterministic MCP catalog identity, computed from the canonical public tool
+ * definitions (including security annotations, input schemas and descriptions).
+ * Never require a manual version bump when MCP tools are added or changed.
+ */
+export async function mcpCatalogRevision(definitions: readonly JsonObject[]): Promise<string> {
+  const encoded = new TextEncoder().encode(JSON.stringify(definitions));
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `catalog-v1-${hex}`;
+}
+
+let surfaceRevisionPromise: Promise<string> | undefined;
+function currentMcpToolSurfaceRevision(): Promise<string> {
+  return surfaceRevisionPromise ??= mcpCatalogRevision(toolDefinitions());
+}
+
 function specFor(name: string): ToolSpec | undefined {
   return TOOLS.find((tool) => tool.name === name);
 }
@@ -665,14 +700,14 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
         ? {
             ok: true,
             authenticated: true,
-            mcp_tool_surface_revision: MCP_TOOL_SURFACE_REVISION,
+            mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
             mcp_tool_count: advertisedToolCount,
           }
         : {
             ok: false,
             authenticated: false,
             error: "authentication_required",
-            mcp_tool_surface_revision: MCP_TOOL_SURFACE_REVISION,
+            mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
             mcp_tool_count: advertisedToolCount,
           },
       !authenticated,

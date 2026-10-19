@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { createCanonicalProductMcpGateway, resolveOrBootstrapAttestedSession } from "../cloudflare/src/product_mcp_entry.ts";
+import { createCanonicalProductMcpGateway, resolveOrBootstrapAttestedSession, PRODUCT_MCP_DIRECT_TOOLS } from "../cloudflare/src/product_mcp_entry.ts";
 
 const ENV = Object.freeze({
   PRODUCT_AUTH_ISSUER: "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1",
@@ -138,7 +138,10 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal(response.status, 200);
   assert.deepEqual(json.result.tools.map((t: any) => t.name), [
     "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
-    "terminal_exec", "process_status", "process_list", "process_logs",
+    "computer_terminal_exec", "terminal_exec",
+    "computer_process_status", "computer_process_list", "computer_process_logs",
+    "computer_process_start", "computer_process_write_stdin", "computer_process_stop",
+    "process_status", "process_list", "process_logs",
     "process_start", "process_write_stdin", "process_stop",
     "computer_windows", "computer_active_window", "computer_screenshot", "computer_screen_info",
     "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
@@ -164,6 +167,9 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal((byName.get("computer_path_remove") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_clipboard_write") as any).annotations.destructiveHint, false);
   assert.equal((byName.get("computer_terminate_process") as any).annotations.destructiveHint, true);
+  assert.equal((byName.get("computer_terminal_exec") as any).annotations.destructiveHint, true);
+  assert.equal((byName.get("computer_process_start") as any).annotations.destructiveHint, true);
+  assert.equal((byName.get("computer_process_status") as any).annotations.readOnlyHint, true);
   assert.equal(calls.session, 1);
   assert.equal(calls.targets, 0);
 });
@@ -257,8 +263,29 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.equal(response.status, 200);
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
-  assert.equal(json.result.structuredContent.mcp_tool_count, 37);
-  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-18.3");
+  assert.equal(json.result.structuredContent.mcp_tool_count, PRODUCT_MCP_DIRECT_TOOLS.size);
+  assert.match(json.result.structuredContent.mcp_tool_surface_revision, /^catalog-v1-[0-9a-f]{64}$/);
+});
+
+test("advertised MCP projection includes device terminal and supervised processes", async () => {
+  const { handlers } = fakeHandlers();
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers);
+  const response = await gateway(new Request(MCP_URL, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  }));
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  const names = new Set(payload.result.tools.map((tool: { name: string }) => tool.name));
+  assert.equal(names.size, PRODUCT_MCP_DIRECT_TOOLS.size);
+  for (const name of [
+    "computer_terminal_exec",
+    "computer_process_start", "computer_process_status", "computer_process_list",
+    "computer_process_logs", "computer_process_write_stdin", "computer_process_stop",
+  ]) {
+    assert.equal(names.has(name), true, name);
+  }
+  assert.equal(names.has("project_create"), false);
 });
 
 test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {
