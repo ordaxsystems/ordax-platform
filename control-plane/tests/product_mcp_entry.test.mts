@@ -258,7 +258,7 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
   assert.equal(json.result.structuredContent.mcp_tool_count, 37);
-  assert.equal(json.result.structuredContent.mcp_tool_surface_revision, "2026-10-18.3");
+  assert.match(json.result.structuredContent.mcp_tool_surface_revision, /^catalog-v1-[0-9a-f]{64}$/);
 });
 
 test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {
