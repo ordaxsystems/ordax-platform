@@ -129,6 +129,7 @@ const PRODUCT_TYPED_ACTIONS_V2 = new Set([
   "computer.path_move",
   "computer.path_remove",
   "computer.terminate_process",
+  "computer.terminal_exec",
   "project.text_write",
   "project.text_patch",
   "blender.live_status",

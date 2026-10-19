@@ -41,6 +41,7 @@ This document is reviewer-facing evidence for the OpenAI plugin submission. The 
 | `git_diff` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
 | `git_command` | false | true | true | Can execute commands or Git operations that may modify project state and may contact open-ended external destinations; explicit grants and host confirmation are required. |
 | `terminal_exec` | false | true | true | Can execute commands or Git operations that may modify project state and may contact open-ended external destinations; explicit grants and host confirmation are required. |
+| `computer_terminal_exec` | false | true | true | Executes arbitrary commands on an Owner-authorized device without a project; requires an explicit device-native-terminal or full-computer-control grant plus local Full Access policy, with bounded output, timeout and audit. |
 | `process_status` | true | false | false | Reads bounded sanitized state for one ORDAX-owned persistent process without exposing ownership tokens or local control paths. |
 | `process_list` | true | false | false | Lists sanitized ORDAX-owned persistent process state for the granted project without changing process state. |
 | `process_logs` | true | false | false | Reads a bounded tail from an ORDAX-owned process log and does not modify the process. |
