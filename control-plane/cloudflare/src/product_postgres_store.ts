@@ -392,9 +392,10 @@ export async function checkCanonicalProductPostgresReadiness(
 ): Promise<ProductPostgresReadiness> {
   const connectionString = configuredConnectionString(env);
   if (!connectionString) return { ok: false, error: "product_postgres_unconfigured" };
-  const client = createClient(connectionString);
+  let client: ReadinessClient | null = null;
   let phase: "connect" | "query" | "decode" = "connect";
   try {
+    client = createClient(connectionString);
     await client.connect();
     phase = "query";
     const result = await client.query("select 1::int as alive");
@@ -408,7 +409,9 @@ export async function checkCanonicalProductPostgresReadiness(
     // belong in an unauthenticated readiness response.
     return { ok: false, error: "product_postgres_unavailable", failure_stage: phase };
   } finally {
-    try { await client.end(); } catch { /* Connection cleanup cannot mask probe outcome. */ }
+    if (client) {
+      try { await client.end(); } catch { /* Connection cleanup cannot mask probe outcome. */ }
+    }
   }
 }
 
