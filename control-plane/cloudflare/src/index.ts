@@ -28,7 +28,6 @@ interface Env extends ProductAuthEnv, ProductPostgresEnv {
   DB: D1Database;
   ARTIFACTS: R2Bucket;
   DEVICE_SESSIONS: DurableObjectNamespace<DeviceSession>;
-  ORDAX_OPERATOR_TOKEN: string;
   OPENAI_APPS_CHALLENGE?: string;
 }
 
@@ -276,18 +275,6 @@ function actionAllowed(value: string): boolean {
     || ACTION_PREFIXES.some((prefix) => value.startsWith(prefix));
 }
 
-async function operatorAuthorized(request: Request, env: Env): Promise<boolean> {
-  const auth = request.headers.get("authorization") ?? "";
-  if (!env.ORDAX_OPERATOR_TOKEN || !auth.startsWith("Bearer ")) return false;
-  const supplied = auth.slice(7);
-  if (supplied.length !== env.ORDAX_OPERATOR_TOKEN.length) return false;
-  const [a, b] = await Promise.all([
-    sha256Text(supplied),
-    sha256Text(env.ORDAX_OPERATOR_TOKEN),
-  ]);
-  return a === b;
-}
-
 async function authenticateDevice(
   env: Env,
   deviceId: string,
@@ -484,120 +471,6 @@ function normalizedStringArray(
     result.add(item);
   }
   return [...result].sort();
-}
-
-async function provisionDevice(request: Request, env: Env): Promise<Response> {
-  if (!await operatorAuthorized(request, env)) return json({ ok: false, error: "operator_unauthorized" }, 401);
-  const body = await parseSmallJson(request, 16 * 1024);
-  if (!body) return json({ ok: false, error: "invalid_json" }, 400);
-
-  const deviceId = typeof body.device_id === "string" && UUID_RE.test(body.device_id)
-    ? body.device_id
-    : crypto.randomUUID();
-  const name = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "OrdaX Device";
-  if (!name) return json({ ok: false, error: "device_name_required" }, 400);
-
-  const token = randomHex(32);
-  const tokenSha256 = await sha256Text(token);
-  const createdAt = nowIso();
-  await env.DB.prepare(
-    `INSERT INTO ordax_devices (id, name, token_sha256, created_at, revoked_at)
-     VALUES (?1, ?2, ?3, ?4, NULL)
-     ON CONFLICT(id) DO UPDATE SET
-       name = excluded.name,
-       token_sha256 = excluded.token_sha256,
-       revoked_at = NULL`,
-  ).bind(deviceId, name, tokenSha256, createdAt).run();
-
-  return json({
-    ok: true,
-    device_id: deviceId,
-    device_token: token,
-    protocol: "cloudflare-v3",
-  }, 201);
-}
-
-async function enqueueJob(request: Request, env: Env): Promise<Response> {
-  if (!await operatorAuthorized(request, env)) return json({ ok: false, error: "operator_unauthorized" }, 401);
-  const body = await parseSmallJson(request);
-  if (!body) return json({ ok: false, error: "invalid_json" }, 400);
-
-  const deviceId = typeof body.device_id === "string" ? body.device_id : "";
-  const action = typeof body.action === "string" ? body.action : "";
-  const project = body.project == null ? null : typeof body.project === "string" ? body.project : "";
-  if (!UUID_RE.test(deviceId) || !actionAllowed(action) || project === "") {
-    return json({ ok: false, error: "job_invalid" }, 400);
-  }
-  const device = await env.DB.prepare(
-    "SELECT id FROM ordax_devices WHERE id = ?1 AND revoked_at IS NULL",
-  ).bind(deviceId).first();
-  if (!device) return json({ ok: false, error: "device_not_found" }, 404);
-
-  const payload = isRecord(body.payload) ? { ...body.payload } : {};
-  if (project) {
-    if (payload.project != null && payload.project !== project) {
-      return json({ ok: false, error: "project_conflict" }, 400);
-    }
-    payload.project = project;
-  }
-
-  const payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
-  if (payloadBytes.byteLength > 64 * 1024) {
-    return json({ ok: false, error: "payload_too_large" }, 413);
-  }
-  const payloadB64 = bytesToBase64(payloadBytes);
-  const payloadSha256 = await sha256Text(new TextDecoder().decode(payloadBytes));
-  const jobId = crypto.randomUUID();
-  const effectId = crypto.randomUUID();
-  const createdAt = nowIso();
-
-  await env.DB.prepare(
-    `INSERT INTO ordax_jobs
-      (id, device_id, capability, payload_canonical_b64, payload_sha256, status,
-       effect_id, execution_epoch, created_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, 'queued', ?6, 0, ?7)`,
-  ).bind(jobId, deviceId, action, payloadB64, payloadSha256, effectId, createdAt).run();
-
-  await wakeDeviceSession(env, deviceId);
-
-  return json({ ok: true, job_id: jobId, effect_id: effectId, status: "queued" }, 201);
-}
-
-async function getJob(request: Request, env: Env, jobId: string): Promise<Response> {
-  if (!await operatorAuthorized(request, env)) {
-    return json({ ok: false, error: "operator_unauthorized" }, 401);
-  }
-  if (!UUID_RE.test(jobId)) return json({ ok: false, error: "job_id_invalid" }, 400);
-
-  const row = await env.DB.prepare(
-    `SELECT id, device_id, capability, status, effect_id, attempt_id, lease_id,
-            execution_epoch, agent_instance_id, boot_id, lease_expires_at,
-            report_id, result_json, result_sha256, error_code,
-            created_at, started_at, finished_at
-     FROM ordax_jobs WHERE id = ?1`,
-  ).bind(jobId).first<Record<string, unknown>>();
-  if (!row) return json({ ok: false, error: "job_not_found" }, 404);
-
-  const events = await env.DB.prepare(
-    `SELECT stage, message, progress_percent, created_at
-     FROM ordax_job_events WHERE job_id = ?1 ORDER BY id ASC LIMIT 200`,
-  ).bind(jobId).all();
-  const artifacts = await env.DB.prepare(
-    `SELECT id, file_name, kind, content_type, sha256, size_bytes, created_at
-     FROM ordax_artifacts WHERE job_id = ?1 ORDER BY created_at ASC`,
-  ).bind(jobId).all();
-
-  let result: unknown = null;
-  if (typeof row.result_json === "string" && row.result_json) {
-    try { result = JSON.parse(row.result_json); } catch { result = null; }
-  }
-  const { result_json: _ignored, ...publicRow } = row;
-  return json({
-    ok: true,
-    job: { ...publicRow, result },
-    events: events.results ?? [],
-    artifacts: artifacts.results ?? [],
-  });
 }
 
 async function recoverTerminalReport(request: Request, env: Env): Promise<Response> {
@@ -1386,7 +1259,7 @@ export default {
       return json({ ok: false, error: "legacy_product_pairing_retired" }, 410);
     }
     if (request.method === "POST" && url.pathname === "/v3/devices") {
-      return provisionDevice(request, env);
+      return json({ ok: false, error: "legacy_operator_device_provision_retired" }, 410);
     }
     if (request.method === "GET" && url.pathname === "/oauth/consent") {
       // Supabase OAuth consent belongs to the first-party OrdaX Web owner.
@@ -1447,10 +1320,10 @@ export default {
       return json({ ok: false, error: "legacy_product_grants_retired" }, 410);
     }
     if (request.method === "POST" && url.pathname === "/v3/jobs") {
-      return enqueueJob(request, env);
+      return json({ ok: false, error: "legacy_operator_job_enqueue_retired" }, 410);
     }
     if (request.method === "GET" && parts[0] === "v3" && parts[1] === "jobs" && parts.length === 3) {
-      return getJob(request, env, parts[2]);
+      return json({ ok: false, error: "legacy_operator_job_read_retired" }, 410);
     }
     if (parts[0] === "v3" && parts[1] === "artifacts" && parts.length === 4) {
       const action = url.searchParams.get("action") ?? "";
