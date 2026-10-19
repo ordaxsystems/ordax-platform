@@ -223,23 +223,16 @@ class DeviceTransportContractTests(unittest.TestCase):
             self.assertNotIn(f'"{action}"', project_block)
 
 
-    def test_operator_job_prefixes_cover_typed_computer_runtime_surfaces(self) -> None:
+    def test_retired_operator_job_prefixes_cannot_be_resurrected(self) -> None:
         root = Path(__file__).resolve().parents[1]
         worker = (
             root / "control-plane" / "cloudflare" / "src" / "index.ts"
         ).read_text(encoding="utf-8")
-        prefix_block = worker.split(
-            "const ACTION_PREFIXES = [", 1
-        )[1].split("];", 1)[0]
-        for prefix in (
-            "workspace.",
-            "terminal.",
-            "process.",
-            "browser.",
-            "computer.",
-        ):
-            self.assertIn(f'"{prefix}"', prefix_block)
-        self.assertNotIn('"shell."', prefix_block)
+        # Global-operator D1 enqueue has been retired. No prefix-based
+        # capability authorization may be reintroduced in this Worker.
+        self.assertNotIn("const ACTION_PREFIXES = [", worker)
+        self.assertNotIn("function actionAllowed(", worker)
+        self.assertIn('error: "legacy_operator_job_enqueue_retired"', worker)
 
 
     def test_artifact_retention_remains_a_canonical_deployment_blocker(self) -> None:
