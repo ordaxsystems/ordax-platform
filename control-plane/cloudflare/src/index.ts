@@ -167,7 +167,9 @@ export default {
       return handleProductDeviceTransport(request,env);
     }
     if (request.method === "POST" && path === "/v3/device/setup") return deviceSetup(request,env);
-    if (request.method === "GET" && path === "/v3/product/session") return productOwnerAccountSession(request,env);
+    if (request.method === "GET" && path === "/v3/product/session") {
+      return productOwnerAccountSession(request, env);
+    }
     if (request.method === "GET" && path === "/v3/product/targets") return createCanonicalProductMcpReadHandlers(env).targets(request);
     if (request.method === "GET" && parts.length===4 && parts[0]==="v3"
       && parts[1]==="product" && parts[2]==="actions") {
@@ -178,6 +180,9 @@ export default {
     }
     if (path === "/v3/product/actions" && request.method === "POST") {
       return json({ok:false,error:"legacy_product_action_retired"},410);
+    }
+    if (path === "/v3/device/product-pairings" || path === "/v3/product/device-links" || path.startsWith("/v3/product/device-links/")) {
+      return json({ ok: false, error: "legacy_product_pairing_retired" }, 410);
     }
     const retiredGrantSegments = ["device-computer-grants", "device-intelligence-grants", "project-capability-grants"];
     if (retiredGrantSegments.some(segment => path.startsWith("/v3/product/" + segment))) {
