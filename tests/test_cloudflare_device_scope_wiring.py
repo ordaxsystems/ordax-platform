@@ -41,7 +41,7 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
         self.assertIn("handleProductDeviceTransport(request,env)", self.worker)
         self.assertIn("handleProductDevicePresence(request, env)", self.worker)
         self.assertNotIn("from \"./product_action_scope\"", self.worker)
-        self.assertIn('from "./product_action_scope"', self.mcp)
+        self.assertIn('from "./product_action_scope.ts"', self.mcp)
 
     def test_device_scope_union_is_explicit(self) -> None:
         self.assertTrue(self.computer_device_actions)
