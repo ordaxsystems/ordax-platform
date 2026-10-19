@@ -249,3 +249,27 @@ Ver [ORDAX-AI-CONNECTION-MODES.md](ORDAX-AI-CONNECTION-MODES.md).
 - config MCP de empacotamento: `plugins/ordax-chatgpt/mcp.json`.
 
 Documentos datados de canary/review permanecem como evidência histórica. Quando houver conflito entre uma evidência histórica e o SSOT atual, o `mcp_release` atual e estes documentos canônicos prevalecem.
+
+## Nomenclatura e limites de escopo — 2026-10-19
+
+Este documento é o contrato de **integração MCP**, não uma segunda definição de Space/Perfil. A definição funcional de Space e de Profile Pack permanece em `ordaxsystems/ordax-os/docs/SPACES-AND-PROFILES.md` e `docs/contracts/spaces-and-profile-packs.json`; a autoridade persistente de Conta, Space, Projeto e grants é o PostgreSQL canônico da Platform, com RPCs restritas.
+
+| Conceito | Identidade / responsabilidade | Não confundir com |
+| --- | --- | --- |
+| Conta OrdaX | sujeito autenticado no provedor de identidade do produto; `session.subject_id` | Profile Pack, Space, credencial do dispositivo |
+| `ordax_profile` | nome MCP histórico para o **identificador opaco da conta** (metadado de perfil do conector ChatGPT) | Perfil de preferências, Profile Pack ou Space |
+| Perfil do usuário | preferências e configuração da conta | Profile Pack versionado |
+| Profile Pack | composição versionada de apps/templates/Intelligence para um Space | identidade, Space ou fonte de dados do negócio |
+| Space | ambiente de trabalho persistente, com membros, recursos e vários projetos; `ordax_spaces` | área visual chamada “workspace”, diretório local ou repositório GitHub |
+| Projeto canônico | recurso do Space com identidade `ordax_projects.id` | slug local do Runtime ou nome de repositório |
+| Repositório GitHub | origem externa verificada do projeto; `ordax_project_connections` | prova de autorização por si só |
+| Dispositivo/Target | equipamento autorizado e atestado, com presença distinta de identidade | Space ou projeto |
+| Grant | autorização por capability/cliente/escopo/dispositivo | vínculo de projeto, acesso de membro ou política local do Runtime |
+| Capability / MCP Tool | capacidade definida pelo serviço e sua projeção pública no MCP | app instalado, entitlement ou grant |
+| App / Module / Service | respectivamente produto instalável, componente funcional e serviço de execução/autoridade | tool MCP ou Profile Pack |
+
+**Regra de não duplicação:** Platform e OS não podem manter dois Spaces persistentes com identidades incompatíveis. A Surface `ordax.spaces/1` é uma projeção de leitura; `ordax_spaces` e a autoridade RPC existente são a referência de identidade. Projetos locais usam identidade/estado próprios e somente uma **associação explícita** pode ligá-los ao projeto canônico; não fazer equivalência por slug, diretório ou nome GitHub. Fluxos específicos de Flow podem possuir um projeto de conversa próprio, mas não podem usá-lo automaticamente como grant de projeto Runtime.
+
+**Operações MCP:** `ordax_session`, `ordax_profile`, `ordax_targets` e `ordax_action_status` são escopadas pela conta/cliente e seus próprios controles, **sem requisito de Space ou Projeto**. `computer_processes` pertence à família de observação do dispositivo, com autorização e confirmação do Runtime; não é `process_list`. `process_list` e `terminal_exec` são ações de **projeto canônico verificado**, cuja autorização atual exige um Space persistente, vínculo de repositório e duas associações dispositivo/Space e dispositivo/projeto, além de grant específico, atestação e política local. `space_id` opcional no schema não cria Space e não remove esses requisitos.
+
+**Gate #220 / PR #222:** nenhum cadastro fictício deve ser produzido para desbloquear uma operação de dispositivo. O contrato de onboarding Owner é design-only até confirmação de equivalência com `ordax_spaces` do OS, verificação real do GitHub e testes de identidade, revogação, concorrência e E2E. Não habilitar cadastro, merge de migrações ou grants automáticos por mera passagem em teste estático. Ferramentas básicas/observação devem continuar independentes de vínculo artificial de projeto. Não alterar o contrato `ordax_profile` nem os nomes das ferramentas sem migração compatível.
