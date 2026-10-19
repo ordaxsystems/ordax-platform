@@ -203,6 +203,22 @@ class McpReleaseContract(unittest.TestCase):
                 with self.assertRaises(McpReleaseError): validate(f,self.config)
                 with self.assertRaises(McpReleaseError): validate_interactive_candidate(f,self.config)
 
+    def test_chatgpt_refresh_contract_keeps_catalog_and_grants_separate(self):
+        doc = (ROOT / "docs/CHATGPT-CUSTOM-MCP-SERVER.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("https://mcp.ordax.com.br/mcp", doc)
+        self.assertIn("control-plane/cloudflare/src/mcp_http.ts", doc)
+        self.assertIn("control-plane/cloudflare/src/product_mcp_entry.ts", doc)
+        self.assertIn("Atualizar ferramentas", doc)
+        self.assertIn("terminal_exec", doc)
+        self.assertIn("process_list", doc)
+        self.assertIn("project-native-terminal", doc)
+        self.assertIn("project-native-process", doc)
+        self.assertIn("snapshot anterior", doc)
+        self.assertNotIn("18 para 23 tools", doc)
+        self.assertNotIn("reinstalar o servidor para adicionar tools", doc)
+
     def test_public_deployment_smoke_requires_actual_hyperdrive_sql_readiness(self):
         source = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text(
             encoding="utf-8"
