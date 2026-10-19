@@ -53,8 +53,6 @@ const REPLACEMENTS = {
   },
 };
 
-const MCP_TOOL_SURFACE_REVISION = "2026-10-18.3";
-
 const TOOLS: ToolSpec[] = [
   { name: "ordax_session", description: "Inspect whether the current ORDAX Product connection is authenticated." },
   { name: "ordax_profile", description: "Return the stable opaque profile id represented by the authenticated ORDAX credentials." },
@@ -599,6 +597,23 @@ function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
   });
 }
 
+/**
+ * Deterministic MCP catalog identity, computed from the canonical public tool
+ * definitions (including security annotations, input schemas and descriptions).
+ * Never require a manual version bump when MCP tools are added or changed.
+ */
+export async function mcpCatalogRevision(definitions: readonly JsonObject[]): Promise<string> {
+  const encoded = new TextEncoder().encode(JSON.stringify(definitions));
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `catalog-v1-${hex}`;
+}
+
+let surfaceRevisionPromise: Promise<string> | undefined;
+function currentMcpToolSurfaceRevision(): Promise<string> {
+  return surfaceRevisionPromise ??= mcpCatalogRevision(toolDefinitions());
+}
+
 function specFor(name: string): ToolSpec | undefined {
   return TOOLS.find((tool) => tool.name === name);
 }
@@ -685,14 +700,14 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
         ? {
             ok: true,
             authenticated: true,
-            mcp_tool_surface_revision: MCP_TOOL_SURFACE_REVISION,
+            mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
             mcp_tool_count: advertisedToolCount,
           }
         : {
             ok: false,
             authenticated: false,
             error: "authentication_required",
-            mcp_tool_surface_revision: MCP_TOOL_SURFACE_REVISION,
+            mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
             mcp_tool_count: advertisedToolCount,
           },
       !authenticated,
