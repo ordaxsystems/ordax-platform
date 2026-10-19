@@ -16,7 +16,7 @@ const WRITE_ACTIONS = new Set<string>([
   "computer.mouse_move", "computer.path_move", "computer.path_remove", "computer.scroll",
   "computer.terminate_process", "computer.text_patch", "computer.text_write", "computer.type",
   "browser.click", "browser.navigate", "browser.start", "browser.stop", "browser.type",
-  "terminal.exec", "process.start", "process.write_stdin", "process.stop",
+  "computer.terminal_exec", "terminal.exec", "process.start", "process.write_stdin", "process.stop",
 ]);
 
 export function productCapabilityAccessMode(capability: string): "read" | "write" {
@@ -42,6 +42,7 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
   ...computerProfiles,
   "app-intelligence-read": profile("device", APP_INTELLIGENCE_DEVICE_ACTIONS),
   "project-browser-automation": profile("project", PROJECT_BROWSER_ACTIONS),
+  "device-native-terminal": profile("device", ["computer.terminal_exec"]),
   "project-native-terminal": profile("project", ["terminal.exec"]),
   "project-native-process": profile("project", [
     "process.start", "process.status", "process.list", "process.logs",

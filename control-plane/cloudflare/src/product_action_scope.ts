@@ -49,6 +49,7 @@ export const COMPUTER_DEVICE_ACTIONS = new Set<string>([
   "computer.scroll",
   "computer.search",
   "computer.terminate_process",
+  "computer.terminal_exec",
   "computer.text_patch",
   "computer.text_read",
   "computer.text_write",

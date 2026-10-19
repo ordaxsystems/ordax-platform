@@ -58,6 +58,42 @@ const identity = async () => ({
   expiresAt: 2_000_000_000,
 });
 
+test("device terminal requires its own Owner grant and no project binding", async () => {
+  assert.equal(validAttestedDeviceActionArguments("computer.terminal_exec", {
+    argv: ["node", "--version"], cwd: "C:\\\\projects", timeout_seconds: 30,
+  }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.terminal_exec", {
+    argv: ["node"], command: "echo unsafe", shell: true,
+  }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.terminal_exec", {
+    argv: [], timeout_seconds: 0,
+  }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.terminal_exec", {
+    command: "echo ok", shell: true,
+  }), true);
+  let calls = 0;
+  const args = { argv: ["node", "--version"] };
+  const granted = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("device-native-terminal", "computer.terminal_exec", "write")),
+    enqueue: async (_env, input) => {
+      calls += 1;
+      assert.equal(input.capability, "computer.terminal_exec");
+      assert.equal(input.projectId, null);
+      assert.equal(input.accessMode, "write");
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+  });
+  assert.equal((await granted(actionRequest("computer.terminal_exec", args))).status, 202);
+  assert.equal(calls, 1);
+  const denied = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("computer-filesystem", "computer.terminal_exec", "write")),
+    enqueue: async () => { throw Error("must not enqueue"); },
+  });
+  assert.equal((await denied(actionRequest("computer.terminal_exec", args))).status, 403);
+});
+
 test("attested device argument allowlist covers observation, interactive and promoted safe reads", () => {
   assert.equal(validAttestedDeviceActionArguments("computer.access_status", {}), true);
   assert.equal(validAttestedDeviceActionArguments("computer.active_window", {}), true);
