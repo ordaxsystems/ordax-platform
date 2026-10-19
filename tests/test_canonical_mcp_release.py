@@ -203,6 +203,17 @@ class McpReleaseContract(unittest.TestCase):
                 with self.assertRaises(McpReleaseError): validate(f,self.config)
                 with self.assertRaises(McpReleaseError): validate_interactive_candidate(f,self.config)
 
+    def test_public_deployment_smoke_requires_actual_hyperdrive_sql_readiness(self):
+        source = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text(
+            encoding="utf-8"
+        )
+        # The OAuth issuer may be healthy while Hyperdrive is disconnected.
+        # A public smoke that only checks OAuth could approve that outage.
+        self.assertIn("ready=get('/ready')", source)
+        self.assertIn("assert ready.get('oauth_discovery_ready') is True, ready", source)
+        self.assertIn("assert ready.get('postgres_ready') is True, ready", source)
+        self.assertIn("assert ready.get('supports_remote_actions') is True, ready", source)
+
     def test_target_discovery_postgres_changes_trigger_every_mcp_release_gate(self):
         # The target-discovery grant RPC is part of the canonical MCP read
         # authority. An edit to this store must never evade canary, bundle,
