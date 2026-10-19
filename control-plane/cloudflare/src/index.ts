@@ -160,7 +160,9 @@ export default {
       const page=publicProductPage(path);
       if(page) return page;
     }
-    if (path === PRODUCT_DEVICE_PRESENCE_PATH) return handleProductDevicePresence(request,env);
+    if (url.pathname === PRODUCT_DEVICE_PRESENCE_PATH) {
+      return handleProductDevicePresence(request, env);
+    }
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX || path.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX+"/")) {
       return handleProductDeviceTransport(request,env);
     }
@@ -171,7 +173,17 @@ export default {
       && parts[1]==="product" && parts[2]==="actions") {
       return createCanonicalProductMcpReadHandlers(env).getAction(request,parts[3]);
     }
-    const legacy = path === "/mcp" || path === "/v3/device/ws"
+    if (path === "/mcp" || path === "/.well-known/oauth-protected-resource") {
+      return json({ok:false,error:"legacy_mcp_retired"},410);
+    }
+    if (path === "/v3/product/actions" && request.method === "POST") {
+      return json({ok:false,error:"legacy_product_action_retired"},410);
+    }
+    const retiredGrantSegments = ["device-computer-grants", "device-intelligence-grants", "project-capability-grants"];
+    if (retiredGrantSegments.some(segment => path.startsWith("/v3/product/" + segment))) {
+      return json({ ok: false, error: "legacy_product_grants_retired" }, 410);
+    }
+    const legacy = path === "/v3/device/ws"
       || path === "/v3/device/recover-report" || path === "/v3/devices" || path === "/v3/jobs"
       || path.startsWith("/v3/jobs/") || path.startsWith("/v3/artifacts/")
       || path.startsWith("/v3/product-grants") || path.startsWith("/v3/product/device-links")
