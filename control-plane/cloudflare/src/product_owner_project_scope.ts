@@ -1,4 +1,4 @@
-import { Client } from "pg";
+import { openPostgresSession } from "./data_postgres_driver.ts";
 import {
   authenticateProductRequest,
   type ProductAuthEnv,
@@ -56,9 +56,7 @@ export async function resolveOwnerProjectScope(
     throw new Error("owner_project_scope_invalid");
   }
 
-  const client = new Client({
-    connectionString,
-  });
+  const client = openPostgresSession(connectionString);
   try {
     await client.connect();
     const response = await client.query(

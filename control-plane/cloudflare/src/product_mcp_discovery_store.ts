@@ -1,4 +1,4 @@
-import { Client } from "pg";
+import { openPostgresSession } from "./data_postgres_driver.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { ProductPostgresError, safePostgresFailure, type ProductPostgresEnv } from "./product_postgres_store.ts";
 
@@ -50,7 +50,7 @@ export async function ensureProductMcpTargetDiscovery(
   const postgresUrl = connectionString(env);
   const client: DiscoveryClient = dependencies.createClient
     ? dependencies.createClient(postgresUrl)
-    : new Client({ connectionString: postgresUrl });
+    : openPostgresSession(postgresUrl);
   let phase: "connect" | "query" | "decode" = "connect";
   try {
     await client.connect();

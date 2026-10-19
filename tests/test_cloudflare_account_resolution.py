@@ -363,7 +363,9 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         self.assertNotIn("SUPABASE_SERVER_KEY", adapter)
         self.assertNotIn("/rest/v1/rpc/", adapter)
         self.assertIn('env.POSTGRES?.connectionString', adapter)
-        self.assertIn('import { Client } from "pg"', adapter)
+        self.assertIn('import { openPostgresSession } from "./data_postgres_driver.ts"', adapter)
+        driver = (CLOUDFLARE_SRC / "data_postgres_driver.ts").read_text(encoding="utf-8")
+        self.assertIn('import { Client } from "pg"', driver)
         self.assertEqual(package["dependencies"]["pg"], "8.23.1")
         self.assertNotIn("worker_hyperdrive_adapter_not_implemented", blockers)
 

@@ -123,7 +123,9 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
 
     def test_worker_adapter_uses_hyperdrive_without_backend_secret(self) -> None:
         lowered = self.adapter.lower()
-        self.assertIn('import { client } from "pg"', lowered)
+        self.assertIn('import { openpostgressession } from "./data_postgres_driver.ts"', lowered)
+        driver = (ROOT / "control-plane/cloudflare/src/data_postgres_driver.ts").read_text(encoding="utf-8").lower()
+        self.assertIn('import { client } from "pg"', driver)
         self.assertIn("env.postgres?.connectionstring", lowered)
         self.assertIn("await client.connect()", lowered)
         self.assertIn("client.query(query, values)", lowered)

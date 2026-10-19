@@ -1,4 +1,4 @@
-import { Client } from "pg";
+import { openPostgresSession } from "./data_postgres_driver.ts";
 import {
   ProductPostgresError,
   type ProductPostgresEnv,
@@ -71,9 +71,7 @@ function connectionString(env: ProductPostgresEnv): string {
 
 async function call<T>(env: ProductPostgresEnv, rpc: RpcName, values: JsonObject): Promise<T> {
   const spec = RPCS[rpc];
-  const client = new Client({
-    connectionString: connectionString(env),
-  });
+  const client = openPostgresSession(connectionString(env));
   const args = spec.casts.map((cast, index) => `$${index + 1}::${cast}`).join(", ");
   const query = `select public.${rpc}(${args}) as result`;
   try {
