@@ -177,13 +177,15 @@ class CloudflareDirectDeployGateTests(unittest.TestCase):
         with self.assertRaisesRegex(gate.DeployGateError, "public browser key"):
             self.validate()
 
-    def test_do_and_r2_bindings_are_enforced(self):
-        self.wrangler["r2_buckets"][0]["bucket_name"] = "incorrect"
-        with self.assertRaisesRegex(gate.DeployGateError, "R2 bucket"):
+    def test_retired_do_and_r2_bindings_are_forbidden(self):
+        self.assertNotIn("r2_buckets", self.wrangler)
+        self.assertNotIn("durable_objects", self.wrangler)
+        self.wrangler["r2_buckets"] = [{"binding": "ARTIFACTS", "bucket_name": self.foundation["r2_bucket"]}]
+        with self.assertRaisesRegex(gate.DeployGateError, "retired artifact R2"):
             self.validate()
-        self.wrangler["r2_buckets"][0]["bucket_name"] = self.foundation["r2_bucket"]
-        self.wrangler["durable_objects"]["bindings"][0]["class_name"] = "Changed"
-        with self.assertRaisesRegex(gate.DeployGateError, "Durable Objects"):
+        self.wrangler.pop("r2_buckets")
+        self.wrangler["durable_objects"] = {"bindings": [{"name": "DEVICE_SESSIONS", "class_name": "DeviceSession"}]}
+        with self.assertRaisesRegex(gate.DeployGateError, "retired Durable Objects"):
             self.validate()
 
     def test_direct_guard_rejects_actual_not_ready_foundation(self):

@@ -1,4 +1,3 @@
-import { DurableObject } from "cloudflare:workers";
 import { authenticateProductRequest, productOwnerAccountSession, productAuthConfigured, type ProductAuthEnv } from "./product_auth";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads";
 import { openAiAppsChallenge, publicProductPage } from "./public_pages";
@@ -202,11 +201,3 @@ export default {
     return json({ok:false,error:"not_found"},404);
   },
 };
-
-// Cloudflare Durable Object migrations may reference the exported class.
-// All legacy sessions fail closed: no D1 binding and no engineering queue.
-export class DeviceSession extends DurableObject<Env> {
-  async fetch(): Promise<Response> {
-    return json({ok:false,error:"legacy_device_session_retired"},410);
-  }
-}

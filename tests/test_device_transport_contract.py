@@ -57,7 +57,8 @@ class DeviceTransportContractTests(unittest.TestCase):
         self.assertIn("enrollProductDevice(env,", worker)
         self.assertIn("identifyProductDevice(env,", worker)
         self.assertNotIn("env.DEVICE_SESSIONS.get(", worker)
-        self.assertIn('error:"legacy_device_session_retired"', worker)
+        self.assertNotIn("class DeviceSession", worker)
+        self.assertNotIn("DurableObject", worker)
 
     def test_retired_operator_and_artifact_routes_fail_closed(self):
         root = Path(__file__).resolve().parents[1]

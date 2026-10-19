@@ -24,15 +24,3 @@ PRODUCT_AUTH_JWKS_URL = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1/.well-
 binding = "POSTGRES"
 id = "4b601ec5815f43259bd8040053825d2a"
 
-[[r2_buckets]]
-binding = "ARTIFACTS"
-bucket_name = "ordax-device-artifacts"
-
-[[durable_objects.bindings]]
-name = "DEVICE_SESSIONS"
-class_name = "DeviceSession"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["DeviceSession"]
-
