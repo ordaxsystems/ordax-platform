@@ -46,8 +46,6 @@ const CONTROL_PLANE_CAPABILITIES = [
   "product_typed_actions_v2",
 ];
 
-const PRODUCT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}$/;
-const PROJECT_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const PRODUCT_READ_ONLY_ACTIONS = new Set([
   ...APP_INTELLIGENCE_DEVICE_ACTIONS,
   "projects.list",
