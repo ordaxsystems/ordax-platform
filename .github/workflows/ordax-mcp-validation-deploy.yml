@@ -143,6 +143,7 @@ jobs:
           ready=get('/ready')
           assert ready.get('ok') is True, ready
           assert ready.get('oauth_discovery_ready') is True, ready
+          assert ready.get('postgres_ready') is True, ready
           assert ready.get('supports_attested_remote_reads') is True, ready
           assert ready.get('supports_remote_actions') is True, ready
           print('ORDAX_MCP_PUBLIC_ATTESTED_INTERACTIVE_SMOKE=PASS')
