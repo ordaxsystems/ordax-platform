@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { createCanonicalProductMcpGateway, resolveOrBootstrapAttestedSession } from "../cloudflare/src/product_mcp_entry.ts";
+import { createCanonicalProductMcpGateway, resolveOrBootstrapAttestedSession, PRODUCT_MCP_DIRECT_TOOLS } from "../cloudflare/src/product_mcp_entry.ts";
 
 const ENV = Object.freeze({
   PRODUCT_AUTH_ISSUER: "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1",
@@ -257,8 +257,29 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.equal(response.status, 200);
   assert.equal(json.result.structuredContent.ok, true);
   assert.equal(json.result.structuredContent.authenticated, true);
-  assert.equal(json.result.structuredContent.mcp_tool_count, 37);
+  assert.equal(json.result.structuredContent.mcp_tool_count, PRODUCT_MCP_DIRECT_TOOLS.size);
   assert.match(json.result.structuredContent.mcp_tool_surface_revision, /^catalog-v1-[0-9a-f]{64}$/);
+});
+
+test("advertised MCP projection includes device terminal and supervised processes", async () => {
+  const { handlers } = fakeHandlers();
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers);
+  const response = await gateway(new Request(MCP_URL, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  }));
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  const names = new Set(payload.result.tools.map((tool: { name: string }) => tool.name));
+  assert.equal(names.size, PRODUCT_MCP_DIRECT_TOOLS.size);
+  for (const name of [
+    "computer_terminal_exec",
+    "computer_process_start", "computer_process_status", "computer_process_list",
+    "computer_process_logs", "computer_process_write_stdin", "computer_process_stop",
+  ]) {
+    assert.equal(names.has(name), true, name);
+  }
+  assert.equal(names.has("project_create"), false);
 });
 
 test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {
