@@ -70,6 +70,7 @@ const ATTESTED_FILESYSTEM_WRITE_ACTIONS = new Set([
 ]);
 const ATTESTED_CLIPBOARD_ACTIONS = new Set(["computer.clipboard_read", "computer.clipboard_write"]);
 const ATTESTED_PROCESS_MUTATION_ACTIONS = new Set(["computer.terminate_process"]);
+const ATTESTED_TERMINAL_ACTIONS = new Set(["computer.terminal_exec"]);
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   ...OBSERVE_ACTIONS,
   ...INTERACTIVE_ACTIONS,
@@ -77,6 +78,7 @@ export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   ...ATTESTED_FILESYSTEM_WRITE_ACTIONS,
   ...ATTESTED_CLIPBOARD_ACTIONS,
   ...ATTESTED_PROCESS_MUTATION_ACTIONS,
+  ...ATTESTED_TERMINAL_ACTIONS,
 ]);
 
 function json(value: unknown, status = 200): Response {
@@ -100,6 +102,7 @@ function validAttestedDevice(value: AttestedMcpDevice | null): value is Attested
 function requiredProfile(action: string): string | null {
   // Observation remains the least-privilege answer for the five capabilities
   // shared with the broader interactive profile.
+  if (action === "computer.terminal_exec") return "device-native-terminal";
   if (OBSERVE_ACTIONS.has(action)) return OBSERVE_COMPUTER_CONTROL_MODE;
   if (INTERACTIVE_ACTIONS.has(action)) return INTERACTIVE_COMPUTER_CONTROL_MODE;
   // Full filesystem mutations use the existing owner filesystem grant;
@@ -185,6 +188,23 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
       && boundedString(value.expected_name, 260)
       && (value.force === undefined || typeof value.force === "boolean")
       && (value.tree === undefined || typeof value.tree === "boolean");
+  }
+  if (action === "computer.terminal_exec") {
+    if (!keysOnly(value, ["argv", "command", "shell", "cwd", "timeout_seconds", "env"])) return false;
+    if (value.cwd !== undefined && !boundedString(value.cwd, 4096)) return false;
+    if (value.timeout_seconds !== undefined && !boundedInteger(value.timeout_seconds, 1, 1800)) return false;
+    if (value.shell !== undefined && typeof value.shell !== "boolean") return false;
+    if (value.env !== undefined) {
+      if (!isRecord(value.env) || Object.keys(value.env).length > 64
+        || !Object.entries(value.env).every(([key, val]) => key.length > 0 && key.length <= 128
+          && !/[=\x00]/u.test(key) && (typeof val === "string" || typeof val === "number" || typeof val === "boolean")
+          && (typeof val !== "number" || Number.isFinite(val))
+          && String(val).length <= 8192 && !String(val).includes("\x00"))) return false;
+    }
+    if (value.argv !== undefined) return value.command === undefined && value.shell !== true
+      && Array.isArray(value.argv) && value.argv.length >= 1 && value.argv.length <= 256
+      && value.argv.every((arg: unknown) => boundedString(arg, 8192));
+    return value.shell === true && boundedString(value.command, 32768);
   }
   if (action === "computer.file_stat") {
     return keysOnly(value, ["path"]) && boundedString(value.path, 4096);
