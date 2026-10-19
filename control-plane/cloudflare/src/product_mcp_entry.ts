@@ -15,7 +15,7 @@ import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
 import { productAuthConfigured, productOwnerAccountSession, type ProductAuthEnv } from "./product_auth.ts";
-import { productPostgresConfigured, type ProductPostgresEnv } from "./product_postgres_store.ts";
+import { checkCanonicalProductPostgresReadiness, productPostgresConfigured, type ProductPostgresEnv } from "./product_postgres_store.ts";
 import { checkCanonicalProductOAuthDiscovery } from "./product_oauth_readiness.ts";
 import {
   handleProductDeviceCentralSession,
@@ -210,6 +210,7 @@ export function createCanonicalProductMcpGateway(
   discoveryFetch: typeof fetch = fetch,
   allowedTools: ReadonlySet<string> = PRODUCT_MCP_DIRECT_TOOLS,
   recoveryDependencies: SessionRecoveryDependencies = {},
+  postgresReadiness: typeof checkCanonicalProductPostgresReadiness = checkCanonicalProductPostgresReadiness,
 ) {
   const deniedHandlers: OrdaxMcpHandlers = {
     ...reads,
@@ -237,23 +238,32 @@ export function createCanonicalProductMcpGateway(
       if (!productAuthConfigured(env) || !productPostgresConfigured(env)) {
         return respond({
           ok: false, service: "ordax-platform-mcp", oauth_discovery_ready: false,
+          postgres_ready: null,
           conversation_topology: "user_chatgpt_direct", model_relay: false,
           supports_attested_remote_reads: false,
           supports_remote_actions: false, error: "platform_mcp_unconfigured",
         }, 503);
       }
       const discovery = await checkCanonicalProductOAuthDiscovery(String(env.PRODUCT_AUTH_ISSUER), discoveryFetch);
+      // OAuth metadata alone is NOT database readiness. During the Hyperdrive
+      // outage, discovery was healthy while all target/heartbeat SQL failed.
+      // Do not add a second connection authority or synthesize device state.
+      const postgres = discovery.ok ? await postgresReadiness(env) : null;
+      const ready = discovery.ok && postgres?.ok === true;
       return respond({
-        ok: discovery.ok, service: "ordax-platform-mcp",
+        ok: ready, service: "ordax-platform-mcp",
         oauth_discovery_ready: discovery.ok,
+        postgres_ready: postgres?.ok ?? null,
         conversation_topology: "user_chatgpt_direct",
         model_relay: false,
-        supports_attested_remote_reads: discovery.ok,
-        supports_remote_actions: discovery.ok,
+        supports_attested_remote_reads: ready,
+        supports_remote_actions: ready,
         ...(discovery.error ? { error: discovery.error } : {}),
         ...(discovery.upstream_http_status !== undefined ? { upstream_http_status: discovery.upstream_http_status } : {}),
         ...(discovery.failure_stage ? { failure_stage: discovery.failure_stage } : {}),
-      }, discovery.ok ? 200 : 503);
+        ...(postgres?.error ? { error: postgres.error } : {}),
+        ...(postgres?.failure_stage ? { postgres_failure_stage: postgres.failure_stage } : {}),
+      }, ready ? 200 : 503);
     }
     if (request.method === "GET" && metadata) {
       if (!productAuthConfigured(env)) return respond({ ok: false, error: "product_auth_unconfigured" }, 503);
