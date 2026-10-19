@@ -215,6 +215,8 @@ def main() -> int:
 
     if not ready:
         print(f"Cloudflare production deployment BLOCKED ({len(data['readiness_blockers'])} blockers)")
+        for blocker in data["readiness_blockers"]:
+            print(f"  BLOCKER: {blocker}")
         if not args.allow_blocked:
             return 3
     else:
