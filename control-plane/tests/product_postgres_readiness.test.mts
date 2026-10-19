@@ -65,7 +65,8 @@ test("a configured but disconnected Hyperdrive reports not ready, even with heal
   const handler = createCanonicalProductMcpGateway(ENV, noActions, oauthOk, undefined, {}, check);
   const answer = await handler(new Request("https://mcp.ordax.com.br/ready"));
   assert.equal(answer.status, 503);
-  assert.deepEqual(await answer.json(), {
+  const body = await answer.json();
+  assert.deepEqual(body, {
     ok: false, service: "ordax-platform-mcp",
     oauth_discovery_ready: true, postgres_ready: false,
     conversation_topology: "user_chatgpt_direct", model_relay: false,
@@ -74,7 +75,7 @@ test("a configured but disconnected Hyperdrive reports not ready, even with heal
   });
   assert.equal(answer.headers.get("cache-control"), "no-store");
   assert.equal(endCount, 2);
-  assert.equal((await answer.clone().text()).includes(SECRET), false);
+  assert.equal(JSON.stringify(body).includes(SECRET), false);
 });
 
 test("readiness classifies failed connect, query and malformed result without disclosing secrets", async () => {
