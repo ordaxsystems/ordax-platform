@@ -584,12 +584,12 @@ type OwnerGrantHint = {
   surface: string;
 };
 
-// Runtime-independent guidance: OS system settings own Native permissions;
-// Windows Studio is only the Owner permission UI for the external Runtime.
-const COMPUTER_GRANT_SURFACE = "OrdaX OS: Permissões do sistema | Windows: ORDAX Studio > Acesso ao computador";
-const BROWSER_GRANT_SURFACE = "OrdaX OS: Permissões do sistema | Windows: ORDAX Studio > Navegador gerenciado";
-const APP_INTELLIGENCE_GRANT_SURFACE = "OrdaX OS: Permissões do sistema | Windows: ORDAX Studio > Inteligência de aplicativos";
-const PROJECT_GRANT_SURFACE = "OrdaX OS: Permissões do sistema e Spaces | Windows: ORDAX Studio > Autorizações MCP de projetos";
+// MCP remediation uses the canonical Owner grant authority on every OS.
+// Owner clients may be Runtime, OS Settings or other first-party surfaces.
+const COMPUTER_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-groups (dispositivo)";
+const BROWSER_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-groups (navegador)";
+const APP_INTELLIGENCE_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-groups (aplicativos)";
+const PROJECT_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-groups (projeto vinculado)";
 
 const OWNER_GRANT_HINT_BY_ACTION = new Map<string, OwnerGrantHint>([
   ...[

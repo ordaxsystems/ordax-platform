@@ -149,6 +149,8 @@ test("grant denial still points to owner authorization without exporting arbitra
   assert.equal(body.result.structuredContent.error, "product_grant_not_resolved");
   assert.equal(body.result.structuredContent.authorization_required, true);
   assert.equal(typeof body.result.structuredContent.required_owner_profile, "string");
+  assert.match(body.result.structuredContent.authorization_surface, /\/v3\/owner\/remote-grant-groups/);
+  assert.doesNotMatch(body.result.structuredContent.authorization_surface, /Studio/i);
   for (const secret of ["secret", "C:/private", "private_token"]) assert.equal(JSON.stringify(body).includes(secret), false);
 });
 
