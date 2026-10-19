@@ -168,6 +168,44 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal(calls.targets, 0);
 });
 
+test("MCP terminology keeps account subject, Space, device and Project independently scoped", async () => {
+  const { handlers } = fakeHandlers();
+  const run = createCanonicalProductMcpGateway(ENV, handlers);
+  const response = await run(new Request(MCP_URL, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  }));
+  assert.equal(response.status, 200);
+  const { result } = await response.json() as any;
+  const tools = new Map<string, any>(result.tools.map((tool: any) => [tool.name, tool]));
+  const account = tools.get("ordax_profile");
+  assert.ok(account);
+  assert.match(account.description, /account subject id/i);
+  assert.match(account.description, /not an OS Profile, Profile Pack, Space/i);
+  assert.equal(account.outputSchema.properties.id.type, "string");
+  assert.match(account.outputSchema.properties.id.description, /account subject ID/i);
+  // Basic identity/discovery and device observation do not require a Space or Project.
+  for (const name of ["ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status", "computer_processes"]) {
+    const tool = tools.get(name);
+    assert.ok(tool, name);
+    assert.equal(tool.inputSchema.required.includes("space_id"), false, name);
+    assert.equal(tool.inputSchema.required.includes("project"), false, name);
+  }
+  assert.match(tools.get("computer_processes").description, /process/i);
+  // Native processes and terminal are project-scoped, distinct from computer observation.
+  for (const name of ["process_list", "terminal_exec"]) {
+    const tool = tools.get(name);
+    assert.ok(tool, name);
+    assert.ok(tool.inputSchema.required.includes("project"), name);
+    assert.equal(tool.inputSchema.required.includes("space_id"), false, name);
+    assert.match(tool.inputSchema.properties.project.description, /GitHub owner\/repository/i);
+  }
+  assert.match(tools.get("terminal_exec").inputSchema.properties.space_id.description, /Omission never bypasses/i);
+  const profileResponse = await run(request("ordax_profile"));
+  const profileCall = await profileResponse.json() as any;
+  assert.equal(profileCall.result.structuredContent.id, "server-subject");
+});
+
 test("unrelated browser and project tools remain unpublished", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
