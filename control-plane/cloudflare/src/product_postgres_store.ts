@@ -370,6 +370,51 @@ export function productPostgresConfigured(env: ProductPostgresEnv): boolean {
   return configuredConnectionString(env) !== null;
 }
 
+/** An actual Hyperdrive connection and bounded, non-privileged SQL query.
+ * This is the existing PostgreSQL authority, not a second health backend.
+ * The returned diagnosis is public-safe; do not propagate pg exception text.
+ */
+export type ProductPostgresReadiness = Readonly<{
+  ok: boolean;
+  error: "product_postgres_unconfigured" | "product_postgres_unavailable" | null;
+  failure_stage?: "connect" | "query" | "decode";
+}>;
+type ReadinessClient = {
+  connect(): Promise<void>;
+  query(sql: string): Promise<{ rows: Array<{ alive?: unknown }> }>;
+  end(): Promise<void>;
+};
+
+export async function checkCanonicalProductPostgresReadiness(
+  env: ProductPostgresEnv,
+  createClient: (connectionString: string) => ReadinessClient =
+    connectionString => new Client({ connectionString }),
+): Promise<ProductPostgresReadiness> {
+  const connectionString = configuredConnectionString(env);
+  if (!connectionString) return { ok: false, error: "product_postgres_unconfigured" };
+  let client: ReadinessClient | null = null;
+  let phase: "connect" | "query" | "decode" = "connect";
+  try {
+    client = createClient(connectionString);
+    await client.connect();
+    phase = "query";
+    const result = await client.query("select 1::int as alive");
+    phase = "decode";
+    if (result.rows.length !== 1 || result.rows[0]?.alive !== 1) {
+      return { ok: false, error: "product_postgres_unavailable", failure_stage: phase };
+    }
+    return { ok: true, error: null };
+  } catch {
+    // Neither credentials, connection string, PG errors, SQL or exceptions
+    // belong in an unauthenticated readiness response.
+    return { ok: false, error: "product_postgres_unavailable", failure_stage: phase };
+  } finally {
+    if (client) {
+      try { await client.end(); } catch { /* Connection cleanup cannot mask probe outcome. */ }
+    }
+  }
+}
+
 function encodeRpcValue(value: unknown, cast: string): unknown {
   if (value === undefined) return null;
   if (cast === "jsonb" && value !== null) return JSON.stringify(value);

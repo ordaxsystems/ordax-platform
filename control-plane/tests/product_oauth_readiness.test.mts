@@ -40,13 +40,15 @@ test("ready uses canonical discovery URL with 5s deadline and rejects redirects"
     return response(metadata());
   }) as typeof fetch;
   assert.deepEqual(await checkCanonicalProductOAuthDiscovery(ISSUER, fake), { ok: true, error: null });
-  const run = createCanonicalProductMcpGateway(env, handlers, fake);
+  const run = createCanonicalProductMcpGateway(env, handlers, fake, undefined, {},
+    async () => ({ ok: true, error: null }));
   const result = await run(new Request("https://platform.example/ready"));
   assert.equal(result.status, 200);
   assert.deepEqual(await result.json(), {
     ok: true,
     service: "ordax-platform-mcp",
     oauth_discovery_ready: true,
+    postgres_ready: true,
     conversation_topology: "user_chatgpt_direct",
     model_relay: false,
     supports_attested_remote_reads: true,
@@ -67,6 +69,7 @@ test("disabled Supabase OAuth 2.1 server does not turn configured variables into
     ok: false,
     service: "ordax-platform-mcp",
     oauth_discovery_ready: false,
+    postgres_ready: null,
     conversation_topology: "user_chatgpt_direct",
     model_relay: false,
     supports_attested_remote_reads: false,
