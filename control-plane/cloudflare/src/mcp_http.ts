@@ -732,6 +732,17 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   const created = await handlers.createAction(createRequest);
   const createdPayload = await bodyJson(created);
   if (!created.ok) {
+    if (spec.projectRequired && createdPayload.error === "product_project_scope_not_found") {
+      // A missing Owner-managed Space/project/repository/device association
+      // precedes grant evaluation. Never suggest a Windows global grant,
+      // fabricate a project ID, or surface private repository metadata.
+      return textToolResult({
+        ok: false,
+        error: "product_project_scope_not_found",
+        setup_required: "space_project_repository_device_binding",
+        owner_action: "register_project_and_device_in_ordax_owner",
+      }, true);
+    }
     if (createdPayload.error === "product_grant_not_resolved") {
       const hint = authorizationHintForAction(spec.action);
       return textToolResult({ ok: false, error: "product_grant_not_resolved", ...hint }, true);

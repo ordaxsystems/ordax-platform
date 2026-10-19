@@ -152,6 +152,49 @@ test("grant denial still points to owner authorization without exporting arbitra
   for (const secret of ["secret", "C:/private", "private_token"]) assert.equal(JSON.stringify(body).includes(secret), false);
 });
 
+test("unregistered project explains exact Owner setup without inventing grants or device bindings", async () => {
+  let dispatched = 0;
+  for (const action of ["process_list", "terminal_exec"]) {
+    const { body } = await call(action, {
+      createAction: async (request) => {
+        dispatched++;
+        const input = await request.json() as any;
+        assert.equal(input.project, "ordaxsystems/ordax-platform");
+        assert.equal(input.device_id, "device-1");
+        return Response.json({
+          ok: false, error: "product_project_scope_not_found",
+          private_repository_id: 999, debug_connection_string: "postgres://secret",
+        }, { status: 403 });
+      },
+      getAction: async () => { assert.fail("missing project scope must not start polling"); },
+    }, { project: "ordaxsystems/ordax-platform" });
+    assert.equal(body.result.isError, true);
+    assert.deepEqual(body.result.structuredContent, {
+      ok: false, error: "product_project_scope_not_found",
+      setup_required: "space_project_repository_device_binding",
+      owner_action: "register_project_and_device_in_ordax_owner",
+    });
+    assert.doesNotMatch(JSON.stringify(body), /999|postgres:|debug_connection_string/);
+  }
+  assert.equal(dispatched, 2);
+});
+
+test("device observation and missing project grant never reuse Owner project setup hint", async () => {
+  for (const action of ["computer_processes", "process_list"]) {
+    const { body } = await call(action, {
+      createAction: async () => Response.json({
+        ok: false, error: "product_grant_not_resolved",
+      }, { status: 403 }),
+    }, { project: "ordaxsystems/ordax-platform" });
+    assert.equal(body.result.isError, true);
+    assert.equal(body.result.structuredContent.error, "product_grant_not_resolved");
+    // A grant denial must never be misreported as missing project
+    // registration, irrespective of the UI hint for this tool family.
+    assert.equal("setup_required" in body.result.structuredContent, false);
+    assert.equal("owner_action" in body.result.structuredContent, false);
+  }
+});
+
 test("tool exceptions and invalid request paths are contained without dispatch or exception details", async () => {
   const { body } = await call("ordax_targets", { targets: async () => { throw new Error("SQL private_table secret"); } });
   assert.equal(body.result.isError, true);

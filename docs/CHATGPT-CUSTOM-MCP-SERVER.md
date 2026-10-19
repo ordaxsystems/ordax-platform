@@ -99,6 +99,13 @@ Para uma ação local acontecer, as seguintes condições são independentes e p
 
 Por isso, um computador pode aparecer em `ordax_targets` e ainda rejeitar clique, screenshot, digitação, leitura de arquivo ou clipboard. Isso é comportamento esperado e fail-closed.
 
+### Gate adicional para processos e terminal por projeto
+
+Antes de consultar `project-native-process` ou `project-native-terminal`, a Platform **resolve um vínculo exato**, administrado pelo Owner, entre um Space ativo, um Projeto ativo, uma seleção GitHub verdadeira (`repository_id` e `repository_full_name`), o dispositivo habilitado como executor daquele Space e o dispositivo vinculado ao projeto. Zero vínculos válidos gera `product_project_scope_not_found`; múltiplos geram `product_project_scope_ambiguous`. São **erros de cadastro/identidade**, anteriores à autorização. Um grant global de observação ou `full_access` Windows não corrige a ausência de projeto e não deve ser promovido como solução.
+
+Se `process_list` ou `terminal_exec` retornar `product_project_scope_not_found`, concluir o **cadastro/vínculo do projeto e dispositivo pela autoridade Owner do OrdaX** antes de pedir grants. Não preencher tabelas ou inventar UUIDs via MCP, SQL administrativo, Surface ou Studio; o fluxo de cadastro precisa existir e confirmar essas escolhas. Só depois solicitar `project-native-process` ou `project-native-terminal` sob o **mesmo** Space, Projeto, cliente OAuth e dispositivo. A implantação desse fluxo é acompanhada na issue `ordax-platform#220`. O Studio no Windows é consumidor dos controles de permissão, não a autoridade do SO OrdaX.
+
+
 ## O que ainda falta para o básico completo
 
 O próximo marco não é aumentar indiscriminadamente o número de tools, e sim completar as famílias tipadas necessárias para um fluxo de desenvolvimento ponta a ponta:
