@@ -51,9 +51,7 @@
     },
     {
       "id": "shared_device_registry",
-      "legacy_tables": [
-        "ordax_devices"
-      ],
+      "legacy_tables": [],
       "target_authority": "postgresql",
       "authority_state": "retired",
       "cutover_strategy": "remove_legacy_d1_device_registry; keep_postgres_product_device_enrollment",
@@ -61,31 +59,36 @@
         "public.ordax_product_devices",
         "public.ordax_device_presence",
         "private.ordax_product_device_credentials"
+      ],
+      "retired_tables": [
+        "ordax_devices"
       ]
     },
     {
       "id": "engineering_runtime_jobs",
-      "legacy_tables": [
-        "ordax_jobs",
-        "ordax_job_events"
-      ],
+      "legacy_tables": [],
       "target_authority": "postgresql",
       "authority_state": "retired",
       "cutover_strategy": "retire_d1_queue_surface; native owner PostgreSQL lifecycle is isolated and opt-in until identity authority proven",
       "target_contracts": [
         "native/ordax-owner-recovery/postgres_lifecycle.go"
+      ],
+      "retired_tables": [
+        "ordax_jobs",
+        "ordax_job_events"
       ]
     },
     {
       "id": "artifact_metadata",
-      "legacy_tables": [
-        "ordax_artifacts",
-        "ordax_artifact_uploads"
-      ],
+      "legacy_tables": [],
       "target_authority": "postgresql_plus_r2",
       "authority_state": "retired",
       "cutover_strategy": "retire_d1_artifact_endpoints_pending_canonical_r2_postgres_artifact_implementation",
-      "target_contracts": []
+      "target_contracts": [],
+      "retired_tables": [
+        "ordax_artifacts",
+        "ordax_artifact_uploads"
+      ]
     }
   ],
   "exit_criteria": [
