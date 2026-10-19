@@ -134,6 +134,23 @@ test("model-selected device/slug and mismatch fail before execution", async () =
   assert.equal(enqueued, 0);
 });
 
+test("unregistered repository/Space/device binding fails before grant listing or enqueue", async () => {
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject: async () => ({ ok: false, error: "owner_project_scope_not_found" }),
+    listTargets: async () => { assert.fail("cannot request grants without an attested canonical project scope"); },
+    enqueue: async () => { assert.fail("cannot enqueue actions without a registered project"); },
+  });
+  for (const [action, args] of [
+    ["process.list", {}],
+    ["terminal.exec", { argv: ["python", "--version"] }],
+  ] as const) {
+    const response = await handler(actionRequest(action, args));
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { ok: false, error: "product_project_scope_not_found" });
+  }
+});
+
 test("missing native terminal grant returns an explicit owner profile without enqueue", async () => {
   let enqueued = false;
   const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
