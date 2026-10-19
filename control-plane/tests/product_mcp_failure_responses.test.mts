@@ -188,11 +188,10 @@ test("device observation and missing project grant never reuse Owner project set
     }, { project: "ordaxsystems/ordax-platform" });
     assert.equal(body.result.isError, true);
     assert.equal(body.result.structuredContent.error, "product_grant_not_resolved");
-    // Project-native grants have an explicit Owner profile; device
-    // observation is a distinct read capability without this owner hint.
-    assert.equal(body.result.structuredContent.authorization_required,
-      action === "process_list" ? true : undefined);
+    // A grant denial must never be misreported as missing project
+    // registration, irrespective of the UI hint for this tool family.
     assert.equal("setup_required" in body.result.structuredContent, false);
+    assert.equal("owner_action" in body.result.structuredContent, false);
   }
 });
 
