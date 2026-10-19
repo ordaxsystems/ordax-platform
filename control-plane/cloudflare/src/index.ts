@@ -46,12 +46,6 @@ const CONTROL_PLANE_CAPABILITIES = [
   "product_typed_actions_v2",
 ];
 
-const ACTION_PREFIXES = [
-  "blender.", "unity.", "git.", "project.", "projects.", "workspace.", "artifact.",
-  "observation.", "game_assets.", "geo.", "visual.", "agent.", "terminal.", "handoff.", "continuity.",
-  "browser.", "computer.", "process.", "intelligence.",
-];
-
 const PRODUCT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}$/;
 const PROJECT_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const PRODUCT_READ_ONLY_ACTIONS = new Set([
@@ -221,12 +215,6 @@ async function sha256Text(value: string): Promise<string> {
     .join("");
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
 function hexToArrayBuffer(value: string): ArrayBuffer {
   const bytes = new Uint8Array(value.length / 2);
   for (let index = 0; index < bytes.length; index += 1) {
@@ -268,11 +256,6 @@ function canonicalStoredJson(value: string | null): string | null {
   } catch {
     return null;
   }
-}
-
-function actionAllowed(value: string): boolean {
-  return value === "ordax.dev.adapter.invoke"
-    || ACTION_PREFIXES.some((prefix) => value.startsWith(prefix));
 }
 
 async function authenticateDevice(
