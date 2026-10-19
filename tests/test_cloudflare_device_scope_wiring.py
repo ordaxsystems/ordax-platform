@@ -37,10 +37,11 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
             | cls.app_intelligence_device_actions
         )
 
-    def test_worker_consumes_canonical_device_scope_ssot(self) -> None:
-        self.assertIn('from "./product_action_scope"', self.worker)
-        self.assertIn("DEVICE_SCOPED_ACTIONS", self.worker)
-        self.assertIn("projectBindingMatchesScope", self.worker)
+    def test_worker_delegates_device_actions_to_canonical_transport(self) -> None:
+        self.assertIn("handleProductDeviceTransport(request,env)", self.worker)
+        self.assertIn("handleProductDevicePresence(request, env)", self.worker)
+        self.assertNotIn("from \"./product_action_scope\"", self.worker)
+        self.assertIn('from "./product_action_scope"', self.mcp)
 
     def test_device_scope_union_is_explicit(self) -> None:
         self.assertTrue(self.computer_device_actions)
@@ -52,12 +53,9 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
         self.assertIn("...APP_INTELLIGENCE_DEVICE_ACTIONS", self.scope)
 
     def test_device_computer_actions_are_not_project_scoped_in_worker(self) -> None:
-        project_block = _set_body(
-            self.worker, "const PRODUCT_PROJECT_ACTIONS = new Set(["
-        )
-        project_actions = _quoted_actions(project_block)
-        overlap = sorted(self.device_actions & project_actions)
-        self.assertEqual(overlap, [], f"device actions still project-scoped: {overlap}")
+        self.assertNotIn("const PRODUCT_PROJECT_ACTIONS =", self.worker)
+        self.assertNotIn("const DEVICE_SCOPED_ACTIONS =", self.worker)
+        self.assertTrue(self.device_actions)
 
     def test_legacy_owner_device_grants_are_retired_not_exposed_to_mcp(self) -> None:
         self.assertNotIn('from "./product_device_grants"', self.worker)
@@ -91,7 +89,7 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
             'return scope === "device" ? project === null : project !== null;',
             self.scope,
         )
-        self.assertIn("projectBindingMatchesScope", self.worker)
+        self.assertNotIn("projectBindingMatchesScope", self.worker)
 
     def test_device_scope_uses_distinct_product_postgres_grants(self) -> None:
         canonical = (ROOT / "control-plane/cloudflare/src/product_relay_scope.ts").read_text(
