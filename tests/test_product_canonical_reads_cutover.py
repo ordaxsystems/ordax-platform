@@ -19,7 +19,7 @@ class CanonicalProductReadsCutoverTests(unittest.TestCase):
     def test_legacy_product_read_routes_use_canonical_postgres_handler(self) -> None:
         self.assertIn('import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads";', self.worker)
         self.assertIn('createCanonicalProductMcpReadHandlers(env).targets(request)', self.worker)
-        self.assertIn('createCanonicalProductMcpReadHandlers(env).getAction(request, parts[3])', self.worker)
+        self.assertRegex(self.worker, r"createCanonicalProductMcpReadHandlers\(env\)\.getAction\(request,\s*parts\[3\]\)")
         self.assertNotIn('async function listProductTargets(', self.worker)
         self.assertNotIn('async function getProductAction(', self.worker)
         self.assertNotIn('FROM ordax_product_grants g', self.worker)
