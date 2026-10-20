@@ -64,13 +64,42 @@ class RecoveryContracts(unittest.TestCase):
              mock.patch.object(recovery, "update_role", side_effect=update), \
              mock.patch.object(recovery, "patch_hyperdrive", side_effect=patch), \
              mock.patch.object(recovery, "restart_hyperdrive"), \
-             mock.patch.object(recovery, "ready", return_value=readied), \
+             mock.patch.object(recovery, "ready", side_effect=([False, True] if readied else [False] * 12)), \
              mock.patch.object(recovery.time, "sleep"), \
              redirect_stdout(output):
             status = recovery.main()
         self.assertNotIn("new-test-password", output.getvalue())
         self.assertNotIn("old-verifier", output.getvalue())
         return status, action_order, output.getvalue()
+
+    def test_full_origin_payload_required_for_cloudflare_patch(self):
+        with mock.patch.object(recovery, "request", return_value={"success": True}) as request:
+            recovery.patch_hyperdrive("fake-cf-token", "fake-new-password")
+        method, url, token, payload = request.call_args.args
+        self.assertEqual(method, "PATCH")
+        self.assertEqual(token, "fake-cf-token")
+        self.assertEqual(payload, {"origin": {
+            "scheme": "postgres", "host": recovery.HOST, "port": 5432,
+            "database": "postgres", "user": recovery.POOLER_USER,
+            "password": "fake-new-password",
+        }})
+        self.assertTrue(url.endswith("/hyperdrive/configs/" + recovery.HYPERDRIVE))
+
+    def test_healthy_mcp_skips_rotation(self):
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {"CLOUDFLARE_API_TOKEN": "fake-cf",
+                                           "SUPABASE_ACCESS_TOKEN": "fake-db"}), \\
+             mock.patch.object(recovery, "assert_hyperdrive"), \\
+             mock.patch.object(recovery, "ready", return_value=True), \\
+             mock.patch.object(recovery, "inspect_role") as inspect, \\
+             mock.patch.object(recovery, "update_role") as update, \\
+             mock.patch.object(recovery, "patch_hyperdrive") as patch, \\
+             redirect_stdout(output):
+            self.assertEqual(recovery.main(), 0)
+        inspect.assert_not_called()
+        update.assert_not_called()
+        patch.assert_not_called()
+        self.assertIn("ALREADY_HEALTHY_NO_ROTATION", output.getvalue())
 
     def test_success_synchronizes_before_readiness(self):
         status, actions, output = self.run_recovery()
