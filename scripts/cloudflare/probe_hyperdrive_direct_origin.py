@@ -196,14 +196,14 @@ def check_worker(name: str) -> dict:
         try:
             result = subprocess.run(
                 ["curl", "--silent", "--show-error", "--max-time", "15",
-                 "--write-out", "\\n%{http_code}", url],
+                 "--write-out", chr(10) + "%{http_code}", url],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 check=False, timeout=22,
             )
             if result.returncode:
                 status = "transport"
             else:
-                body, sep, code = result.stdout.rpartition(b"\\n")
+                body, sep, code = result.stdout.rpartition(bytes([10]))
                 status = code.decode("ascii", "replace").strip()[:3] if sep else "invalid"
                 if status in ("200", "503"):
                     value = json.loads(body[:8192])
