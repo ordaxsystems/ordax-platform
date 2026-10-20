@@ -112,7 +112,14 @@ def update_role(db_token: str, credential: str) -> None:
 
 def patch_hyperdrive(cf_token: str, credential: str) -> None:
     result = request("PATCH", f"{CF_ROOT}/hyperdrive/configs/{HYPERDRIVE}",
-                     cf_token, {"origin": {"password": credential}})
+                     cf_token, {"origin": {
+                         "scheme": "postgres",
+                         "host": HOST,
+                         "port": 5432,
+                         "database": "postgres",
+                         "user": POOLER_USER,
+                         "password": credential,
+                     }})
     if not isinstance(result, dict) or result.get("success") is not True:
         raise RecoveryFailure("hyperdrive_update_uncertain")
 
@@ -143,6 +150,11 @@ def main() -> int:
         return 3
     try:
         assert_hyperdrive(cf)
+        # Do not rotate a production credential when the canonical MCP is
+        # already healthy. A recovery run must be idempotent, not disruptive.
+        if ready():
+            print("ORDAX_RECOVERY=ALREADY_HEALTHY_NO_ROTATION")
+            return 0
         inspect = inspect_role(db)
         # Also prove the session-pooler IPv4 origin is routable from this
         # runner before changing any database credential.
