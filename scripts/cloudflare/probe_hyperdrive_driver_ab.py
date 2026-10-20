@@ -100,8 +100,15 @@ def probe(worker: str, driver_path: str) -> dict:
                         r"[a-z_]{1,45}", classification
                     ):
                         raise ProbeFailure("response_failure_invalid")
-                    return {"driver": driver, "ok": False, "phase": phase,
+                    item = {"driver": driver, "ok": False, "phase": phase,
                             "classification": classification}
+                    code = record.get("code")
+                    error_class = record.get("error_class")
+                    if isinstance(code, str) and re.fullmatch(r"[A-Z0-9_]{2,32}", code):
+                        item["code"] = code
+                    if error_class in ("Error", "TypeError", "PostgresError", "AggregateError"):
+                        item["error_class"] = error_class
+                    return item
         except (OSError, subprocess.TimeoutExpired, UnicodeError, ValueError):
             status = "unreachable"
         if attempt < 4 and status in ("403", "404", "unreachable"):
