@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 import importlib.util
 import io
 import os
+import urllib.error
 from pathlib import Path
 import unittest
 from unittest import mock
@@ -72,18 +73,36 @@ class RecoveryContracts(unittest.TestCase):
         self.assertNotIn("old-verifier", output.getvalue())
         return status, action_order, output.getvalue()
 
-    def test_full_origin_payload_required_for_cloudflare_patch(self):
+    def test_password_only_patch_preserves_existing_origin(self):
         with mock.patch.object(recovery, "request", return_value={"success": True}) as request:
             recovery.patch_hyperdrive("fake-cf-token", "fake-new-password")
         method, url, token, payload = request.call_args.args
         self.assertEqual(method, "PATCH")
         self.assertEqual(token, "fake-cf-token")
-        self.assertEqual(payload, {"origin": {
-            "scheme": "postgres", "host": recovery.HOST, "port": 5432,
-            "database": "postgres", "user": recovery.POOLER_USER,
-            "password": "fake-new-password",
-        }})
+        self.assertEqual(payload, {"origin": {"password": "fake-new-password"}})
         self.assertTrue(url.endswith("/hyperdrive/configs/" + recovery.HYPERDRIVE))
+
+    def test_cf_400_logs_numeric_code_only_never_secret_or_message(self):
+        from io import BytesIO
+        unsafe = b'{"errors":[{"code":10042,"message":"password=mock-private-secret"}]}'
+        error = urllib.error.HTTPError(
+            recovery.CF_ROOT + "/hyperdrive/configs/" + recovery.HYPERDRIVE,
+            400, "password=mock-private-secret", {}, BytesIO(unsafe)
+        )
+        with mock.patch.object(recovery.OPENER, "open", side_effect=error):
+            with self.assertRaises(recovery.RecoveryFailure) as captured:
+                recovery.request("PATCH", recovery.CF_ROOT + "/hyperdrive/configs/"
+                                 + recovery.HYPERDRIVE, "mock-cf-token", {})
+        self.assertEqual(str(captured.exception), "provider_http_400_cf_10042")
+        self.assertNotIn("mock-private-secret", str(captured.exception))
+
+    def test_definitive_400_numeric_code_keeps_safe_rollback(self):
+        status, actions, output = self.run_recovery(
+            cf_patch_error="provider_http_400_cf_10042"
+        )
+        self.assertEqual(status, 5)
+        self.assertEqual([name for name, _ in actions], ["db", "cf", "db"])
+        self.assertIn("ROLLED_BACK", output)
 
     def test_healthy_mcp_skips_rotation(self):
         output = io.StringIO()

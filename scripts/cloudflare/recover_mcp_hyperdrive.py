@@ -62,9 +62,22 @@ def request(method: str, url: str, token: str, payload: dict | None = None) -> o
             raw = res.read(262144)
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as exc:
-        # Never include response bodies: a provider may echo a submitted SQL
-        # command or configuration containing credentials.
-        raise RecoveryFailure(f"provider_http_{exc.code}") from None
+        # Providers may echo credentials in arbitrary messages. Emit only a
+        # bounded, numeric Cloudflare error code, never any error body.
+        safe_code = None
+        if url.startswith(CF_ROOT + "/") and exc.code == 400:
+            try:
+                body = json.loads(exc.read(8192))
+                errors = body.get("errors", []) if isinstance(body, dict) else []
+                for entry in errors if isinstance(errors, list) else []:
+                    code = entry.get("code") if isinstance(entry, dict) else None
+                    if type(code) is int and 0 <= code <= 999999:
+                        safe_code = code
+                        break
+            except (ValueError, OSError):
+                pass
+        suffix = f"_cf_{safe_code}" if safe_code is not None else ""
+        raise RecoveryFailure(f"provider_http_{exc.code}{suffix}") from None
     except (urllib.error.URLError, TimeoutError) as exc:
         raise RecoveryFailure("provider_connection_unavailable") from None
     except (ValueError, json.JSONDecodeError):
@@ -113,11 +126,8 @@ def update_role(db_token: str, credential: str) -> None:
 def patch_hyperdrive(cf_token: str, credential: str) -> None:
     result = request("PATCH", f"{CF_ROOT}/hyperdrive/configs/{HYPERDRIVE}",
                      cf_token, {"origin": {
-                         "scheme": "postgres",
-                         "host": HOST,
-                         "port": 5432,
-                         "database": "postgres",
-                         "user": POOLER_USER,
+                         # Host, port, user, database and TLS mode were checked
+                         # by assert_hyperdrive and must remain unchanged.
                          "password": credential,
                      }})
     if not isinstance(result, dict) or result.get("success") is not True:
@@ -169,8 +179,9 @@ def main() -> int:
             # Only a definitive 4xx write rejection guarantees no Cloudflare
             # update happened. Ambiguous transport errors must not revert
             # one side of the synchronized credential.
-            if str(exc) in ("provider_http_400", "provider_http_401", "provider_http_403",
-                            "provider_http_404", "provider_http_422"):
+            provider_status = str(exc).split("_cf_", 1)[0]
+            if provider_status in ("provider_http_400", "provider_http_401", "provider_http_403",
+                                   "provider_http_404", "provider_http_422"):
                 update_role(db, inspect)
                 print("ORDAX_RECOVERY=ROLLED_BACK_AFTER_CLOUDFLARE_REJECTION")
             else:
