@@ -135,3 +135,33 @@ test("OAuth failure does not connect to PostgreSQL; readiness does not claim act
   assert.equal(body.supports_remote_actions, false);
   assert.equal(connected, false);
 });
+
+test("readiness logs only allowlisted classification, never connection strings or raw errors", async () => {
+  const records: string[] = [];
+  const previous = console.error;
+  console.error = (...values: unknown[]) => { records.push(values.map(String).join(" ")); };
+  try {
+    const check = await checkCanonicalProductPostgresReadiness(ENV, () => ({
+      async connect() {
+        throw new Error("password authentication failed for " + SECRET);
+      },
+      async query() { throw new Error("must not query"); },
+      async end() {},
+    }));
+    assert.deepEqual(check, {
+      ok: false, error: "product_postgres_unavailable", failure_stage: "connect",
+    });
+    assert.equal(records.length, 1);
+    assert.deepEqual(JSON.parse(records[0]), {
+      event: "product_postgres_readiness_failure",
+      phase: "connect",
+      classification: "origin_authentication_failed",
+      signals: ["authentication"],
+    });
+    assert.equal(records[0].includes(SECRET), false);
+    assert.equal(records[0].includes("private-password"), false);
+    assert.equal(records[0].includes("private-db.invalid"), false);
+  } finally {
+    console.error = previous;
+  }
+});
