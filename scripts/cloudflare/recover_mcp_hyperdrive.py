@@ -59,7 +59,8 @@ def request(method: str, url: str, token: str, payload: dict | None = None) -> o
                                  data=json.dumps(payload).encode() if payload is not None else None)
     try:
         with OPENER.open(req, timeout=25) as res:
-            return json.load(res)
+            raw = res.read(262144)
+            return json.loads(raw) if raw else None
     except urllib.error.HTTPError as exc:
         # Never include response bodies: a provider may echo a submitted SQL
         # command or configuration containing credentials.
@@ -103,15 +104,17 @@ def inspect_role(db_token: str) -> str:
 
 
 def update_role(db_token: str, credential: str) -> None:
-    # Supabase Management API executes as the authorized project admin.
-    database_sql(db_token, "ALTER ROLE " + ROLE + " WITH PASSWORD " + literal(credential))
+    # UPDATE may legitimately return an empty response: never misinterpret a
+    # successful mutation as a parser error before updating Cloudflare.
+    request("POST", DB_QUERY, db_token,
+            {"query": "ALTER ROLE " + ROLE + " WITH PASSWORD " + literal(credential)})
 
 
 def patch_hyperdrive(cf_token: str, credential: str) -> None:
     result = request("PATCH", f"{CF_ROOT}/hyperdrive/configs/{HYPERDRIVE}",
                      cf_token, {"origin": {"password": credential}})
     if not isinstance(result, dict) or result.get("success") is not True:
-        raise RecoveryFailure("hyperdrive_update_rejected")
+        raise RecoveryFailure("hyperdrive_update_uncertain")
 
 
 def restart_hyperdrive(cf_token: str) -> None:
@@ -155,7 +158,7 @@ def main() -> int:
             # update happened. Ambiguous transport errors must not revert
             # one side of the synchronized credential.
             if str(exc) in ("provider_http_400", "provider_http_401", "provider_http_403",
-                            "provider_http_404", "provider_http_422", "hyperdrive_update_rejected"):
+                            "provider_http_404", "provider_http_422"):
                 update_role(db, inspect)
                 print("ORDAX_RECOVERY=ROLLED_BACK_AFTER_CLOUDFLARE_REJECTION")
             else:
