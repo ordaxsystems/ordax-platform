@@ -31,7 +31,7 @@ class NetworkBanAuditTests(unittest.TestCase):
         bans = mock.MagicMock()
         bans.__enter__.return_value.read.return_value = json.dumps({
             "banned_ipv4_addresses": [
-                {"banned_address": "173.245.48.12"},
+                {"banned_address": "173.245.48.12/32"},
                 {"banned_address": "192.0.2.12"},
             ],
         }).encode()
@@ -50,6 +50,7 @@ class NetworkBanAuditTests(unittest.TestCase):
             report = mod.inspect("synthetic", include_cloudflare_overlap=True)
         self.assertEqual(report["cloudflare_banned_ipv4_count"], 1)
         self.assertEqual(report["other_banned_ipv4_count"], 1)
+        self.assertEqual(report["unparsed_ban_count"], 0)
         self.assertNotIn("173.245.48.12", str(report))
         self.assertNotIn("192.0.2.12", str(report))
 
