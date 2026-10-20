@@ -60,6 +60,8 @@ class RecoveryContracts(unittest.TestCase):
                                            "SUPABASE_ACCESS_TOKEN": "fake-db-token"}), \
              mock.patch.object(recovery, "assert_hyperdrive"), \
              mock.patch.object(recovery, "inspect_role", return_value="SCRAM-SHA-256$old-verifier"), \
+             mock.patch.object(recovery.shutil, "which", return_value="/usr/bin/psql"), \
+             mock.patch.object(recovery, "verify_pooler_credential"), \
              mock.patch.object(recovery.socket, "create_connection", return_value=fake_socket), \
              mock.patch.object(recovery.secrets, "token_urlsafe", return_value="new-test-password"), \
              mock.patch.object(recovery, "update_role", side_effect=update), \
@@ -103,6 +105,62 @@ class RecoveryContracts(unittest.TestCase):
         self.assertEqual(status, 5)
         self.assertEqual([name for name, _ in actions], ["db", "cf", "db"])
         self.assertIn("ROLLED_BACK", output)
+
+    def test_pooler_probe_uses_exact_origin_and_never_logs_credential(self):
+        sample = mock.Mock(returncode=0, stdout=b"1", stderr=b"")
+        with mock.patch.dict(os.environ, {
+                "CLOUDFLARE_API_TOKEN": "mock-admin",
+                "SUPABASE_ACCESS_TOKEN": "mock-other-admin"}), \
+             mock.patch.object(recovery.shutil, "which", return_value="/usr/bin/psql"), \
+             mock.patch.object(recovery.subprocess, "run", return_value=sample) as run:
+            recovery.verify_pooler_credential("synthetic-auth-secret")
+        args, kwargs = run.call_args
+        self.assertNotIn("synthetic-auth-secret", str(args))
+        self.assertEqual(kwargs["env"]["PGPASSWORD"], "synthetic-auth-secret")
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", kwargs["env"])
+        self.assertNotIn("SUPABASE_ACCESS_TOKEN", kwargs["env"])
+        self.assertEqual(kwargs["env"]["PGUSER"], recovery.POOLER_USER)
+        self.assertEqual(kwargs["env"]["PGHOST"], recovery.HOST)
+        self.assertEqual(kwargs["env"]["PGSSLMODE"], "require")
+        self.assertEqual(kwargs["stdout"], recovery.subprocess.PIPE)
+        self.assertEqual(kwargs["stderr"], recovery.subprocess.PIPE)
+
+    def test_pooler_probe_exhaustion_fails_without_echoing_secret(self):
+        rejected = mock.Mock(returncode=2, stdout=b"", stderr=b"password=synthetic-auth-secret")
+        with mock.patch.object(recovery.shutil, "which", return_value="/usr/bin/psql"), \
+             mock.patch.object(recovery.subprocess, "run", return_value=rejected) as run, \
+             mock.patch.object(recovery.time, "sleep"):
+            with self.assertRaisesRegex(
+                recovery.RecoveryFailure, "pooler_new_credential_not_authenticated"
+            ) as caught:
+                recovery.verify_pooler_credential("synthetic-auth-secret")
+        self.assertEqual(run.call_count, 18)
+        self.assertNotIn("synthetic-auth-secret", str(caught.exception))
+
+    def test_pooler_auth_failed_restores_role_before_cloudflare_write(self):
+        actions = []
+        fake_socket = mock.MagicMock()
+        fake_socket.__enter__.return_value = fake_socket
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {
+                "CLOUDFLARE_API_TOKEN": "fake-cf", "SUPABASE_ACCESS_TOKEN": "fake-db"}), \
+             mock.patch.object(recovery, "assert_hyperdrive"), \
+             mock.patch.object(recovery, "ready", return_value=False), \
+             mock.patch.object(recovery, "inspect_role", return_value="SCRAM-SHA-256$old-verifier"), \
+             mock.patch.object(recovery.shutil, "which", return_value="/usr/bin/psql"), \
+             mock.patch.object(recovery.socket, "create_connection", return_value=fake_socket), \
+             mock.patch.object(recovery.secrets, "token_urlsafe", return_value="synthetic-auth-secret"), \
+             mock.patch.object(recovery, "update_role",
+                               side_effect=lambda _, v: actions.append(v)), \
+             mock.patch.object(recovery, "verify_pooler_credential",
+                               side_effect=recovery.RecoveryFailure("pooler_new_credential_not_authenticated")), \
+             mock.patch.object(recovery, "patch_hyperdrive") as patch_cf, \
+             redirect_stdout(output):
+            self.assertEqual(recovery.main(), 5)
+        self.assertEqual(actions, ["synthetic-auth-secret", "SCRAM-SHA-256$old-verifier"])
+        patch_cf.assert_not_called()
+        self.assertIn("ROLLED_BACK_AFTER_POOLER_AUTH_FAILURE", output.getvalue())
+        self.assertNotIn("synthetic-auth-secret", output.getvalue())
 
     def test_healthy_mcp_skips_rotation(self):
         output = io.StringIO()

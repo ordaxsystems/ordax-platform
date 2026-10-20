@@ -8,7 +8,9 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import shutil
 import socket
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -123,6 +125,45 @@ def update_role(db_token: str, credential: str) -> None:
             {"query": "ALTER ROLE " + ROLE + " WITH PASSWORD " + literal(credential)})
 
 
+
+def verify_pooler_credential(credential: str) -> None:
+    """Prove the freshly rotated SCRAM credential through the real pooler.
+
+    Cloudflare validates new Hyperdrive credentials during PATCH (error 2013
+    when authentication fails). Supavisor can still have a cached old verifier.
+    No Cloudflare write can precede an authenticated SELECT 1 using the exact
+    same origin host, port, database and pooler user.
+    """
+    if shutil.which("psql") is None:
+        raise RecoveryFailure("pooler_probe_cli_missing")
+    # Do not pass Cloudflare/Supabase administration tokens into psql.
+    env = {key: value for key, value in os.environ.items()
+           if key in {"PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT"}}
+    env["PGPASSWORD"] = credential
+    env["PGHOST"] = HOST
+    env["PGPORT"] = "5432"
+    env["PGDATABASE"] = "postgres"
+    env["PGUSER"] = POOLER_USER
+    env["PGSSLMODE"] = "require"
+    env["PGCONNECT_TIMEOUT"] = "8"
+    command = ["psql", "--no-psqlrc", "--no-password", "--tuples-only",
+               "--no-align", "--command", "SELECT 1;"]
+    # Never print stdout/stderr or a connection URI; only the fixed result.
+    for attempt in range(18):
+        try:
+            outcome = subprocess.run(
+                command, env=env, input=b"", stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, check=False, timeout=14,
+            )
+            if outcome.returncode == 0 and outcome.stdout.strip() == b"1":
+                return
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if attempt < 17:
+            time.sleep(10)
+    raise RecoveryFailure("pooler_new_credential_not_authenticated")
+
+
 def patch_hyperdrive(cf_token: str, credential: str) -> None:
     result = request("PATCH", f"{CF_ROOT}/hyperdrive/configs/{HYPERDRIVE}",
                      cf_token, {"origin": {
@@ -170,9 +211,20 @@ def main() -> int:
         # runner before changing any database credential.
         with socket.create_connection((HOST, 5432), timeout=8):
             pass
+        # The runner must support an authenticated direct PostgreSQL probe
+        # before a production credential is ever changed.
+        if shutil.which("psql") is None:
+            raise RecoveryFailure("pooler_probe_cli_missing")
         print("ORDAX_RECOVERY_PREFLIGHT=PASS")
         credential = secrets.token_urlsafe(48)
         update_role(db, credential)
+        try:
+            verify_pooler_credential(credential)
+            print("ORDAX_POOLER_NEW_CREDENTIAL=AUTHENTICATED")
+        except RecoveryFailure:
+            update_role(db, inspect)
+            print("ORDAX_RECOVERY=ROLLED_BACK_AFTER_POOLER_AUTH_FAILURE")
+            raise
         try:
             patch_hyperdrive(cf, credential)
         except RecoveryFailure as exc:
