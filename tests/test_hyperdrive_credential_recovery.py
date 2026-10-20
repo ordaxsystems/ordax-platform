@@ -1,0 +1,102 @@
+"""Test the canonical recovery without writing credentials to either provider."""
+from contextlib import redirect_stdout
+import importlib.util
+import io
+import os
+from pathlib import Path
+import unittest
+from unittest import mock
+
+FILE = Path(__file__).resolve().parents[1] / "scripts/cloudflare/recover_mcp_hyperdrive.py"
+spec = importlib.util.spec_from_file_location("ordax_hyperdrive_recovery", FILE)
+recovery = importlib.util.module_from_spec(spec)
+assert spec and spec.loader
+spec.loader.exec_module(recovery)
+
+
+class RecoveryContracts(unittest.TestCase):
+    def test_sql_literal_quotes_do_not_escape_statement(self):
+        self.assertEqual(recovery.literal("a'b"), "'a''b'")
+
+    def test_read_only_verifier_response_shape(self):
+        verifier = {"verifier": "SCRAM-SHA-256$fake", "login": True, "valid": True}
+        self.assertEqual(recovery.response_rows([verifier]), [verifier])
+        self.assertEqual(recovery.response_rows({"result": [verifier]}), [verifier])
+        self.assertEqual(recovery.response_rows({"data": [verifier]}), [verifier])
+        with self.assertRaises(recovery.RecoveryFailure):
+            recovery.response_rows({"unexpected": True})
+
+    def test_missing_authority_never_writes(self):
+        with mock.patch.dict(os.environ, {}, clear=True), \
+             mock.patch.object(recovery, "request") as request:
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(recovery.main(), 3)
+            request.assert_not_called()
+            self.assertIn("BLOCKED_MISSING_AUTHORIZED_CREDENTIALS", out.getvalue())
+
+    def test_hyperdrive_guard_rejects_wrong_identity(self):
+        wrong = {"success": True, "result": {"origin": {
+            "host": "legacy.example.org", "port": 5432,
+            "user": recovery.POOLER_USER, "database": "postgres"},
+            "mtls": {"sslmode": "require"}}}
+        with mock.patch.object(recovery, "request", return_value=wrong):
+            with self.assertRaisesRegex(recovery.RecoveryFailure, "unexpected_hyperdrive_origin"):
+                recovery.assert_hyperdrive("not-a-real-token")
+
+    def run_recovery(self, cf_patch_error=None, readied=True):
+        action_order = []
+        def update(db_token, credential):
+            action_order.append(("db", credential))
+        def patch(cf_token, credential):
+            action_order.append(("cf", credential))
+            if cf_patch_error:
+                raise recovery.RecoveryFailure(cf_patch_error)
+        fake_socket = mock.MagicMock()
+        fake_socket.__enter__.return_value = fake_socket
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {"CLOUDFLARE_API_TOKEN": "fake-cf-token",
+                                           "SUPABASE_ACCESS_TOKEN": "fake-db-token"}), \
+             mock.patch.object(recovery, "assert_hyperdrive"), \
+             mock.patch.object(recovery, "inspect_role", return_value="SCRAM-SHA-256$old-verifier"), \
+             mock.patch.object(recovery.socket, "create_connection", return_value=fake_socket), \
+             mock.patch.object(recovery.secrets, "token_urlsafe", return_value="new-test-password"), \
+             mock.patch.object(recovery, "update_role", side_effect=update), \
+             mock.patch.object(recovery, "patch_hyperdrive", side_effect=patch), \
+             mock.patch.object(recovery, "restart_hyperdrive"), \
+             mock.patch.object(recovery, "ready", return_value=readied), \
+             mock.patch.object(recovery.time, "sleep"), \
+             redirect_stdout(output):
+            status = recovery.main()
+        self.assertNotIn("new-test-password", output.getvalue())
+        self.assertNotIn("old-verifier", output.getvalue())
+        return status, action_order, output.getvalue()
+
+    def test_success_synchronizes_before_readiness(self):
+        status, actions, output = self.run_recovery()
+        self.assertEqual(status, 0)
+        self.assertEqual(actions, [("db", "new-test-password"), ("cf", "new-test-password")])
+        self.assertIn("ORDAX_MCP_POSTGRES_READY=PASS", output)
+
+    def test_definitive_cloudflare_rejection_rolls_back_database(self):
+        status, actions, output = self.run_recovery(cf_patch_error="provider_http_403")
+        self.assertEqual(status, 5)
+        self.assertEqual(actions, [("db", "new-test-password"), ("cf", "new-test-password"),
+                                   ("db", "SCRAM-SHA-256$old-verifier")])
+        self.assertIn("ROLLED_BACK", output)
+
+    def test_ambiguous_cloudflare_error_does_not_break_synced_authority_by_rollback(self):
+        status, actions, output = self.run_recovery(cf_patch_error="provider_connection_unavailable")
+        self.assertEqual(status, 5)
+        self.assertEqual([a[0] for a in actions], ["db", "cf"])
+        self.assertIn("AMBIGUOUS_WRITE_REQUIRES_OPERATOR_REVIEW", output)
+
+    def test_readiness_failure_never_unsynchronizes_valid_credential(self):
+        status, actions, output = self.run_recovery(readied=False)
+        self.assertEqual(status, 4)
+        self.assertEqual([a[0] for a in actions], ["db", "cf"])
+        self.assertIn("FAIL_AFTER_SYNCHRONIZATION", output)
+
+
+if __name__ == "__main__":
+    unittest.main()
