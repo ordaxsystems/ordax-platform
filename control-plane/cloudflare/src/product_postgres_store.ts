@@ -404,9 +404,17 @@ export async function checkCanonicalProductPostgresReadiness(
       return { ok: false, error: "product_postgres_unavailable", failure_stage: phase };
     }
     return { ok: true, error: null };
-  } catch {
-    // Neither credentials, connection string, PG errors, SQL or exceptions
-    // belong in an unauthenticated readiness response.
+  } catch (error) {
+    // Public readiness remains generic. Operators need a bounded diagnostic
+    // for connectivity incidents without ever logging exception messages,
+    // credentials, URLs or raw PostgreSQL connection strings.
+    const safe = safePostgresFailure(error, "readiness");
+    console.error(JSON.stringify({
+      event: "product_postgres_readiness_failure",
+      phase,
+      classification: safe.classification,
+      signals: safe.signals,
+    }));
     return { ok: false, error: "product_postgres_unavailable", failure_stage: phase };
   } finally {
     if (client) {
