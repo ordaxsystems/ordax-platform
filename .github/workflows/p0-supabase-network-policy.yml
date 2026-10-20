@@ -23,3 +23,7 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: python scripts/cloudflare/audit_supabase_network_policy.py
+      - name: Read current PostgreSQL network bans without revealing addresses
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: python scripts/cloudflare/audit_supabase_network_bans.py
