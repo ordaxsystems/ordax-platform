@@ -1,7 +1,7 @@
 /** Diagnostic Worker, never a Product MCP authority. No D1/OAuth/owner state.
  * Uses the Hyperdrive binding of ONE ephemeral configuration and SELECT 1.
  */
-import { Client } from "pg";
+import { openPostgresSession } from "./data_postgres_driver.ts";
 
 type Env = { POSTGRES: { connectionString: string } };
 
@@ -20,7 +20,7 @@ export default {
     if (request.method !== "GET" || new URL(request.url).pathname !== "/") {
       return new Response("Not found", { status: 404 });
     }
-    const client = new Client({ connectionString: env.POSTGRES.connectionString });
+    const client = openPostgresSession(env.POSTGRES.connectionString);
     let phase = "connect";
     try {
       await client.connect();
