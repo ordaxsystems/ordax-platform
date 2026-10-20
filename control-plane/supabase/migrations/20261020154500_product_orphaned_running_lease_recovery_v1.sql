@@ -245,7 +245,7 @@ begin
   -- A lost Runtime can recover a persisted terminal report after the five-
   -- minute orphan grace. Reconcile ONLY the original fenced attempt; never
   -- reclaim or re-execute that command on another agent.
-  v_late_original_report := pg_catalog.coalesce(
+  v_late_original_report := coalesce(
     v_row.status = 'failed'
     and v_row.error_code = 'execution_outcome_unconfirmed'
     and v_row.report_id is null
