@@ -54,7 +54,7 @@ def api(method: str, url: str, token: str | None = None, body: dict | None = Non
     except urllib.error.HTTPError as exc:
         # The isolated Worker only returns a public-safe phase/classification.
         if exc.code == 503 and re.fullmatch(
-            r"https://ordax-direct-ipv6-diag-[0-9]{5,16}\\.ordaxsystems\\.workers\\.dev/",
+            r"https://ordax-direct-ipv6-diag-[0-9]{5,16}[.]ordaxsystems[.]workers[.]dev/",
             url,
         ):
             try:
