@@ -39,6 +39,23 @@ $function$;
 revoke all on function private.ordax_expire_queued_product_actions_v1(uuid,uuid)
   from public, anon, authenticated, service_role, ordax_edge_executor;
 
+-- Complete the same canonical transition for rows already expired before
+-- this migration. Never create leases, invoke commands or touch running work.
+do $backfill$
+declare
+  v_device_id uuid;
+begin
+  for v_device_id in
+    select distinct r.device_id
+      from private.ordax_product_action_requests r
+     where r.status = 'queued'
+       and r.expires_at <= pg_catalog.clock_timestamp()
+  loop
+    perform private.ordax_expire_queued_product_actions_v1(v_device_id, null);
+  end loop;
+end;
+$backfill$;
+
 create or replace function public.ordax_get_product_action_v1(
   p_owner_user_id uuid,
   p_client_kind text,
