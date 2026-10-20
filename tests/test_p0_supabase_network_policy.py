@@ -20,7 +20,7 @@ class PolicyAuditTests(unittest.TestCase):
     def test_preserves_empty_policy_vs_unknown(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = (
-            b'{"restrictions_applied":false,"db_allowed_cidrs":[],"db_allowed_ipv6_cidrs":[]}'
+            b'{"entitlement":"allowed","status":"stored","config":{"dbAllowedCidrs":[],"dbAllowedCidrsV6":[]}}'
         )
         with mock.patch.object(mod.urllib.request, "urlopen", return_value=response) as call:
             r = mod.inspect("synthetic-bearer")
@@ -33,8 +33,8 @@ class PolicyAuditTests(unittest.TestCase):
     def test_never_prints_allowlist_or_raw_body(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = (
-            b'{"restrictions_applied":true,"db_allowed_cidrs":["192.0.2.1/24"],'
-            b'"db_allowed_ipv6_cidrs":["2001:db8::/64"]}'
+            b'{"entitlement":"allowed","status":"applied","config":{"dbAllowedCidrs":["192.0.2.1/24"],'
+            b'"dbAllowedCidrsV6":["2001:db8::/64"]}}'
         )
         with mock.patch.object(mod.urllib.request, "urlopen", return_value=response):
             r = mod.inspect("synthetic-bearer")

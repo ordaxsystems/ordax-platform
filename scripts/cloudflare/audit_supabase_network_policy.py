@@ -33,18 +33,21 @@ def inspect(token: str) -> dict:
         raise AuditFailure("supabase_policy_unavailable") from None
     if not isinstance(body, dict):
         raise AuditFailure("supabase_network_policy_shape")
-    # Management API has evolved across project versions; do not classify an
-    # unknown shape as unrestricted. List field names only, not CIDR values.
+    # Current v1 Management API: entitlement + status + nested config.
+    # Never log network CIDR values, just counts and non-sensitive statuses.
+    settings = body.get("config")
+    if not isinstance(settings, dict):
+        settings = {}
+    ipv4 = settings.get("dbAllowedCidrs")
+    ipv6 = settings.get("dbAllowedCidrsV6")
+    status = body.get("status")
+    entitlement = body.get("entitlement")
     return {
-        "applied": body.get("restrictions_applied", body.get("applied", "unknown")),
-        "network_policy_fields": sorted(k for k in body if k in (
-            "db_allowed_cidrs", "db_allowed_ipv6_cidrs", "restrictions_applied",
-            "applied", "ipv4", "ipv6", "db_allowed_cidrs_v6"
-        )),
-        "ipv4_count": len(body.get("db_allowed_cidrs", []))
-                      if isinstance(body.get("db_allowed_cidrs"), list) else None,
-        "ipv6_count": len(body.get("db_allowed_ipv6_cidrs", []))
-                      if isinstance(body.get("db_allowed_ipv6_cidrs"), list) else None,
+        "status": status if status in ("applied", "stored", "pending") else "unknown",
+        "entitlement": entitlement if entitlement in ("allowed", "disallowed") else "unknown",
+        "ipv4_count": len(ipv4) if isinstance(ipv4, list) else None,
+        "ipv6_count": len(ipv6) if isinstance(ipv6, list) else None,
+        "applied": status == "applied" if status in ("applied", "stored") else "unknown",
     }
 
 
