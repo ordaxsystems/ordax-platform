@@ -94,6 +94,7 @@ class HyperdriveDriverAbTest(TestCase):
         self.assertIn("github.ref == 'refs/heads/main'", workflow)
         self.assertNotIn("schedule:", workflow)
         self.assertIn("postgres@3.4.5", workflow)
+        self.assertIn('- name: "Dry-run only: no deployed Worker"', workflow)
         self.assertNotIn("SUPABASE_ACCESS_TOKEN", workflow)
 
 
