@@ -88,12 +88,12 @@ class RecoveryContracts(unittest.TestCase):
     def test_healthy_mcp_skips_rotation(self):
         output = io.StringIO()
         with mock.patch.dict(os.environ, {"CLOUDFLARE_API_TOKEN": "fake-cf",
-                                           "SUPABASE_ACCESS_TOKEN": "fake-db"}), \\
-             mock.patch.object(recovery, "assert_hyperdrive"), \\
-             mock.patch.object(recovery, "ready", return_value=True), \\
-             mock.patch.object(recovery, "inspect_role") as inspect, \\
-             mock.patch.object(recovery, "update_role") as update, \\
-             mock.patch.object(recovery, "patch_hyperdrive") as patch, \\
+                                           "SUPABASE_ACCESS_TOKEN": "fake-db"}), \
+             mock.patch.object(recovery, "assert_hyperdrive"), \
+             mock.patch.object(recovery, "ready", return_value=True), \
+             mock.patch.object(recovery, "inspect_role") as inspect, \
+             mock.patch.object(recovery, "update_role") as update, \
+             mock.patch.object(recovery, "patch_hyperdrive") as patch, \
              redirect_stdout(output):
             self.assertEqual(recovery.main(), 0)
         inspect.assert_not_called()
