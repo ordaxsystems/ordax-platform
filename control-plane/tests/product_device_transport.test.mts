@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   canonicalDeviceHeartbeatDigest,
+  isProductReportJsonbSafe,
   handleProductDeviceTransport,
 } from "../cloudflare/src/product_device_transport.ts";
 import { createCanonicalProductMcpGateway } from "../cloudflare/src/product_mcp_entry.ts";
@@ -103,4 +104,12 @@ test("heartbeat bridge rejects mixed schemas, untrusted authority metadata and o
   for (const body of variants) {
     assert.equal(await canonicalDeviceHeartbeatDigest(body), null, JSON.stringify(body).slice(0, 150));
   }
+});
+
+test("PostgreSQL report JSONB rejects NUL recursively without rejecting text escaped for display", () => {
+  const nul = String.fromCharCode(0);
+  assert.equal(isProductReportJsonbSafe({ ok: true, data: { stdout: "line" + nul + "tail" } }), false);
+  assert.equal(isProductReportJsonbSafe({ nested: [{ [nul]: "value" }] }), false);
+  assert.equal(isProductReportJsonbSafe({ nested: [null, "safe", "\\u0000"] }), true);
+  assert.equal(isProductReportJsonbSafe({ stdout: "C:\\\\Users\\\\Work" }), true);
 });
