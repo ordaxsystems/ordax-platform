@@ -128,6 +128,8 @@ class DirectOriginProbeContracts(unittest.TestCase):
     def test_source_has_only_read_only_query(self):
         text = (ROOT / "control-plane/cloudflare/src/hyperdrive_direct_probe.ts").read_text("utf-8")
         self.assertIn("select 1::int as ok", text)
+        self.assertIn('openPostgresSession(env.POSTGRES.connectionString)', text)
+        self.assertNotIn('from "pg"', text)
         for forbidden in ("INSERT INTO", "UPDATE ", "DELETE FROM", "CREATE TABLE",
                           "ordax_", "/mcp", "oauth", "product_device", "env.DB"):
             self.assertNotIn(forbidden, text)
