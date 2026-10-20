@@ -108,12 +108,17 @@ class RecoveryContracts(unittest.TestCase):
 
     def test_pooler_probe_uses_exact_origin_and_never_logs_credential(self):
         sample = mock.Mock(returncode=0, stdout=b"1", stderr=b"")
-        with mock.patch.object(recovery.shutil, "which", return_value="/usr/bin/psql"), \
+        with mock.patch.dict(os.environ, {
+                "CLOUDFLARE_API_TOKEN": "mock-admin",
+                "SUPABASE_ACCESS_TOKEN": "mock-other-admin"}), \
+             mock.patch.object(recovery.shutil, "which", return_value="/usr/bin/psql"), \
              mock.patch.object(recovery.subprocess, "run", return_value=sample) as run:
             recovery.verify_pooler_credential("synthetic-auth-secret")
         args, kwargs = run.call_args
         self.assertNotIn("synthetic-auth-secret", str(args))
         self.assertEqual(kwargs["env"]["PGPASSWORD"], "synthetic-auth-secret")
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", kwargs["env"])
+        self.assertNotIn("SUPABASE_ACCESS_TOKEN", kwargs["env"])
         self.assertEqual(kwargs["env"]["PGUSER"], recovery.POOLER_USER)
         self.assertEqual(kwargs["env"]["PGHOST"], recovery.HOST)
         self.assertEqual(kwargs["env"]["PGSSLMODE"], "require")
