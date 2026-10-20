@@ -89,17 +89,27 @@ def policy(token: str) -> tuple[dict, str]:
 
 
 def official_cloudflare_networks() -> None:
-    """Fail closed if the published Cloudflare IP list diverges from the reviewed snapshot."""
-    for url, expected in (("https://www.cloudflare.com/ips-v4", CF_V4),
-                          ("https://www.cloudflare.com/ips-v6", CF_V6)):
-        try:
-            with urllib.request.urlopen(url, timeout=15) as response:
-                content = response.read(8192).decode("ascii")
-        except (urllib.error.URLError, TimeoutError, OSError, UnicodeError):
-            raise RepairFailure("official_cloudflare_ip_list_unavailable") from None
-        observed = frozenset(content.split())
-        if observed != expected:
-            raise RepairFailure("official_cloudflare_ip_list_mismatch")
+    """Check pinned egress CIDRs using Cloudflare's supported public REST API.
+
+    The static snapshot is intentionally authoritative for the *write*.
+    Network fetches are read-only verification, not an unreviewed dynamic ACL.
+    """
+    try:
+        with urllib.request.urlopen("https://api.cloudflare.com/client/v4/ips", timeout=15) as response:
+            payload = json.loads(response.read(16384))
+    except (urllib.error.URLError, TimeoutError, OSError, UnicodeError, ValueError):
+        raise RepairFailure("official_cloudflare_ip_list_unavailable") from None
+    if not isinstance(payload, dict) or payload.get("success") is not True:
+        raise RepairFailure("official_cloudflare_ip_list_invalid")
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        raise RepairFailure("official_cloudflare_ip_list_invalid")
+    v4 = result.get("ipv4_cidrs")
+    v6 = result.get("ipv6_cidrs")
+    if not isinstance(v4, list) or not isinstance(v6, list):
+        raise RepairFailure("official_cloudflare_ip_list_invalid")
+    if frozenset(v4) != CF_V4 or frozenset(v6) != CF_V6:
+        raise RepairFailure("official_cloudflare_ip_list_mismatch")
 
 
 def merge(current: dict) -> dict:

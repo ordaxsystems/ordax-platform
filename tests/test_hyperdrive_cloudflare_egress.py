@@ -23,6 +23,27 @@ class HyperdriveEgressRepairTests(TestCase):
             network = ipaddress.ip_network(value, strict=True)
             self.assertGreater(network.prefixlen, 0)
 
+    def test_vendor_snapshot_verified_through_official_api(self):
+        import io
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "success": True, "result": {
+                "ipv4_cidrs": sorted(mod.CF_V4), "ipv6_cidrs": sorted(mod.CF_V6),
+            },
+        }).encode()
+        with mock.patch.object(mod.urllib.request, "urlopen", return_value=response) as fetch:
+            mod.official_cloudflare_networks()
+        self.assertEqual(fetch.call_args.args[0], "https://api.cloudflare.com/client/v4/ips")
+        bad = mock.MagicMock()
+        bad.__enter__.return_value.read.return_value = json.dumps({
+            "success": True, "result": {
+                "ipv4_cidrs": [], "ipv6_cidrs": sorted(mod.CF_V6),
+            },
+        }).encode()
+        with mock.patch.object(mod.urllib.request, "urlopen", return_value=bad):
+            with self.assertRaisesRegex(mod.RepairFailure, "official_cloudflare_ip_list_mismatch"):
+                mod.official_cloudflare_networks()
+
     def test_merge_preserves_original_allowed_cidrs(self):
         added = mod.merge(OLD)
         self.assertTrue(set(OLD["dbAllowedCidrs"]).issubset(added["dbAllowedCidrs"]))
