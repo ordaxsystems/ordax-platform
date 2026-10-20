@@ -673,20 +673,62 @@ function authorizationHintForAction(action: string): JsonObject | null {
   };
 }
 
+function actionMonitoringUnavailable(requestId: string, upstreamStatus?: number): JsonObject {
+  // Enqueue already succeeded. Losing the status query is NOT evidence that
+  // the device failed or stopped: callers must retain the original action ID
+  // rather than executing a potentially non-idempotent command a second time.
+  return {
+    ok: true,
+    pending: true,
+    request_id: requestId,
+    monitoring_error: "action_status_unavailable",
+    ...(upstreamStatus === undefined ? {} : { upstream_status: upstreamStatus }),
+    message: "Action was accepted, but its current state cannot be verified. Do not resubmit; check ordax_action_status with this request_id.",
+  };
+}
+
+function pendingActionMessage(status: unknown): string {
+  if (status === "queued") return "Action is queued and has not started; check ordax_action_status with this request_id.";
+  if (status === "leased") return "Action has been leased to the device; check ordax_action_status with this request_id.";
+  if (status === "running") return "Action is executing on the device; check ordax_action_status with this request_id.";
+  return "Action has not reached a verified terminal state; check ordax_action_status with this request_id.";
+}
+
 async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers): Promise<JsonObject> {
   const deadline = Date.now() + timeoutMs;
+  let pollRound = 0;
   while (true) {
     const statusRequest = cloneWithAuth(source, new URL(`/v3/product/actions/${requestId}`, source.url).toString(), "GET");
     let statusResponse: Response;
     try { statusResponse = await handlers.getAction(statusRequest, requestId); }
-    catch { return { ok: false, pending: false, request_id: requestId, error: "action_status_unavailable" }; }
-    const payload = await bodyJson(statusResponse);
-    if (!statusResponse.ok) return { ok: false, pending: false, request_id: requestId,
-      upstream_status: statusResponse.status, error: "action_status_unavailable" };
-    const projected = sanitizeActionPayload(payload, requestId);
-    if (projected.ok !== true || projected.pending === false) return projected;
-    if (Date.now() >= deadline) return sanitizeActionPayload({ ok: true, pending: true, request_id: requestId, message: "Action is still running; call ordax_action_status with this request_id." }, requestId);
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    catch { return actionMonitoringUnavailable(requestId); }
+    if (!statusResponse.ok) {
+      const status = statusResponse.status;
+      // A temporary outage/rate limit while reading does not undo the
+      // durable, previously accepted enqueue. Fail closed for auth denials.
+      if (status === 408 || status === 429 || status >= 500) {
+        return actionMonitoringUnavailable(requestId, status);
+      }
+      return { ok: false, pending: false, request_id: requestId,
+        upstream_status: status, error: "action_status_unavailable" };
+    }
+    const projected = sanitizeActionPayload(await bodyJson(statusResponse), requestId);
+    if (projected.ok !== true) return actionMonitoringUnavailable(requestId);
+    if (projected.pending === false) return projected;
+    if (Date.now() >= deadline) {
+      // Preserve the last attested state (queued/leased/running) rather than
+      // misreporting every pending action as "running" or discarding it.
+      const raw = projected.action;
+      const stage = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as JsonObject).status : null;
+      return { ...projected, message: pendingActionMessage(stage) };
+    }
+    // Polling every 250ms can issue ~80 authenticated PostgreSQL reads in a
+    // 20-second tool wait. Back off to 1.5s while preserving initial latency;
+    // never sleep past the caller's requested deadline.
+    const remainingMs = Math.max(0, deadline - Date.now());
+    const delayMs = Math.min(remainingMs, 250 * (2 ** Math.min(pollRound, 3)), 1500);
+    pollRound++;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 }
 
