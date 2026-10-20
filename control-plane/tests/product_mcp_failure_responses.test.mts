@@ -84,10 +84,21 @@ test("unknown status, missing action and mismatched request stop observation wit
         getAction: async () => { reads++; return Response.json(payload); },
         createAction: async () => { dispatched++; return Response.json({ ok: true, request_id: acceptedId }); },
       });
-      assert.equal(body.result.isError, true);
-      assert.deepEqual(body.result.structuredContent, {
-        ok: false, pending: false, request_id: acceptedId, error: "action_status_invalid_response",
-      });
+      if (name === "ordax_action_status") {
+        assert.equal(body.result.isError, true);
+        assert.deepEqual(body.result.structuredContent, {
+          ok: false, pending: false, request_id: acceptedId, error: "action_status_invalid_response",
+        });
+      } else {
+        // An ACK is already durable. A malformed status read gives no proof
+        // that execution stopped; prevent an accidental duplicate dispatch.
+        assert.equal(body.result.isError, false);
+        assert.equal(body.result.structuredContent.ok, true);
+        assert.equal(body.result.structuredContent.pending, true);
+        assert.equal(body.result.structuredContent.request_id, acceptedId);
+        assert.equal(body.result.structuredContent.monitoring_error, "action_status_unavailable");
+        assert.match(body.result.structuredContent.message, /Do not resubmit/);
+      }
       assert.equal(reads, 1);
       assert.equal(dispatched, name === "git_status" ? 1 : 0);
     }
@@ -106,10 +117,18 @@ test("accepted action retains continuation ID across HTTP and thrown status fail
         getAction: async () => { reads++; return statusFailure(); },
         createAction: async () => { dispatched++; return Response.json({ ok: true, request_id: acceptedId }); },
       });
-      assert.equal(body.result.isError, true);
       assert.equal(body.result.structuredContent.request_id, acceptedId);
-      assert.equal(body.result.structuredContent.pending, false);
-      assert.equal(body.result.structuredContent.error, "action_status_unavailable");
+      if (name === "ordax_action_status") {
+        assert.equal(body.result.isError, true);
+        assert.equal(body.result.structuredContent.pending, false);
+        assert.equal(body.result.structuredContent.error, "action_status_unavailable");
+      } else {
+        assert.equal(body.result.isError, false);
+        assert.equal(body.result.structuredContent.ok, true);
+        assert.equal(body.result.structuredContent.pending, true);
+        assert.equal(body.result.structuredContent.monitoring_error, "action_status_unavailable");
+        assert.match(body.result.structuredContent.message, /Do not resubmit/);
+      }
       assert.equal(reads, 1); assert.equal(dispatched, name === "git_status" ? 1 : 0);
       for (const secret of ["secret", "private", "SQL", "postgres://"]) assert.equal(JSON.stringify(body).includes(secret), false);
     }
