@@ -1,0 +1,67 @@
+name: Hyperdrive Driver A/B
+on:
+  pull_request:
+    paths:
+      - "control-plane/cloudflare/labs/hyperdrive_driver_ab.ts"
+      - "scripts/cloudflare/probe_hyperdrive_driver_ab.py"
+      - "tests/test_hyperdrive_driver_ab_contract.py"
+      - ".github/workflows/hyperdrive-driver-ab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ordax-hyperdrive-driver-ab-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Run isolated source contracts
+        run: python -m unittest discover -s tests -p test_hyperdrive_driver_ab_contract.py -v
+      - name: Install fixed diagnostic-only Postgres.js
+        run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-save --no-audit --no-fund --package-lock=false postgres@3.4.5
+      - name: Dry-run only: no deployed Worker
+        working-directory: control-plane/cloudflare
+        run: |
+          cat > _hyperdrive_driver_ab.toml <<'EOF'
+          name = "ordax-hyperdrive-ab-dry-run"
+          main = "labs/hyperdrive_driver_ab.ts"
+          compatibility_date = "2026-10-20"
+          compatibility_flags = ["nodejs_compat"]
+          workers_dev = true
+          preview_urls = false
+          [[hyperdrive]]
+          binding = "POSTGRES"
+          id = "4b601ec5815f43259bd8040053825d2a"
+          EOF
+          npx --yes wrangler@4.141.0 deploy --dry-run --config _hyperdrive_driver_ab.toml --outdir .hyperdrive-driver-ab-bundle
+
+  proof:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    environment: cloudflare-v3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Install diagnostic-only drivers
+        run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-save --no-audit --no-fund --package-lock=false postgres@3.4.5
+      - name: Probe the existing single Hyperdrive and destroy test Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python scripts/cloudflare/probe_hyperdrive_driver_ab.py
