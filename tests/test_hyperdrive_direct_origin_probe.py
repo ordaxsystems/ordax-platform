@@ -125,6 +125,39 @@ class DirectOriginProbeContracts(unittest.TestCase):
         drop.assert_called_once()
         self.assertIn("ORDAX_DIRECT_ROLE_CLEANUP=PASS", out.getvalue())
 
+    def test_curl_probe_parses_only_safe_select_one_response(self):
+        good = mock.Mock(returncode=0, stdout=(
+            b'{"ok":true,"phase":"complete"}' + bytes([10]) + b"200"), stderr=b"")
+        with mock.patch.object(probe.shutil, "which", return_value="/usr/bin/curl"), \
+             mock.patch.object(probe.subprocess, "run", return_value=good) as runner:
+            result = probe.check_worker("ordax-direct-ipv6-diag-39478283587")
+        self.assertEqual(result, {"ok": True, "phase": "complete"})
+        self.assertEqual(runner.call_args.args[0][0], "curl")
+        self.assertNotIn("--location", runner.call_args.args[0])
+
+    def test_curl_worker_503_returns_only_safe_postgres_phase(self):
+        failure = mock.Mock(returncode=0, stdout=(
+            b'{"ok":false,"phase":"connect","classification":"connection_terminated",'
+            b'"secret":"mock-secret"}' + bytes([10]) + b"503"), stderr=b"")
+        with mock.patch.object(probe.shutil, "which", return_value="/usr/bin/curl"), \
+             mock.patch.object(probe.subprocess, "run", return_value=failure):
+            result = probe.check_worker("ordax-direct-ipv6-diag-39478283587")
+        self.assertEqual(result, {"ok": False, "phase": "connect",
+                                  "classification": "connection_terminated"})
+        self.assertNotIn("mock-secret", json.dumps(result))
+
+    def test_worker_http_403_is_bounded_no_secrets(self):
+        denied = mock.Mock(returncode=0, stdout=b"private content" + bytes([10]) + b"403",
+                           stderr=b"mock-private-secret")
+        with mock.patch.object(probe.shutil, "which", return_value="/usr/bin/curl"), \
+             mock.patch.object(probe.subprocess, "run", return_value=denied) as runner, \
+             mock.patch.object(probe.time, "sleep") as sleep:
+            with self.assertRaisesRegex(probe.ProbeError, "probe_http_403") as caught:
+                probe.check_worker("ordax-direct-ipv6-diag-39478283587")
+        self.assertEqual(runner.call_count, 6)
+        self.assertEqual(sleep.call_count, 5)
+        self.assertNotIn("mock-private-secret", str(caught.exception))
+
     def test_source_has_only_read_only_query(self):
         text = (ROOT / "control-plane/cloudflare/src/hyperdrive_direct_probe.ts").read_text("utf-8")
         self.assertIn("select 1::int as ok", text)
