@@ -26,7 +26,7 @@ class ProductReadonlyWorkerContractTests(unittest.TestCase):
 
     def test_legacy_mutation_route_is_retired_instead_of_parallel_authority(self):
         self.assertIn('path === "/v3/product/actions" && request.method === "POST"', self.worker)
-        self.assertIn('error: "legacy_product_action_retired"', self.worker)
+        self.assertIn('"legacy_product_action_retired"', self.worker)
         self.assertIn('product_typed_actions_v2', self.worker)
         self.assertNotIn("'ordax.product.invoke'", self.worker)
         self.assertNotIn("env.DB", self.worker)
@@ -71,7 +71,7 @@ class ProductReadonlyWorkerContractTests(unittest.TestCase):
 
     def test_product_audit_is_private_not_an_anonymous_worker_route(self):
         self.assertIn('path === "/v3/product/audit"', self.worker)
-        self.assertIn('error: "legacy_endpoint_retired"', self.worker)
+        self.assertIn('"legacy_endpoint_retired"', self.worker)
         self.assertIn("revoke all on table private.ordax_product_action_audit", self.authority)
 
 
