@@ -349,10 +349,13 @@ export async function handleProductDeviceTransport(
   env: ProductPostgresEnv,
 ): Promise<Response> {
   if (request.method !== "POST") return respond({ ok: false, error: "method_not_allowed" }, 405);
-  const auth = await authenticateDeviceRequest(request, env);
-  if (!auth.ok) return auth.response;
-  const path = new URL(request.url).pathname;
   try {
+    // Authentication itself calls PostgreSQL. Keep it inside the same
+    // canonical error boundary as claim/report so transient RPC failures
+    // return a retryable 503 instead of an uncaught HTTP 500.
+    const auth = await authenticateDeviceRequest(request, env);
+    if (!auth.ok) return auth.response;
+    const path = new URL(request.url).pathname;
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/heartbeat") return heartbeat(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/claim") return claim(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/start") return start(request, env, auth.deviceId);
