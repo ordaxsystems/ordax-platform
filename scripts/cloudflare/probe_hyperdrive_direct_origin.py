@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import tempfile
 import time
@@ -182,18 +183,46 @@ def deploy_worker(name: str, hyperdrive_id: str):
 
 
 def check_worker(name: str) -> dict:
+    """Probe with curl, as the original isolated Cloudflare probe did.
+
+    A fresh workers.dev route may need time to propagate. No authorization
+    headers, no secrets, no redirects, and only read-only SELECT 1.
+    """
     url = f"https://{name}.ordaxsystems.workers.dev/"
-    for attempt in range(3):
+    if shutil.which("curl") is None:
+        raise ProbeError("curl_missing")
+    status = "unknown"
+    for attempt in range(6):
         try:
-            response = api("GET", url)
-            if not isinstance(response, dict):
-                raise ProbeError("probe_invalid_response")
-            return {k: response.get(k) for k in ("ok", "phase", "classification", "code")}
-        except ProbeError as exc:
-            if attempt == 2 or not str(exc).startswith(("provider_http_404", "provider_connection")):
-                raise
-            time.sleep(4)
-    raise ProbeError("probe_unreachable")
+            result = subprocess.run(
+                ["curl", "--silent", "--show-error", "--max-time", "15",
+                 "--write-out", "\\n%{http_code}", url],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                check=False, timeout=22,
+            )
+            if result.returncode:
+                status = "transport"
+            else:
+                body, sep, code = result.stdout.rpartition(b"\\n")
+                status = code.decode("ascii", "replace").strip()[:3] if sep else "invalid"
+                if status in ("200", "503"):
+                    value = json.loads(body[:8192])
+                    if not isinstance(value, dict):
+                        raise ProbeError("probe_invalid_response")
+                    if status == "200" and value.get("ok") is True and value.get("phase") == "complete":
+                        return {"ok": True, "phase": "complete"}
+                    phase = value.get("phase")
+                    label = value.get("classification")
+                    if phase in ("connect", "query") and isinstance(label, str) and re.fullmatch(
+                        r"[a-z_]{1,48}", label
+                    ):
+                        return {"ok": False, "phase": phase, "classification": label}
+                    raise ProbeError("probe_invalid_response")
+        except (OSError, subprocess.TimeoutExpired, ValueError, UnicodeDecodeError):
+            status = "transport"
+        if attempt < 5:
+            time.sleep(5)
+    raise ProbeError("probe_http_" + (status if status.isdigit() else "unavailable"))
 
 
 def run():
