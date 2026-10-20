@@ -1,5 +1,6 @@
 -- Execute after the migration. This postflight leaves all data unchanged.
--- Probe a real expired queued request only inside a rolled-back transaction.
+-- Temporarily requeue one already-expired historical action only inside a
+-- rolled-back transaction; no live job may be newly leased or executed.
 begin;
 
 do $postflight$
@@ -29,7 +30,10 @@ begin
 
   select * into v_expired
     from private.ordax_product_action_requests
-   where status = 'queued'
+   where status = 'failed'
+     and error_code = 'action_expired'
+     and execution_epoch = 0
+     and report_id is null
      and expires_at <= pg_catalog.clock_timestamp()
      and client_kind in ('ordax-web','ordax-mobile','product-mcp')
      and client_id is not null
@@ -37,9 +41,16 @@ begin
    limit 1;
 
   if not found then
-    raise notice 'No expired queued fixture available; ACL/definition assertions passed';
+    raise notice 'No historical expired fixture available; ACL/definition assertions passed';
     return;
   end if;
+
+  -- This row cannot be claimed: the modification remains uncommitted,
+  -- the request deadline has elapsed, and the transaction rolls back below.
+  update private.ordax_product_action_requests
+     set status = 'queued', error_code = null, finished_at = null
+   where request_id = v_expired.request_id
+     and status = 'failed' and error_code = 'action_expired';
 
   v_result := public.ordax_get_product_action_v1(
     v_expired.owner_user_id,v_expired.client_kind,
