@@ -30,7 +30,9 @@ test("PostgreSQL diagnostics expose only allowlisted non-secret fields", () => {
 
 test("store logs only the safe diagnostic envelope before generic failure", () => {
   const source = fs.readFileSync(new URL("../cloudflare/src/product_postgres_store.ts", import.meta.url), "utf8");
-  assert.match(source, /console\.error\(JSON\.stringify\(\{ \.\.\.safePostgresFailure\(error, rpc\), phase \}\)\)/);
+  assert.match(source, /const diagnostic = safePostgresFailure\(error, rpc\)/);
+  assert.match(source, /console\\.error\\(JSON\\.stringify\\(\\{ \\.\\.\\.diagnostic, phase \\}\\)\\)/);
+  assert.match(source, /diagnostic\\.code === "22P05"/);
   assert.match(source, /let phase: "connect" \| "query" \| "decode" = "connect"/);
   assert.match(source, /phase = "query"/);
   assert.match(source, /phase = "decode"/);
