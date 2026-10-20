@@ -46,6 +46,25 @@ class HyperdriveDriverAbTest(TestCase):
                                   "classification": "terminated_unexpectedly"})
         self.assertNotIn("hidden", json.dumps(report))
 
+    def test_machine_codes_are_bounded_and_secret_strings_never_escape(self):
+        raw = {"driver": "postgres_js", "ok": False,
+               "phase": "connect_or_query", "classification": "other",
+               "code": "CONNECTION_CLOSED", "error_class": "PostgresError",
+               "secret": "postgres://mock-secret"}
+        response = mock.Mock(returncode=0, stdout=json.dumps(raw).encode() + bytes([10]) + b"503", stderr=b"password hidden")
+        with mock.patch.object(ab.subprocess, "run", return_value=response):
+            report = ab.probe("ordax-hyperdrive-ab-39494974328", "/postgres-js")
+        self.assertEqual(report.get("code"), "CONNECTION_CLOSED")
+        self.assertEqual(report.get("error_class"), "PostgresError")
+        self.assertNotIn("mock-secret", json.dumps(report))
+        raw["code"] = "bad token mock-secret"
+        raw["error_class"] = "SecretError"
+        response.stdout = json.dumps(raw).encode() + bytes([10]) + b"503"
+        with mock.patch.object(ab.subprocess, "run", return_value=response):
+            report = ab.probe("ordax-hyperdrive-ab-39494974328", "/postgres-js")
+        self.assertNotIn("code", report)
+        self.assertNotIn("error_class", report)
+
     def test_success_and_protected_path(self):
         mockproc = mock.Mock(returncode=0, stdout=b'{"driver":"postgres_js","ok":true,"phase":"complete"}' + bytes([10]) + b"200", stderr=b"")
         with mock.patch.object(ab.subprocess, "run", return_value=mockproc):

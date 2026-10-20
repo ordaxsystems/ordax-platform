@@ -9,7 +9,8 @@ type ProbeEnv = { POSTGRES: { connectionString: string } };
 type DriverName = "node_postgres" | "postgres_js";
 
 function classify(err: unknown): string {
-  const msg = err instanceof Error ? err.message.toLowerCase() : "";
+  const record = err && typeof err === "object" ? err as Record<string, unknown> : {};
+  const msg = typeof record.message === "string" ? record.message.toLowerCase() : "";
   if (msg.includes("connection terminated unexpectedly")) return "terminated_unexpectedly";
   if (msg.includes("connection terminated") || msg.includes("connection closed")) return "connection_closed";
   if (msg.includes("authentication") || msg.includes("password")) return "authentication";
@@ -17,6 +18,21 @@ function classify(err: unknown): string {
   if (msg.includes("timeout") || msg.includes("timed out")) return "timeout";
   if (msg.includes("refused") || msg.includes("unreachable")) return "network";
   return "other";
+}
+
+function safeError(err: unknown): { classification: string; code?: string; error_class?: string } {
+  const record = err && typeof err === "object" ? err as Record<string, unknown> : {};
+  // Only bounded machine codes are permitted. Never expose message, stack,
+  // connection URI, hostname, query text, credentials, or arbitrary metadata.
+  const rawCode = record.code;
+  const code = typeof rawCode === "string" && /^[A-Z0-9_]{2,32}$/.test(rawCode)
+    ? rawCode : undefined;
+  const rawName = record.name;
+  const errorClass = typeof rawName === "string"
+    && ["Error", "TypeError", "PostgresError", "AggregateError"].includes(rawName)
+    ? rawName : undefined;
+  return { classification: classify(err),
+    ...(code ? { code } : {}), ...(errorClass ? { error_class: errorClass } : {}) };
 }
 
 async function probePg(connectionString: string): Promise<{ ok: boolean; phase: string; classification?: string }> {
@@ -28,7 +44,7 @@ async function probePg(connectionString: string): Promise<{ ok: boolean; phase: 
     const result = await client.query<{ ok: number }>("select 1::int as ok");
     return { ok: result.rows?.[0]?.ok === 1, phase: "complete" };
   } catch (error) {
-    return { ok: false, phase, classification: classify(error) };
+    return { ok: false, phase, ...safeError(error) };
   } finally {
     await client.end().catch(() => {});
   }
@@ -45,7 +61,7 @@ async function probePostgresJs(connectionString: string): Promise<{ ok: boolean;
     const result = await sql`select 1::int as ok`;
     return { ok: result[0]?.ok === 1, phase: "complete" };
   } catch (error) {
-    return { ok: false, phase: "connect_or_query", classification: classify(error) };
+    return { ok: false, phase: "connect_or_query", ...safeError(error) };
   } finally {
     await sql.end({ timeout: 1 }).catch(() => {});
   }
