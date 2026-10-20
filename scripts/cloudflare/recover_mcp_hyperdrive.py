@@ -136,7 +136,9 @@ def verify_pooler_credential(credential: str) -> None:
     """
     if shutil.which("psql") is None:
         raise RecoveryFailure("pooler_probe_cli_missing")
-    env = dict(os.environ)
+    # Do not pass Cloudflare/Supabase administration tokens into psql.
+    env = {key: value for key, value in os.environ.items()
+           if key in {"PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT"}}
     env["PGPASSWORD"] = credential
     env["PGHOST"] = HOST
     env["PGPORT"] = "5432"
