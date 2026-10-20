@@ -1,5 +1,5 @@
 from pathlib import Path
-import hashlib
+import subprocess
 import json
 import unittest
 
@@ -409,10 +409,13 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
         )
 
         for path in source_files:
-            data = path.read_bytes()
-            git_blob = hashlib.sha1(
-                f"blob {len(data)}\0".encode("utf-8") + data
-            ).hexdigest()
+            # The registry records the canonical Git blob after attributes
+            # normalize Windows CRLF; raw worktree bytes are not Git object bytes.
+            relative = path.relative_to(ROOT).as_posix()
+            git_blob = subprocess.check_output(
+                ["git", "hash-object", f"--path={relative}", relative],
+                cwd=ROOT, text=True,
+            ).strip()
             self.assertEqual(
                 git_blob,
                 entries[path.stem]["source"]["blob_sha"],
