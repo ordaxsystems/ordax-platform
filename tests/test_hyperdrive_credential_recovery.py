@@ -107,7 +107,7 @@ class RecoveryContracts(unittest.TestCase):
         self.assertIn("ROLLED_BACK", output)
 
     def test_pooler_probe_uses_exact_origin_and_never_logs_credential(self):
-        sample = mock.Mock(returncode=0, stdout=b"1\\n", stderr=b"")
+        sample = mock.Mock(returncode=0, stdout=b"1", stderr=b"")
         with mock.patch.object(recovery.shutil, "which", return_value="/usr/bin/psql"), \
              mock.patch.object(recovery.subprocess, "run", return_value=sample) as run:
             recovery.verify_pooler_credential("synthetic-auth-secret")
