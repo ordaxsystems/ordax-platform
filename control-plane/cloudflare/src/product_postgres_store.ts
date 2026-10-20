@@ -468,7 +468,15 @@ async function callRpc<T>(
     // The client-facing response remains deliberately generic. Emit only an
     // allowlisted diagnostic envelope: never SQL, values, connection strings,
     // hostnames, credentials, messages or stacks.
-    console.error(JSON.stringify({ ...safePostgresFailure(error, rpc), phase }));
+    const diagnostic = safePostgresFailure(error, rpc);
+    console.error(JSON.stringify({ ...diagnostic, phase }));
+    // SQLSTATE 22P05 means the report contains a U+0000 character that
+    // PostgreSQL JSONB cannot store. This is invalid action output, not an
+    // unavailable database: retries of identical bytes can never succeed.
+    if (rpc === "ordax_report_product_action_v1"
+        && (diagnostic.code === "22P05" || diagnostic.cause_code === "22P05")) {
+      throw new ProductPostgresError("report_result_invalid_unicode", 422);
+    }
     throw new ProductPostgresError("product_postgres_unavailable", 503);
   } finally {
     try {
