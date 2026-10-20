@@ -52,6 +52,21 @@ def api(method: str, url: str, token: str | None = None, body: dict | None = Non
             raw = response.read(131072)
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as exc:
+        # The isolated Worker only returns a public-safe phase/classification.
+        if exc.code == 503 and re.fullmatch(
+            r"https://ordax-direct-ipv6-diag-[0-9]{5,16}\\.ordaxsystems\\.workers\\.dev/",
+            url,
+        ):
+            try:
+                report = json.loads(exc.read(8192))
+                phase = report.get("phase") if isinstance(report, dict) else None
+                label = report.get("classification") if isinstance(report, dict) else None
+                if phase in ("connect", "query") and isinstance(label, str) and re.fullmatch(
+                    r"[a-z_]{1,48}", label
+                ):
+                    return {"ok": False, "phase": phase, "classification": label}
+            except (ValueError, OSError):
+                pass
         # Provider error bodies can contain the submitted SQL/password.
         code = exc.code
         safe_cf = None
@@ -100,11 +115,12 @@ def require_unique_role(token: str, role: str):
 
 
 def create_role(token: str, role: str, credential: str):
-    sql(token, f"create role {role} login password {literal(credential)}")
+    # DDL may return an empty HTTP body on success; do not misparse it.
+    api("POST", DB_API, token, {"query": f"create role {role} login password {literal(credential)}"})
 
 
 def delete_role(token: str, role: str):
-    sql(token, f"drop role if exists {role}")
+    api("POST", DB_API, token, {"query": f"drop role if exists {role}"})
 
 
 def create_hyperdrive(token: str, name: str, role: str, credential: str) -> str:
