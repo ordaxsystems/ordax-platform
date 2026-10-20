@@ -38,6 +38,21 @@ function respond(value: unknown, status = 200): Response {
   });
 }
 
+/**
+ * PostgreSQL jsonb cannot store the U+0000 character, including when it
+ * arrives JSON-escaped. Reject the invalid canonical result before any RPC
+ * to avoid misreporting malformed output as a database outage.
+ */
+export function isProductReportJsonbSafe(value: unknown): boolean {
+  if (typeof value === "string") return !value.includes(String.fromCharCode(0));
+  if (Array.isArray(value)) return value.every(isProductReportJsonbSafe);
+  if (value && typeof value === "object") {
+    return Object.entries(value).every(([key, item]) =>
+      isProductReportJsonbSafe(key) && isProductReportJsonbSafe(item));
+  }
+  return true;
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (item) => item.toString(16).padStart(2, "0")).join("");
@@ -311,6 +326,9 @@ async function report(request: Request, env: ProductPostgresEnv, deviceId: strin
     result = parsed as Json;
   } catch {
     return respond({ ok: false, error: "report_invalid" }, 400);
+  }
+  if (!isProductReportJsonbSafe(result)) {
+    return respond({ ok: false, error: "report_result_invalid_unicode" }, 422);
   }
   const committed = await reportProductAction(env, {
     deviceId, ...ctx, reportId, status, result, resultSha256, errorCode,
