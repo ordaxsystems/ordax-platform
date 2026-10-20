@@ -30,7 +30,7 @@ jobs:
         run: python -m unittest discover -s tests -p test_hyperdrive_driver_ab_contract.py -v
       - name: Install fixed diagnostic-only Postgres.js
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-save --no-audit --no-fund --package-lock=false postgres@3.4.5
-      - name: Dry-run only: no deployed Worker
+      - name: "Dry-run only: no deployed Worker"
         working-directory: control-plane/cloudflare
         run: |
           cat > _hyperdrive_driver_ab.toml <<'EOF'
