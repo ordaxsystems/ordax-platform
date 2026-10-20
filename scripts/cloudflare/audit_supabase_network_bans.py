@@ -52,14 +52,31 @@ def inspect(token: str, *, include_cloudflare_overlap: bool = False) -> dict:
             raise BanAuditFailure("cloudflare_ip_list_invalid")
         try:
             networks = [ipaddress.ip_network(x, strict=True) for x in ranges]
-            addresses = [ipaddress.IPv4Address(entry["banned_address"]) for entry in entries]
             if any(net.version != 4 or net.prefixlen == 0 for net in networks):
                 raise ValueError("unsafe network")
         except ValueError:
-            raise BanAuditFailure("network_ban_address_invalid") from None
-        count = sum(any(addr in network for network in networks) for addr in addresses)
-        report["cloudflare_banned_ipv4_count"] = count
-        report["other_banned_ipv4_count"] = len(addresses) - count
+            raise BanAuditFailure("cloudflare_ip_list_invalid") from None
+        matched = 0
+        unmatched = 0
+        unparsed = 0
+        for entry in entries:
+            raw = entry["banned_address"]
+            try:
+                value = ipaddress.ip_network(raw, strict=False)
+                if value.version != 4:
+                    raise ValueError("not ipv4")
+            except ValueError:
+                # The management API may return e.g. a non-address identifier.
+                # Do not log it or silently treat it as outside Cloudflare.
+                unparsed += 1
+                continue
+            if any(value.overlaps(network) for network in networks):
+                matched += 1
+            else:
+                unmatched += 1
+        report["cloudflare_banned_ipv4_count"] = matched
+        report["other_banned_ipv4_count"] = unmatched
+        report["unparsed_ban_count"] = unparsed
     return report
 
 
