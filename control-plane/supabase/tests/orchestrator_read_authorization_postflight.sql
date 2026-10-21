@@ -18,12 +18,13 @@ begin
     or v_definition not like '%r.lease_id = p_lease_id%'
     or v_definition not like '%r.execution_epoch = p_execution_epoch%'
   then raise exception 'orchestrator_authorization_contract_mismatch'; end if;
-  foreach v_role in array array['anon','authenticated','service_role','ordax_edge_runtime'] loop
+  foreach v_role in array array['anon','authenticated','service_role'] loop
     if has_function_privilege(v_role,v_oid,'EXECUTE') then
       raise exception 'orchestrator_authorization_public_execute';
     end if;
   end loop;
-  if not has_function_privilege('ordax_edge_executor',v_oid,'EXECUTE') then
+  if not has_function_privilege('ordax_edge_executor',v_oid,'EXECUTE')
+     or not has_function_privilege('ordax_edge_runtime',v_oid,'EXECUTE') then
     raise exception 'orchestrator_authorization_executor_missing';
   end if;
 end;

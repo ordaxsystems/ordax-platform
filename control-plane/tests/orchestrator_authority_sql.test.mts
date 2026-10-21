@@ -17,6 +17,7 @@ test('actual PostgreSQL resolver fences live App reads, grant/consent revocation
       create schema private; create schema auth;
       create role anon; create role authenticated; create role service_role;
       create role ordax_edge_executor; create role ordax_edge_runtime;
+      grant ordax_edge_executor to ordax_edge_runtime;
       create table auth.users(id uuid primary key,deleted_at timestamptz,is_anonymous boolean default false,
         confirmed_at timestamptz default now(),banned_until timestamptz);
       create table public.ordax_accounts(user_id uuid primary key);
@@ -88,7 +89,7 @@ test('actual PostgreSQL resolver fences live App reads, grant/consent revocation
       assert.equal((await call()).ok,false,mutation);await db.exec('rollback');
     }
     const signature='public.ordax_orchestrator_read_authorization_v1(uuid,uuid,uuid,uuid,uuid,bigint,uuid,text)';
-    for(const role of ['anon','authenticated','service_role','ordax_edge_runtime']){
+    for(const role of ['anon','authenticated','service_role']){
       const r=await db.query('select has_function_privilege($1,$2,\'EXECUTE\') as allowed',[role,signature]);
       assert.equal(r.rows[0].allowed,false,role);
     }

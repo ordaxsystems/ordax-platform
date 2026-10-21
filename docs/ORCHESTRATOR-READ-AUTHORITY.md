@@ -37,9 +37,14 @@ The checked-in postflight verifies the installed function and privileges
 without creating data. HTTP tests check device authentication and rejection of
 model identity fields. Runtime tests cover fresh checks and late disclosure.
 
-Local: 282 Node tests passed. Broad Python discovery has seven failures and one
-setup error already reproduced on unchanged main (retired route/source tests);
-the new registry entry remains pending until canonical migration application.
+Local: 282 Node tests passed. Broad Python discovery has six failures and one
+setup error already reproduced on unchanged main (retired route/source tests).
+The canonical migration was applied once as ledger version `20261021184429`
+after source PR #264 was opened. The read-only postflight passed against the
+installed function: anon/authenticated/service_role cannot execute; the
+canonical edge executor and its inheriting runtime login can execute. Invalid
+execution context returns denial. No test grant or task was created live.
+Security advisors showed no new findings relative to the preflight baseline.
 Do not conceal those results or change unrelated product contracts.
 
 Rollout follows `control-plane/supabase/README.md`: branch/PR first, migration

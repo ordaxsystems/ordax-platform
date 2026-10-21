@@ -662,9 +662,9 @@
     },
     {
       "name": "20261021183531_orchestrator_read_authorization_v1",
-      "applied_version": null,
-      "state": "pending",
-      "ledger_source_relation": "not-applied",
+      "applied_version": "20261021184429",
+      "state": "applied",
+      "ledger_source_relation": "exact",
       "source": {
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261021183531_orchestrator_read_authorization_v1.sql",
