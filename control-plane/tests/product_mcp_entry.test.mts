@@ -147,7 +147,7 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
     "computer_drag", "computer_clipboard_write", "computer_launch_app",
     "computer_scroll", "computer_type", "computer_hotkey",
-    "computer_access_status", "computer_file_stat", "computer_directory_list", "computer_text_read",
+    "computer_access_status", "orchestrator_lab_status", "computer_file_stat", "computer_directory_list", "computer_text_read",
     "computer_search", "computer_processes", "computer_terminate_process",
     "computer_text_write", "computer_text_patch",
     "computer_directory_create", "computer_path_move", "computer_path_remove",

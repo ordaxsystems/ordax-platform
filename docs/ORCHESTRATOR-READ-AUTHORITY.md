@@ -52,3 +52,12 @@ exactly once, ledger version/blob pinned, postflight, then integration checks.
 The Worker is not deployed by creating this source PR. Verified installation
 registration/provenance, actual job executor, public MCP projection and live
 account/device E2E remain prerequisites. Full 24h supervision is not enabled.
+
+## First public read
+
+`orchestrator_lab_status` is a read-only public MCP action that enqueues the
+device-scoped `orchestrator.app_read` capability. It accepts device selection and
+completion wait only; the action payload is empty. The attested boundary requires
+the `orchestrator-app-read` profile and rejects generic computer profiles even if
+they contain the capability. Runtime owns verified installation lookup and status
+execution. Source registration does not deploy the Worker or install the App.
