@@ -73,6 +73,7 @@ const ATTESTED_PROCESS_MUTATION_ACTIONS = new Set(["computer.terminate_process"]
 const ATTESTED_TERMINAL_ACTIONS = new Set(["computer.terminal_exec"]);
 const ATTESTED_DEVICE_PROCESS_ACTIONS = new Set(["computer.process_start", "computer.process_status", "computer.process_list", "computer.process_logs", "computer.process_write_stdin", "computer.process_stop"]);
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
+  "orchestrator.app_read",
   ...OBSERVE_ACTIONS,
   ...INTERACTIVE_ACTIONS,
   ...ATTESTED_FILESYSTEM_READ_ACTIONS,
@@ -102,6 +103,7 @@ function validAttestedDevice(value: AttestedMcpDevice | null): value is Attested
 }
 
 function requiredProfile(action: string): string | null {
+  if (action === "orchestrator.app_read") return "orchestrator-app-read";
   // Observation remains the least-privilege answer for the five capabilities
   // shared with the broader interactive profile.
   if (action === "computer.terminal_exec") return "device-native-terminal";
@@ -159,6 +161,7 @@ function validButton(value: unknown): boolean {
 export function validAttestedDeviceActionArguments(action: string, value: unknown): value is Json {
   if (!ATTESTED_MCP_DEVICE_ACTIONS.has(action) || !isRecord(value)) return false;
   const keys = Object.keys(value);
+  if (action === "orchestrator.app_read") return keys.length === 0;
 
   if (["computer.access_status", "computer.active_window", "computer.screen_info"].includes(action)) {
     return keys.length === 0;
@@ -411,6 +414,7 @@ export function catalogAllowsAttestedDeviceAction(
     if (expires !== undefined && expires !== null
       && (typeof expires !== "string" || !Number.isFinite(Date.parse(expires)))) return false;
     if (typeof expires === "string" && Date.parse(expires) <= Date.now()) continue;
+    if (action === "orchestrator.app_read" && rawGroup.profile_key !== profile) continue;
     if (rawGroup.profile_key !== profile && rawGroup.profile_key !== FULL_COMPUTER_CONTROL_MODE
       && !(profile === TEXT_EDIT_COMPUTER_CONTROL_MODE
         && rawGroup.profile_key === FILESYSTEM_COMPUTER_CONTROL_MODE)) continue;

@@ -541,3 +541,33 @@ test("Owner clipboard and guarded process control enqueue exact write authority"
       catalog(grantGroup("full-computer-control", action, "write")), DEVICE, action), true);
   }
 });
+
+test("Orchestrator status enqueues only a dedicated read grant with no model identity or path", async () => {
+  const action = "orchestrator.app_read";
+  assert.equal(validAttestedDeviceActionArguments(action, {}), true);
+  for (const args of [{ path: "C:/fake" }, { grant_id: OWNER }, { operation: "tasks.create" }]) {
+    assert.equal(validAttestedDeviceActionArguments(action, args), false);
+  }
+  let calls = 0;
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("orchestrator-app-read", action, "read")),
+    enqueue: async (_env, input) => {
+      calls++;
+      assert.equal(input.capability, action);
+      assert.equal(input.projectId, null);
+      assert.equal(input.accessMode, "read");
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+  });
+  assert.equal((await handler(actionRequest(action))).status, 202);
+  assert.equal(calls, 1);
+  for (const profile of ["computer-full-control", "computer-read", "device-native-process"]) {
+    const denied = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+      authenticate: identity,
+      listTargets: async () => catalog(grantGroup(profile, action, "read")),
+      enqueue: async () => { throw Error("wrong authority must not enqueue"); },
+    });
+    assert.equal((await denied(actionRequest(action))).status, 403);
+  }
+});

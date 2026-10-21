@@ -120,6 +120,7 @@ const ATTESTED_DEVICE_NATIVE_EXECUTION_TOOLS: ReadonlySet<string> = new Set([
   "computer_process_stop",
 ]);
 const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
+  "orchestrator_lab_status",
   ...ATTESTED_DEVICE_OBSERVE_TOOLS,
   ...ATTESTED_DEVICE_INTERACTIVE_TOOLS,
   ...ATTESTED_DEVICE_FILESYSTEM_READ_TOOLS,

@@ -134,7 +134,9 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
         self.assertNotIn("supabase_service_role_key", lowered)
         self.assertNotIn("/rest/v1/rpc/", lowered)
         self.assertNotIn("apikey:", lowered)
-        self.assertNotIn("authorization", lowered)
+        # A Product authorization RPC name is not a backend HTTP credential.
+        self.assertNotIn('"authorization"', lowered)
+        self.assertNotIn("headers.authorization", lowered)
         self.assertNotIn("bearer ", lowered)
         self.assertNotIn("d1database", lowered)
 

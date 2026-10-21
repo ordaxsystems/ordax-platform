@@ -157,6 +157,11 @@ export function safePostgresFailure(error: unknown, rpc: string): SafePostgresFa
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const RPC_SPECS = {
+  ordax_orchestrator_read_authorization_v1: {
+    keys: ["p_device_id", "p_request_id", "p_effect_id", "p_attempt_id",
+      "p_lease_id", "p_execution_epoch", "p_agent_instance_id", "p_boot_id"],
+    casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text"],
+  },
   ordax_enqueue_product_action_v1: {
     keys: [
       "p_owner_user_id",
@@ -579,6 +584,18 @@ export async function startProductAction(
     p_execution_epoch: input.executionEpoch,
     p_agent_instance_id: input.agentInstanceId,
     p_boot_id: input.bootId,
+  });
+}
+
+export async function resolveOrchestratorReadAuthorization(
+  env: ProductPostgresEnv,
+  input: Parameters<typeof startProductAction>[1],
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_orchestrator_read_authorization_v1", {
+    p_device_id: input.deviceId, p_request_id: input.requestId,
+    p_effect_id: input.effectId, p_attempt_id: input.attemptId,
+    p_lease_id: input.leaseId, p_execution_epoch: input.executionEpoch,
+    p_agent_instance_id: input.agentInstanceId, p_boot_id: input.bootId,
   });
 }
 

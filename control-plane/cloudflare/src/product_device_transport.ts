@@ -12,6 +12,7 @@ import {
   progressProductAction,
   recordProductPresence,
   renewProductActionLease,
+  resolveOrchestratorReadAuthorization,
   reportProductAction,
   startProductAction,
   ProductPostgresError,
@@ -297,6 +298,17 @@ async function progress(request: Request, env: ProductPostgresEnv, deviceId: str
   return respond({ ok, ...(ok ? {} : { error: "lease_not_active" }) }, ok ? 200 : 409);
 }
 
+async function orchestratorAuthorization(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
+  const body = await readBoundedJsonObject(request, 4096);
+  const allowed = new Set(["job_id", "effect_id", "attempt_id", "lease_id",
+    "execution_epoch", "agent_instance_id", "boot_id"]);
+  const ctx = body ? executionContext(body) : null;
+  if (!body || !ctx || Object.keys(body).some(key => !allowed.has(key)))
+    return respond({ ok: false, error: "orchestrator_authorization_invalid" }, 400);
+  const result = await resolveOrchestratorReadAuthorization(env, {deviceId, ...ctx});
+  return respond(result, result.ok === true ? 200 : 403);
+}
+
 async function report(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
   const body = await readBoundedJsonObject(request, 640 * 1024);
   const ctx = body ? executionContext(body) : null;
@@ -357,6 +369,8 @@ export async function handleProductDeviceTransport(
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/claim") return claim(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/start") return start(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/lease") return lease(request, env, auth.deviceId);
+    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/orchestrator-read-authorization")
+      return orchestratorAuthorization(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/progress") return progress(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/report"
         || path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/recover-report") {

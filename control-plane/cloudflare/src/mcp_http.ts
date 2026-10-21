@@ -126,6 +126,7 @@ const TOOLS: ToolSpec[] = [
   { name: "computer_type", description: "Type bounded Unicode text into the interactive Windows desktop. Requires an explicit grant.", action: "computer.type", properties: { device_id: DEVICE, space_id: SPACE, text: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "text"] },
   { name: "computer_hotkey", description: "Send a bounded validated hotkey chord to the interactive Windows desktop. Requires an explicit grant.", action: "computer.hotkey", properties: { device_id: DEVICE, space_id: SPACE, keys: { type: "array", items: STRING, minItems: 1, maxItems: 6 }, wait_for_completion_ms: WAIT }, required: ["device_id", "keys"] },
   { name: "computer_access_status", description: "Read the local ORDAX computer-access policy and allowed filesystem roots.", action: "computer.access_status", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "orchestrator_lab_status", description: "Read verified OrdaX Orchestrator Lab status directly through its private service. Requires the dedicated orchestrator-app-read grant and a verified Lab installation. Does not send provider messages.", action: "orchestrator.app_read", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_file_stat", description: "Inspect a file or directory allowed by the local computer-access policy.", action: "computer.file_stat", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "computer_directory_list", description: "List a directory tree allowed by the local computer-access policy.", action: "computer.directory_list", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, max_depth: { type: "integer", minimum: 1, maximum: 12 }, max_entries: { type: "integer", minimum: 1, maximum: 5000 }, include_hidden: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "computer_text_read", description: "Read bounded UTF-8 text from an allowed computer path.", action: "computer.text_read", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, start_line: { type: "integer", minimum: 1 }, end_line: { type: "integer", minimum: 1 }, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
@@ -151,6 +152,7 @@ const TOOLS: ToolSpec[] = [
 ];
 
 const READ_ONLY_TOOLS = new Set([
+  "orchestrator_lab_status",
   "ordax_session",
   "ordax_profile",
   "ordax_targets",
