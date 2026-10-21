@@ -70,24 +70,17 @@ begin
    pg_catalog.hashtext(p_owner_user_id::text||':'||p_client_id||':'||p_session_sha256)
  );
 
- select pg_catalog.array_agg(x.device_id order by x.device_id)
+ -- Single authority for active, non-discovery grants. Opening a session
+ -- and later resolving/reconfirming it MUST enforce the same predicate.
+ -- Never duplicate grant filters here: a future grant type must not drift.
+ select pg_catalog.array_agg(d.device_id order by d.device_id)
    into v_devices
-   from (
-     select distinct g.device_id
-       from public.ordax_remote_capability_grants g
-       join public.ordax_product_devices d
-         on d.device_id=g.device_id and d.owner_user_id=g.owner_user_id
-      where g.owner_user_id=p_owner_user_id
-        and g.client_kind='product-mcp'
-        and g.client_id=p_client_id
-        and g.scope_kind='device'
-       -- Visibility grants are not remote-operation authority.
-       and g.profile_key <> 'mcp-discovery'
-       and g.capability <> 'product.target.read'
-        and g.space_id is null and g.project_id is null
-        and g.state='active' and d.state='active'
-        and (g.valid_until is null or g.valid_until>v_now)
-   ) x;
+   from public.ordax_product_devices d
+  where d.owner_user_id=p_owner_user_id
+    and d.state='active'
+    and private.ordax_central_device_grant_eligible_v1(
+      p_owner_user_id,p_client_id,d.device_id
+    );
 
  if v_devices is null or pg_catalog.cardinality(v_devices)=0 then
    return jsonb_build_object('ok',false,'error','central_device_target_missing');
