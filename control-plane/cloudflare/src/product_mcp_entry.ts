@@ -180,6 +180,15 @@ type SessionRecoveryDependencies = Readonly<{
 // The installed Runtime 1.30.3 polls challenges every 20 seconds. Keep one
 // bounded legacy compatibility window until managed Runtime upgrades converge
 // on the existing five-second heartbeat. Device confirmation is still required.
+// Public, bounded remediation codes. They explain why a trusted session was
+// not established, but never grant a device or dispatch an action.
+const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
+  "central_session_marker_required",
+  "central_device_target_missing",
+  "central_device_target_ambiguous",
+  "central_session_revoked",
+  "central_session_target_mismatch",
+]);
 const SESSION_CONFIRMATION_ATTEMPTS = 12;
 const SESSION_CONFIRMATION_INTERVAL_MS = 2000;
 function waitForSessionConfirmation(milliseconds: number): Promise<void> {
@@ -198,7 +207,14 @@ export async function resolveOrBootstrapAttestedSession(
   // This is the same device-confirmed challenge normally opened by ordax_session.
   // PostgreSQL chooses an eligible target; no device_id from MCP arguments is used.
   const opened = await (deps.open ?? openCentralSessionFromMcp)(request.clone(), env);
-  if (!opened.ok) return result;
+  if (!opened.ok) {
+    const failed: unknown = await opened.clone().json().catch(() => null);
+    const code = failed && typeof failed === "object" && !Array.isArray(failed)
+      ? (failed as Record<string, unknown>).error : null;
+    return typeof code === "string" && CENTRAL_SESSION_REMEDIATION_ERRORS.has(code)
+      ? { ok: false as const, error: code }
+      : result;
+  }
   const payload: unknown = await opened.clone().json().catch(() => null);
   if (!payload || typeof payload !== "object" || (payload as Record<string, unknown>).ok !== true) {
     return result;
@@ -320,6 +336,7 @@ export function createCanonicalProductMcpGateway(
         && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName) || ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName))) {
         let trusted: AttestedMcpDevice | null = null;
         let pending = false;
+        let trustFailure: string | null = null;
         try {
           const resolved = await resolveOrBootstrapAttestedSession(request.clone(), env, recoveryDependencies);
           if (resolved.ok) {
@@ -330,6 +347,9 @@ export function createCanonicalProductMcpGateway(
             });
           } else {
             pending = resolved.error === "central_session_pending";
+            if (CENTRAL_SESSION_REMEDIATION_ERRORS.has(resolved.error)) {
+              trustFailure = resolved.error;
+            }
           }
         } catch {
           trusted = null;
@@ -338,7 +358,9 @@ export function createCanonicalProductMcpGateway(
           ...reads,
           createAction: pending
             ? async () => respond({ ok: false, error: "central_session_pending" }, 409)
-            : ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
+            : trustFailure
+              ? async () => respond({ ok: false, error: trustFailure }, 409)
+              : ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
               ? createAttestedProjectActionHandler(env, trusted)
               : createAttestedDeviceActionHandler(env, trusted),
         };
