@@ -243,7 +243,7 @@ test("attested device tools fail closed without a verified session binding", asy
     assert.equal(response.status, 200);
     const json = await response.json();
     assert.equal(json.result.isError, true);
-    assert.equal(json.result.structuredContent.error, "trusted_operation_required");
+    assert.equal(json.result.structuredContent.error, "central_session_marker_required");
   }
 });
 
@@ -377,8 +377,43 @@ test("attested recovery never retries revoked, missing-marker or rejected challe
     wait: async () => { throw new Error("must_not_wait"); },
   });
   assert.equal(denied.ok, false);
-  assert.equal(denied.error, "central_session_unbound");
+  assert.equal(denied.error, "central_device_target_missing");
   assert.equal(retries, 1);
+});
+
+test("ambiguous Central device selection yields a safe remediation instead of opaque trusted-operation error", async () => {
+  const { handlers } = fakeHandlers();
+  let opens = 0;
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+    new Set(["computer_access_status"]), {
+      resolve: async () => ({ ok: false, error: "central_session_unbound" }),
+      open: async () => {
+        opens++;
+        return Response.json({ ok: false, error: "central_device_target_ambiguous" }, { status: 409 });
+      },
+      wait: async () => { throw new Error("must_not_wait"); },
+    });
+  const response = await gateway(request("computer_access_status",
+    { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
+  const body = await response.json() as any;
+  assert.equal(body.result.isError, true);
+  assert.equal(body.result.structuredContent.error, "central_device_target_ambiguous");
+  assert.equal(opens, 1);
+});
+
+test("unclassified Central session failure remains fail-closed and generic", async () => {
+  const { handlers } = fakeHandlers();
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+    new Set(["computer_access_status"]), {
+      resolve: async () => ({ ok: false, error: "central_session_unbound" }),
+      open: async () => Response.json({ ok: false, error: "central_session_unavailable" }, { status: 503 }),
+      wait: async () => { throw new Error("must_not_wait"); },
+    });
+  const response = await gateway(request("computer_access_status",
+    { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
+  const body = await response.json() as any;
+  assert.equal(body.result.isError, true);
+  assert.equal(body.result.structuredContent.error, "trusted_operation_required");
 });
 
 test("pending device challenge does not enqueue any action or expand grants", async () => {
