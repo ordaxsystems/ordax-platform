@@ -101,6 +101,8 @@ This document is reviewer-facing evidence for the OpenAI plugin submission. The 
 | `blender_apply_material` | false | true | false | Can overwrite, patch, move, remove, save, or otherwise modify existing project/Blender state, so it is treated as potentially destructive. |
 | `blender_save` | false | true | false | Can overwrite, patch, move, remove, save, or otherwise modify existing project/Blender state, so it is treated as potentially destructive. |
 
+| `orchestrator_lab_status` | true | false | false | Reads status from the verified Orchestrator Lab private service under a dedicated device read grant; sends no provider messages and accepts no commands or arbitrary paths. |
+
 ## Classification policy
 
 - **Read-only**: retrieval, bounded inspection, health/status, search, preview metadata, and artifact/file reads.
