@@ -42,6 +42,7 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
   "full-computer-control": fullComputer,
   ...computerProfiles,
   "app-intelligence-read": profile("device", APP_INTELLIGENCE_DEVICE_ACTIONS),
+  "orchestrator-app-read": profile("device", ["orchestrator.app_read"]),
   "project-browser-automation": profile("project", PROJECT_BROWSER_ACTIONS),
   "device-native-terminal": profile("device", ["computer.terminal_exec"]),
   "device-native-process": profile("device", [
