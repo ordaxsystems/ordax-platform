@@ -221,7 +221,8 @@ begin
   if p_owner_user_id is null or p_client_id is null
      or p_resource_id is null
      or char_length(p_resource_id) not between 17 and 169
-     or p_resource_id !~ '^resource_[A-Za-z0-9_-]{8,160}
+     or p_resource_id !~ ('^resource_[A-Za-z0-9_-]{8,160}' || pg_catalog.chr(36))
+  then
     return false;
   end if;
 
