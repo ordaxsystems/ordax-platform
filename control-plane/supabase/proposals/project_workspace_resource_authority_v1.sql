@@ -226,7 +226,7 @@ as $function$
       and r.revoked_at is null
     returning r.resource_id
   )
-  select pg_catalog.exists(select 1 from revoked);
+  select exists (select 1 from revoked);
 $function$;
 
 revoke all on function public.ordax_revoke_project_workspace_resource_v1(
