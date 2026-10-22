@@ -161,6 +161,22 @@ class HyperdriveEgressRepairTests(TestCase):
         self.assertIn("ORDAX_NETWORK_BANS_IPV4_COUNT=0", capture.getvalue())
         update.assert_not_called()
 
+    def test_inspection_counts_ipv6_even_in_legacy_ipv4_field(self):
+        receipt = {"banned_ipv4_addresses": [
+            "2606:4700::abcd", "2001:db8::1234", "173.245.48.4"]}
+        with mock.patch.object(mod, "policy", return_value=(OLD, "applied")), \
+             mock.patch.object(mod, "request", return_value=receipt), \
+             mock.patch.object(mod, "update_policy") as update, \
+             redirect_stdout(StringIO()) as output:
+            mod.inspect_only("synthetic")
+        summary = output.getvalue()
+        self.assertIn("ORDAX_NETWORK_BANS_IPV4_COUNT=1", summary)
+        self.assertIn("ORDAX_NETWORK_BANS_IPV6_COUNT=2", summary)
+        self.assertIn("ORDAX_NETWORK_BANS_CLOUDFLARE_OVERLAP=2", summary)
+        self.assertNotIn("2606:4700", summary)
+        self.assertNotIn("173.245", summary)
+        update.assert_not_called()
+
     def test_inspection_accepts_single_host_ipv4_cidr_bans(self):
         with mock.patch.object(mod, "policy", return_value=(OLD, "applied")), \
              mock.patch.object(mod, "request", return_value={
