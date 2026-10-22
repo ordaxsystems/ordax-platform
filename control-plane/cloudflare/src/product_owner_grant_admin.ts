@@ -3,6 +3,7 @@ import {
   listOwnerMcpRemoteAuthority,
   replaceOwnerMcpGrantGroup,
   revokeOwnerMcpGrantGroup,
+  revokeProjectWorkspaceResource,
   ProductPostgresError,
   type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
@@ -14,6 +15,8 @@ type Env = ProductAuthEnv & ProductPostgresEnv;
 type Json = Record<string, unknown>;
 const ROOT = "/v3/owner/remote-authority";
 const GROUPS = "/v3/owner/remote-grant-groups";
+const WORKSPACE_RESOURCES = "/v3/owner/workspace-resources/";
+const RESOURCE_ID_RE = /^resource_[A-Za-z0-9_-]{8,160}$/;
 const CLIENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PROFILE_KEY_RE = /^[a-z][a-z0-9._-]{1,79}$/;
 
@@ -51,13 +54,33 @@ function validUntil(value: unknown): string | null | undefined {
 
 export async function handleProductOwnerGrantAdmin(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname !== ROOT && !url.pathname.startsWith(GROUPS))
+  if (url.pathname !== ROOT && !url.pathname.startsWith(GROUPS)
+      && !url.pathname.startsWith(WORKSPACE_RESOURCES))
     return json({ ok: false, error: "not_found" }, 404);
 
   const ownerId = await owner(request, env);
   if (ownerId instanceof Response) return ownerId;
 
   try {
+    if (url.pathname.startsWith(WORKSPACE_RESOURCES)) {
+      // Disabled until governance-approved SQL migration and real picker
+      // attestation. Explicitly signed Owner identity is already verified.
+      if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled")
+        return json({ ok: false, error: "not_found" }, 404);
+      if (request.method !== "DELETE")
+        return json({ ok: false, error: "method_not_allowed" }, 405);
+      const resourceId = url.pathname.slice(WORKSPACE_RESOURCES.length);
+      const clientId = url.searchParams.get("client_id") ?? "";
+      if (!RESOURCE_ID_RE.test(resourceId) || !isCanonicalUuid(clientId)
+          || [...url.searchParams.keys()].some(key => key !== "client_id")
+          || url.searchParams.getAll("client_id").length !== 1)
+        return json({ ok: false, error: "workspace_resource_invalid" }, 400);
+      const revoked = await revokeProjectWorkspaceResource(env, {
+        ownerUserId: ownerId, clientId, resourceId,
+      });
+      return json({ ok: true, revoked });
+    }
+
     if (request.method === "GET" && url.pathname === ROOT) {
       const deviceId = (url.searchParams.get("device_id") ?? "").toLowerCase();
       if (!isCanonicalUuid(deviceId)) return json({ ok: false, error: "device_id_invalid" }, 400);
