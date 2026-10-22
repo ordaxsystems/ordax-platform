@@ -11,6 +11,16 @@
 - **Verificação**: `public.ordax_verify_project_workspace_resource_v1` faz join completo sobre relações canônicas, consentimento, revogação e expiração **a cada chamada**, devolvendo só prova limitada. A API não está conectada ao App.
 - **Filesystem e Git**: Runtime é owner exclusivo. O SQL não prova que a raiz local existe, é segura contra junction/symlink ou preservou identidade. Runtime precisa revalidar isso antes e depois de cada snapshot.
 
+## Consulta pelo transporte Device/Product existente — código preparado, desabilitado
+
+A Platform contém o ponto de integração read-only `POST /v3/device/transport/workspace-proof` **no handler canônico de transporte Device**, não em um MCP novo. A implementação é `source-only` e exige a configuração literal `WORKSPACE_RESOURCE_VERIFIER_ENABLED=enabled`; ausente ou qualquer outro valor retorna `not_found` após o gate normal de autenticação do dispositivo. **Não configurar essa flag até a migração aprovada, a emissão/revogação e o E2E**. Sem a função SQL aplicada, a operação falha fechada.
+
+O request aceito pelo dispositivo já autenticado contém exclusivamente `owner_user_id`, `actor_id`, `client_id`, `lab_project_id`, `workspace_session_id` e `resource_id`; **não aceita** `device_id`, Space, projeto Product, `path`, token, grant ou permissões do caller. `device_id` é fornecido pelo resultado da autenticação Device existente. Os identificadores da requisição são **chaves de consulta, não autoridade**: `public.ordax_verify_project_workspace_resource_v1` é quem valida todos eles contra ledger, consentimento e vínculo vivos no PostgreSQL.
+
+A função de store `verifyProjectWorkspaceResource` reutiliza o `callRpc` com parâmetros vinculados e RPC allowlisted. A resposta só é liberada se a função SQL retornar `ordax.project-workspace-resource/1` e o resultado passar pelo `projectWorkspaceGrantProjection` existente com todas as identidades coincidentes, `read` e validade original máxima de 24h. Nem caminhos locais nem credenciais são retornados. Falhas de schema, grant ou revogação produzem uma negativa genérica; nenhuma autorização é inferida do JSON do dispositivo.
+
+Os testes cobrem request allowlist, impossibilidade de escolher outro device pelo corpo, grant de outro Owner/actor/client/session/projeto/recurso, revogação, conteúdo extra, expiração e ausência de autenticação. A nova consulta **não** cria, renova ou revoga grants nem implementa o picker; a migração e a ativação permanecem bloqueadas pela issue #266. A credencial Device identifica o transportador, enquanto o PostgreSQL valida o grant e seu ator: não interpretar uma chamada com resourceId como consentimento novo.
+
 ## Operações ausentes por design
 
 O SQL de proposta em `control-plane/supabase/proposals/project_workspace_resource_authority_v1.sql` **não inclui emissão, inserção, renovação, revogação remota ou rota HTTP**. As relações privadas têm RLS habilitado e nenhuma escrita concedida ao Edge. Sem picker de pasta confiável e consentimento explícito, o port do App continua `capability_unavailable`; não usar SQL direto para fabricar evidência do picker.
