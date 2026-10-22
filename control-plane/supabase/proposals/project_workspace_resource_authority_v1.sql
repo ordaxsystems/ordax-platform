@@ -213,29 +213,20 @@ create function public.ordax_revoke_project_workspace_resource_v1(
   p_owner_user_id uuid, p_client_id uuid, p_resource_id text
 )
 returns boolean
-language plpgsql volatile security definer set search_path = ''
+language sql volatile security definer set search_path = ''
 as $function$
-declare
-  v_revoked text;
-begin
-  -- Resource IDs have a single canonical CHECK constraint on the binding
-  -- table; this function never builds SQL from the caller's text value.
-  if p_owner_user_id is null or p_client_id is null or p_resource_id is null then
-    return false;
-  end if;
-
-  update private.ordax_workspace_resource_bindings as r
-  set revoked_at=pg_catalog.clock_timestamp()
-  from private.ordax_lab_project_authorities as a
-  where r.lab_binding_id=a.binding_id
-    and a.owner_user_id=p_owner_user_id
-    and a.client_id=p_client_id
-    and r.resource_id=p_resource_id
-    and r.revoked_at is null
-  returning r.resource_id into v_revoked;
-
-  return v_revoked is not null;
-end;
+  with revoked as (
+    update private.ordax_workspace_resource_bindings as r
+    set revoked_at = pg_catalog.clock_timestamp()
+    from private.ordax_lab_project_authorities as a
+    where r.lab_binding_id = a.binding_id
+      and a.owner_user_id = p_owner_user_id
+      and a.client_id = p_client_id
+      and r.resource_id = p_resource_id
+      and r.revoked_at is null
+    returning r.resource_id
+  )
+  select pg_catalog.exists(select 1 from revoked);
 $function$;
 
 revoke all on function public.ordax_revoke_project_workspace_resource_v1(
