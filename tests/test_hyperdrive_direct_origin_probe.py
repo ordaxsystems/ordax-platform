@@ -90,7 +90,7 @@ class DirectOriginProbeContracts(unittest.TestCase):
             with self.subTest(mode=mode), \
                  mock.patch.object(probe.shutil, "which", return_value="/usr/bin/psql"), \
                  mock.patch.object(probe.subprocess, "run", return_value=mock.Mock(
-                     returncode=0, stdout=b"1\\n")) as runner:
+                     returncode=0, stdout=bytes([49, 10]))) as runner:
                 probe.verify_pooler_credential(
                     mode, "ordax_direct_diag_39478283587", "mock-secret")
             command = runner.call_args.args[0]
