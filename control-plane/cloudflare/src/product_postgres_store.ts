@@ -372,6 +372,10 @@ const RPC_SPECS = {
     keys: ["p_owner_user_id", "p_client_id", "p_tool_name", "p_request_fingerprint"],
     casts: ["uuid", "uuid", "text", "text"],
   },
+  ordax_get_product_mcp_usage_v1: {
+    keys: ["p_owner_user_id"],
+    casts: ["uuid"],
+  },
   ordax_prune_product_mcp_usage_v1: {
     keys: [],
     casts: [],
@@ -930,6 +934,19 @@ export async function recordProductMcpUsage(
     p_client_id: input.clientId,
     p_tool_name: input.toolName,
     p_request_fingerprint: input.requestFingerprint,
+  });
+}
+
+/** Observational account read; never supplies entitlement or billing authority. */
+export async function readProductMcpUsage(
+  env: ProductPostgresEnv,
+  ownerUserId: string,
+): Promise<JsonObject> {
+  if (!isCanonicalUuid(ownerUserId)) {
+    throw new ProductPostgresError("product_mcp_usage_owner_invalid", 400);
+  }
+  return callRpc<JsonObject>(env, "ordax_get_product_mcp_usage_v1", {
+    p_owner_user_id: ownerUserId,
   });
 }
 
