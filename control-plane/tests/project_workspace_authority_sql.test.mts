@@ -17,8 +17,8 @@ const proposal = () => fs.readFileSync(new URL(
 
 test("Workspace verifier binds live Product scope and revocation without a new grant authority", async () => {
   const db = new PGlite();
-  const [owner, actor, client, device, space, project, binding, grant, other] =
-    Array.from({ length: 9 }, () => randomUUID());
+  const [owner, actor, client, device, space, project, grant, other] =
+    Array.from({ length: 8 }, () => randomUUID());
   const resource = "resource_" + randomUUID().replaceAll("-", "");
   const args = [owner, actor, client, "session_one", "lab_one", device, resource];
   const verify = async (values=args) => (await db.query(
@@ -67,18 +67,24 @@ test("Workspace verifier binds live Product scope and revocation without a new g
       [project,device,["workspace.project_snapshot"]]);
     await db.query("insert into public.ordax_remote_capability_grants values($1,$2,$3,$4,$5,'product-mcp',$6,'project','project-workspace-read','workspace.project_snapshot','read',$2,'active',now()+interval '2 hours')",
       [grant,owner,space,project,device,client]);
-    await db.query("insert into private.ordax_lab_project_authorities(binding_id,owner_user_id,client_id,lab_project_id,space_id,project_id) values($1,$2,$3,'lab_one',$4,$5)",
-      [binding,owner,client,space,project]);
-    await db.query("insert into private.ordax_workspace_resource_bindings(resource_id,lab_binding_id,grant_id,actor_id,workspace_session_id,device_id,issued_by,issued_at,expires_at) values($1,$2,$3,$4,'session_one',$5,'trusted-runtime-picker',now()-interval '1 minute',now()+interval '1 hour')",
-      [resource,binding,grant,actor,device]);
-
-    const valid = await verify();
+    const registered = await db.query(
+      "select public.ordax_register_project_workspace_resource_v1($1,$2,$3,$4,$5,$6,$7,$8,$9) as result",
+      [owner,actor,client,"session_one","lab_one",device,resource,space,project]);
+    const valid = registered.rows[0].result;
     assert.equal(valid.ok,true);
     assert.equal(valid.schema,"ordax.project-workspace-resource/1");
     assert.equal(valid.grant.grant_id,grant);
     assert.equal(valid.grant.resource_id,resource);
     assert.equal(valid.grant.client_id,client);
     assert.deepEqual(valid.grant.allowed_actions,["read"]);
+    const retried = await db.query(
+      "select public.ordax_register_project_workspace_resource_v1($1,$2,$3,$4,$5,$6,$7,$8,$9) as result",
+      [owner,actor,client,"session_one","lab_one",device,resource,space,project]);
+    assert.deepEqual(retried.rows[0].result,valid,"an uncertain retry returns the original proof without extending it");
+    const conflictingRetry = await db.query(
+      "select public.ordax_register_project_workspace_resource_v1($1,$2,$3,$4,$5,$6,$7,$8,$9) as result",
+      [owner,actor,client,"different_session","lab_one",device,resource,space,project]);
+    assert.equal(conflictingRetry.rows[0].result.error,"workspace_resource_conflict");
     const scope = {ownerUserId:owner,spaceId:space,projectId:project,labProjectId:"lab_one",
       actorId:actor,clientId:client,workspaceSessionId:"session_one",deviceId:device,resourceId:resource};
     assert.equal(projectWorkspaceGrantProjection(valid.grant,scope,Date.now())?.authorized,true);
@@ -120,13 +126,23 @@ test("Workspace verifier binds live Product scope and revocation without a new g
     }
 
     const signature="public.ordax_verify_project_workspace_resource_v1(uuid,uuid,uuid,text,text,uuid,text)";
+    const registerSignature="public.ordax_register_project_workspace_resource_v1(uuid,uuid,uuid,text,text,uuid,text,uuid,uuid)";
+    const revokeSignature="public.ordax_revoke_project_workspace_resource_v1(uuid,uuid,text)";
     for(const role of ["anon","authenticated","service_role","ordax_edge_executor"]){
       const result=await db.query("select has_function_privilege($1,$2,'EXECUTE') as permitted",
         [role,signature]);
       assert.equal(result.rows[0].permitted,false,role);
+      assert.equal((await db.query("select has_function_privilege($1,$2,'EXECUTE') as permitted",
+        [role,registerSignature])).rows[0].permitted,false,role+" register");
+      assert.equal((await db.query("select has_function_privilege($1,$2,'EXECUTE') as permitted",
+        [role,revokeSignature])).rows[0].permitted,false,role+" revoke");
     }
     assert.equal((await db.query("select has_function_privilege('ordax_edge_runtime',$1,'EXECUTE') as permitted",
       [signature])).rows[0].permitted,true);
+    for(const signature of [registerSignature,revokeSignature]){
+      assert.equal((await db.query("select has_function_privilege('ordax_edge_runtime',$1,'EXECUTE') as permitted",
+        [signature])).rows[0].permitted,true,signature);
+    }
     for(const relation of ["private.ordax_lab_project_authorities",
                             "private.ordax_workspace_resource_bindings"]){
       for(const role of ["anon","authenticated","service_role","ordax_edge_executor","ordax_edge_runtime"]){
@@ -138,13 +154,25 @@ test("Workspace verifier binds live Product scope and revocation without a new g
     await db.exec("set role ordax_edge_runtime");
     assert.equal((await verify()).ok,true);
     await db.exec("reset role");
+    const revoked=(await db.query(
+      "select public.ordax_revoke_project_workspace_resource_v1($1,$2,$3) as result",
+      [owner,client,resource])).rows[0].result;
+    assert.equal(revoked.ok,true);
+    assert.equal(revoked.revoked,true);
+    assert.equal((await verify()).ok,false);
+    const repeatedRevoke=(await db.query(
+      "select public.ordax_revoke_project_workspace_resource_v1($1,$2,$3) as result",
+      [owner,client,resource])).rows[0].result;
+    assert.equal(repeatedRevoke.ok,true,"revoke is safe to retry after an uncertain response");
+    await db.exec("set role ordax_edge_runtime");
     await assert.rejects(() => db.query(
-      "insert into private.ordax_lab_project_authorities(binding_id,owner_user_id,client_id,lab_project_id,space_id,project_id) values($1,$2,$3,'lab_one',$4,$5)",
+      "insert into private.ordax_lab_project_authorities(binding_id,owner_user_id,client_id,lab_project_id,space_id,project_id) values($1,$2,$3,'lab_two',$4,$5)",
       [randomUUID(),owner,client,space,project]));
+    await db.exec("reset role");
   } finally { await db.close(); }
 });
 
-test("New schema has no issuance RPC, write grants or duplicate capability ledger",()=>{
+test("New schema keeps resource lifecycle subordinate to the canonical grant ledger",()=>{
   const sql=proposal().toLowerCase().replace(/\s+/g," ");
   for(const required of [
     "references public.ordax_remote_capability_grants(grant_id)",
@@ -157,9 +185,13 @@ test("New schema has no issuance RPC, write grants or duplicate capability ledge
     "r.revoked_at is null",
     "g.state='active'",
     "force row level security",
-    "to ordax_edge_runtime"
+    "to ordax_edge_runtime",
+    "create function public.ordax_register_project_workspace_resource_v1",
+    "create function public.ordax_revoke_project_workspace_resource_v1",
+    "references public.ordax_remote_capability_grants(grant_id)",
   ])assert.ok(sql.includes(required),required);
-  for(const forbidden of ["create function public.ordax_issue_","grant insert on","grant update on",
+  for(const forbidden of ["create table private.ordax_project_workspace_grants",
+    "create table public.ordax_project_workspace_grants","grant insert on","grant update on",
     "grant delete on","create policy"]){
     assert.equal(sql.includes(forbidden),false,forbidden);
   }

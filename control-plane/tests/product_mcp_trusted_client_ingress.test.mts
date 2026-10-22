@@ -16,6 +16,7 @@ import {
   PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH,
 } from "../cloudflare/src/product_owner_grant_admin.ts";
 import { PRODUCT_OWNER_PROJECT_SCOPE_PATH } from "../cloudflare/src/product_owner_project_scope.ts";
+import { PRODUCT_OWNER_WORKSPACE_RESOURCES_PATH } from "../cloudflare/src/product_workspace_resource_api.ts";
 
 const ENV = Object.freeze({
   PRODUCT_AUTH_ISSUER: "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1",
@@ -87,6 +88,14 @@ test("trusted ingress reaches only authenticated Runtime and owner-grant handler
       body: "{}",
     }],
     [`${PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH}/33333333-3333-4333-8333-333333333333?client_id=44444444-4444-4444-8444-444444444444`, {
+      method: "DELETE",
+    }],
+    [PRODUCT_OWNER_WORKSPACE_RESOURCES_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    }],
+    [`${PRODUCT_OWNER_WORKSPACE_RESOURCES_PATH}/resource_abcdefgh12345678?client_id=33333333-3333-4333-8333-333333333333`, {
       method: "DELETE",
     }],
   ];
