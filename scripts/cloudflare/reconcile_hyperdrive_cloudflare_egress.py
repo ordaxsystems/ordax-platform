@@ -216,12 +216,22 @@ def inspect_only(token: str) -> None:
         raise RepairFailure("network_bans_response_invalid")
     blocked_ips = []
     for raw in blocked:
+        candidate = raw.get("banned_address") if isinstance(raw, dict) else raw
         try:
-            item = ipaddress.ip_address(raw)
+            if not isinstance(candidate, str):
+                raise ValueError("invalid_ban_record")
+            item = ipaddress.ip_address(candidate)
             if item.version != 4:
                 raise ValueError("not_ipv4")
             blocked_ips.append(item)
         except ValueError:
+            # Only bounded data types and key names are observable; addresses
+            # and provider return values remain secret to the runner.
+            print("ORDAX_NETWORK_BANS_ITEM_TYPE=" + type(raw).__name__, flush=True)
+            if isinstance(raw, dict):
+                keys = sorted(k for k in raw if isinstance(k, str) and
+                              1 <= len(k) <= 48 and k.replace("_", "").isalnum())
+                print("ORDAX_NETWORK_BANS_ITEM_KEYS=" + json.dumps(keys), flush=True)
             raise RepairFailure("network_bans_response_invalid") from None
     cf = tuple(ipaddress.ip_network(c) for c in CF_V4)
     cloudflare_bans = sum(any(ip in net for net in cf) for ip in blocked_ips)
