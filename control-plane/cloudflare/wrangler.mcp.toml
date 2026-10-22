@@ -12,6 +12,9 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
 
+[triggers]
+crons = ["0 0 * * *"]
+
 [observability]
 enabled = true
 redact_query_string = true

@@ -70,6 +70,30 @@ Princípios obrigatórios:
 - não existe fallback silencioso para o Worker legado;
 - o Runtime aplica uma política local adicional antes da execução.
 
+## Medição de uso e planos
+
+O OrdaX MCP está recebendo um medidor de chamadas para dimensionar os planos e
+acompanhar o custo operacional com dados reais. A unidade observada é uma
+chamada autenticada e bem-sucedida a uma ferramenta MCP. Inicialização, ping,
+listagem de ferramentas, notificações, chamadas com erro e polling interno não
+entram na contagem. Retries idênticos do mesmo cliente são deduplicados por uma
+impressão digital HMAC-SHA-256 temporária, protegida por um segredo de
+implantação; argumentos, prompts e histórico de conversa não são persistidos
+pelo medidor.
+
+Esse primeiro corte é somente de observação: a flag `MCP_USAGE_METER_MODE`
+fica desligada por padrão e só pode ser habilitada com esse segredo configurado.
+Não existe bloqueio por quota nem cobrança, e o
+usuário continua pagando o uso do modelo diretamente ao provedor de IA. Os
+agregados são por conta, cliente OAuth, ferramenta e mês-calendário UTC; ficam
+somente o mês atual e o anterior. O digest de deduplicação é limpo após 24 horas
+por uma rotina diária, normalmente em até 48 horas. Antes de habilitar a coleta,
+a migration deve estar aplicada e o Worker implantado com a política publicada.
+
+Preços e direitos dos planos continuam definidos no catálogo comercial do
+OrdaX OS. Este ledger do Platform mede chamadas do MCP e não é uma segunda
+autoridade de assinatura, grant ou entitlement.
+
 ## Descoberta dos dispositivos
 
 `ordax_targets` retorna somente a visão autorizada para a sessão atual, incluindo presença informada e grupos de grants publicados.

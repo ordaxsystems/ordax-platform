@@ -322,3 +322,81 @@ test("MCP projects cross-device attestation errors without leaking the bound dev
   });
   assert.equal(JSON.stringify(body).includes("private-device"), false);
 });
+
+test("shadow usage records one successful authenticated tool call and ignores MCP protocol or error responses", async () => {
+  const ownerUserId = "11111111-1111-4111-8111-111111111111";
+  const clientId = "22222222-2222-4222-8222-222222222222";
+  const recorded: any[] = [];
+  const handlers: OrdaxMcpHandlers = {
+    session: async () => Response.json({ ok: true, session: { subject_id: ownerUserId, client_id: clientId } }),
+    targets: async () => Response.json({ ok: true, targets: [] }),
+    createAction: async () => Response.json({ ok: false }),
+    getAction: async () => Response.json({ ok: false }),
+    recordUsage: async (usage) => { recorded.push(usage); },
+    usageFingerprintKey: "fixture-only-random-secret-key-with-32-bytes",
+  };
+  const send = (method: string, id: string | number | undefined, params?: unknown) => handleOrdaxMcp(
+    new Request("https://ordax.example/mcp", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", ...(id === undefined ? {} : { id }), method, ...(params === undefined ? {} : { params }) }),
+    }), handlers,
+  );
+
+  const first = await send("tools/call", 7, { name: "ordax_targets", arguments: {} });
+  assert.equal((await first.json() as any).result.isError, false);
+  assert.equal(recorded.length, 1);
+  assert.deepEqual(Object.keys(recorded[0]).sort(), ["clientId", "ownerUserId", "requestFingerprint", "toolName"]);
+  assert.equal(recorded[0].ownerUserId, ownerUserId);
+  assert.equal(recorded[0].clientId, clientId);
+  assert.equal(recorded[0].toolName, "ordax_targets");
+  assert.match(recorded[0].requestFingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(recorded).includes("arguments"), false);
+
+  await send("tools/call", 7, { name: "ordax_targets", arguments: {} });
+  assert.equal(recorded[1].requestFingerprint, recorded[0].requestFingerprint, "retry digest is stable");
+  await send("tools/call", 8, { name: "ordax_targets", arguments: {} });
+  assert.notEqual(recorded[2].requestFingerprint, recorded[0].requestFingerprint, "a distinct request ID is a distinct call");
+
+  await send("initialize", 9);
+  await send("ping", 10);
+  await send("notifications/initialized", undefined);
+  const failedHandlers = {
+    ...handlers,
+    targets: async () => Response.json({ ok: false, error: "targets_unavailable" }, { status: 503 }),
+  };
+  const failedResponse = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "ordax_targets", arguments: {} } }),
+  }), failedHandlers);
+  assert.equal((await failedResponse.json() as any).result.isError, true);
+  assert.equal(recorded.length, 3, "protocol methods and failed tools are not usage calls");
+
+  const noIdentity = { ...handlers, session: async () => Response.json({ ok: true, session: {} }) };
+  const noIdentityResponse = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: "ordax_targets", arguments: {} } }),
+  }), noIdentity);
+  assert.equal((await noIdentityResponse.json() as any).result.isError, false);
+  assert.equal(recorded.length, 3, "unbound identity is never metered");
+
+  const noSecret = { ...handlers, usageFingerprintKey: undefined };
+  const noSecretResponse = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 121, method: "tools/call", params: { name: "ordax_targets", arguments: {} } }),
+  }), noSecret);
+  assert.equal((await noSecretResponse.json() as any).result.isError, false);
+  assert.equal(recorded.length, 3, "missing fingerprint key fails closed to unmetered mode");
+
+  const meterUnavailable = { ...handlers, recordUsage: async () => { throw new Error("private backend detail"); } };
+  const originalError = console.error;
+  const logs: string[] = [];
+  console.error = (...values: unknown[]) => logs.push(values.map(String).join(" "));
+  try {
+    const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 13, method: "tools/call", params: { name: "ordax_targets", arguments: {} } }),
+    }), meterUnavailable);
+    assert.equal((await response.json() as any).result.isError, false, "meter outage cannot fail a completed MCP call");
+    assert.equal(JSON.stringify(logs).includes("private backend detail"), false);
+  } finally { console.error = originalError; }
+});

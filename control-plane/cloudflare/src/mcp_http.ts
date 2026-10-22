@@ -12,6 +12,16 @@ export interface OrdaxMcpHandlers {
   targets: Handler;
   createAction: Handler;
   getAction: StatusHandler;
+  /** Deployment-only HMAC secret. Never returned from a tool or logged. */
+  usageFingerprintKey?: string;
+  /** Optional shadow-only accounting hook. It receives verified session
+   * identity and a digest, never tool arguments or conversation content. */
+  recordUsage?: (usage: Readonly<{
+    ownerUserId: string;
+    clientId: string;
+    toolName: string;
+    requestFingerprint: string;
+  }>) => Promise<void>;
 }
 
 interface ToolSpec {
@@ -865,6 +875,44 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   return textToolResult(finalPayload, failed);
 }
 
+async function recordSuccessfulToolCall(
+  handlers: OrdaxMcpHandlers,
+  sessionPayload: JsonObject,
+  requestId: unknown,
+  toolName: string,
+  args: JsonObject,
+): Promise<void> {
+  if (!handlers.recordUsage || !handlers.usageFingerprintKey || handlers.usageFingerprintKey.length < 32
+      || !(typeof requestId === "string" || typeof requestId === "number")) return;
+  const session = sessionPayload.session;
+  if (!session || typeof session !== "object" || Array.isArray(session)) return;
+  const ownerUserId = (session as JsonObject).subject_id;
+  const clientId = (session as JsonObject).client_id;
+  if (!isCanonicalUuid(ownerUserId) || !isCanonicalUuid(clientId)) return;
+
+  try {
+    // MCP request ids are correlation ids, not action authority. Key the
+    // request id, tool name and arguments to suppress transport retries; only
+    // the keyed digest is persisted, never the arguments or conversation text.
+    const fingerprintInput = JSON.stringify({ id: requestId, tool: toolName, arguments: args });
+    if (typeof fingerprintInput !== "string") return;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(handlers.usageFingerprintKey),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const digest = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(fingerprintInput));
+    const requestFingerprint = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+    await handlers.recordUsage({ ownerUserId, clientId, toolName, requestFingerprint });
+  } catch {
+    // Metering is observational and cannot turn a completed device action into
+    // a user-visible failure or cause a client to retry a successful action.
+    console.error(JSON.stringify({ event: "product_mcp_usage_meter_write_failed" }));
+  }
+}
+
 export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandlers, allowedTools?: ReadonlySet<string>): Promise<Response> {
   if (request.method === "GET") return new Response(null, { status: 405, headers: { allow: "POST" } });
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "GET, POST" } });
@@ -908,7 +956,9 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
     const args = rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
     if (!specFor(name) || (allowedTools && !allowedTools.has(name))) return rpcError(id, -32601, "Tool not found", { tool: name });
     try {
-      return rpcResult(id, await callTool(request, name, args, handlers, toolDefinitions(allowedTools).length));
+      const result = await callTool(request, name, args, handlers, toolDefinitions(allowedTools).length);
+      if (result.isError !== true) await recordSuccessfulToolCall(handlers, sessionPayload, id, name, args);
+      return rpcResult(id, result);
     } catch {
       return rpcResult(id, textToolResult({ ok: false, error: "ordax_mcp_internal_error" }, true));
     }
