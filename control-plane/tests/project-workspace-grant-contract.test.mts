@@ -18,6 +18,7 @@ const row={grant_id:id,owner_user_id:owner,space_id:space,project_id:project,
   lab_project_id:trusted.labProjectId,actor_id:actor,client_id:client,
   workspace_session_id:trusted.workspaceSessionId,device_id:device,
   resource_id:trusted.resourceId,allowed_actions:['read'],issued_by:'trusted-runtime-picker',
+  issued_at:'2026-10-21T23:00:00.000Z',
   valid_until:'2026-10-22T01:00:00.000Z',revoked_at:null,active:true};
 const projection=(r=row,t=trusted,clock=now)=>projectWorkspaceGrantProjection(r,t,clock);
 
@@ -57,7 +58,10 @@ test('no full-computer, write, execute or duplicate read grant masquerades as pr
 test('revoked, inactive, untrusted picker, no expiry or unreasonable expiry fail closed',()=>{
   for(const patch of [
     {active:false},{revoked_at:'2026-10-21T22:00:00Z'},
-    {issued_by:'full-computer-control'},{valid_until:null},
+    {issued_by:'full-computer-control'},{issued_at:null},
+    {issued_at:'2026-10-22T00:00:00.000Z'},
+    {issued_at:'2026-10-20T20:00:00.000Z'},
+    {valid_until:null},
     {valid_until:'2026-10-21T23:39:59.999Z'},
     {valid_until:'2026-11-01T01:00:00.000Z'},
     {valid_until:'not a timestamp'}

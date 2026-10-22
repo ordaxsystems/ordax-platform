@@ -87,7 +87,8 @@ class ProjectWorkspaceGrantBoundaryTests(unittest.TestCase):
         self.assertIn('r.allowed_actions[0] !== "read"', self.contract)
         self.assertIn("r.revoked_at !== null", self.contract)
         self.assertIn("expiry <= nowMs", self.contract)
-        self.assertIn("expiry > nowMs + 24 * 60 * 60 * 1000", self.contract)
+        self.assertIn("expiry > issued + 24 * 60 * 60 * 1000", self.contract)
+        self.assertIn("issued > nowMs", self.contract)
         for field in (
             "owner_user_id", "space_id", "project_id", "lab_project_id",
             "actor_id", "client_id", "workspace_session_id", "device_id",

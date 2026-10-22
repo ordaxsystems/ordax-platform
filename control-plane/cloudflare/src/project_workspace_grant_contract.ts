@@ -34,6 +34,7 @@ export type WorkspaceGrantRow = Readonly<{
   resource_id: string;
   allowed_actions: readonly string[];
   issued_by: "trusted-runtime-picker";
+  issued_at: string;
   valid_until: string;
   revoked_at: string | null;
   active: boolean;
@@ -104,10 +105,14 @@ export function projectWorkspaceGrantProjection(
     || r.allowed_actions.length !== 1 || r.allowed_actions[0] !== "read"
   ) return null;
 
+  const issued = time(r.issued_at);
   const expiry = time(r.valid_until);
-  // A local resource binding always expires; no infinite / null grants.
-  // Limit exposure if an upstream query supplies a malformed lifetime.
-  if (expiry === null || expiry <= nowMs || expiry > nowMs + 24 * 60 * 60 * 1000)
+  // The complete lifespan is bounded, not merely its remaining time.
+  // This prevents an originally unlimited grant from becoming acceptable
+  // during its last 24 hours.
+  if (issued === null || issued > nowMs || expiry === null
+    || expiry <= nowMs || expiry <= issued
+    || expiry > issued + 24 * 60 * 60 * 1000)
     return null;
   return Object.freeze({
     authorized: true as const,
