@@ -162,6 +162,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const RPC_SPECS = {
   // Staged read-only RPC: remains unavailable until the separately governed
   // PostgreSQL proposal is applied. No new grant authority is created here.
+  ordax_revoke_project_workspace_resource_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_resource_id"],
+    casts: ["uuid", "uuid", "text"],
+  },
   ordax_verify_project_workspace_resource_v1: {
     keys: ["p_owner_user_id", "p_actor_id", "p_client_id",
       "p_workspace_session_id", "p_lab_project_id",
@@ -612,6 +616,24 @@ export type WorkspaceResourceVerificationInput = Readonly<{
  * Caller authentication belongs to the existing Product Device transport.
  * No issuer, path lookup, grant cache, or shadow permissions table.
  */
+/** Owner-only revocation of the subordinate resource row. The trusted
+ * HTTP handler must derive ownerUserId from the signed Product session.
+ * This is not a grant issuer and never modifies the canonical grant ledger.
+ */
+export async function revokeProjectWorkspaceResource(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string; resourceId: string },
+): Promise<boolean> {
+  const result = await callRpc<boolean>(
+    env, "ordax_revoke_project_workspace_resource_v1", {
+      p_owner_user_id: input.ownerUserId,
+      p_client_id: input.clientId,
+      p_resource_id: input.resourceId,
+    },
+  );
+  return result === true;
+}
+
 export async function verifyProjectWorkspaceResource(
   env: ProductPostgresEnv,
   input: WorkspaceResourceVerificationInput,
