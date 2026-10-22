@@ -1,6 +1,16 @@
 name: Hyperdrive Direct IPv6 Diagnostic
 on:
   workflow_dispatch:
+    inputs:
+      origin_mode:
+        description: 'Isolated origin to prove; never changes the live MCP binding'
+        required: true
+        type: choice
+        default: pooler_transaction
+        options:
+          - direct_ipv6
+          - pooler_session
+          - pooler_transaction
 
 permissions:
   contents: read
@@ -32,4 +42,5 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          ORDAX_HYPERDRIVE_PROBE_MODE: ${{ inputs.origin_mode }}
         run: python scripts/cloudflare/probe_hyperdrive_direct_origin.py
