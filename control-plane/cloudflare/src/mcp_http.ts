@@ -840,6 +840,14 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       const hint = authorizationHintForAction(spec.action);
       return textToolResult({ ok: false, error: "product_grant_not_resolved", ...hint }, true);
     }
+    if (createdPayload.error === "product_attested_device_mismatch") {
+      return textToolResult({
+        ok: false,
+        error: "product_attested_device_mismatch",
+        required_action: "establish_attested_session_for_requested_device",
+        grant_evaluated: false,
+      }, true);
+    }
     return textToolResult({ ok: false, error: publicErrorCode(createdPayload.error, "product_action_unavailable") }, true);
   }
   const requestId = typeof createdPayload.request_id === "string" ? createdPayload.request_id : "";

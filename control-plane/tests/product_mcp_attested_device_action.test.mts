@@ -571,3 +571,35 @@ test("Orchestrator status enqueues only a dedicated read grant with no model ide
     assert.equal((await denied(actionRequest(action))).status, 403);
   }
 });
+
+test("cross-device request requires target attestation before grant lookup or dispatch", async () => {
+  const other = "99999999-9999-4999-8999-999999999999";
+  let catalogQueries = 0;
+  let enqueues = 0;
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => {
+      catalogQueries++;
+      return catalog(grantGroup("full-computer-control", "computer.terminal_exec", "write"));
+    },
+    enqueue: async () => {
+      enqueues++;
+      throw Error("must_not_enqueue");
+    },
+  });
+
+  const response = await handler(actionRequest("computer.terminal_exec", { argv: ["id"] }, other));
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    error: "product_attested_device_mismatch",
+    required_action: "establish_attested_session_for_requested_device",
+  });
+  assert.equal(catalogQueries, 0);
+  assert.equal(enqueues, 0);
+
+  const malformed = await handler(actionRequest("computer.terminal_exec", { argv: [] }));
+  assert.equal(malformed.status, 400);
+  assert.equal((await malformed.json()).error, "product_device_action_invalid");
+  assert.equal(catalogQueries, 0);
+});
