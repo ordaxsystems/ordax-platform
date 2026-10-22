@@ -202,7 +202,7 @@ test("Workspace verifier binds live Product scope and revocation without a new g
     const expiredIntent=randomUUID();
     assert.equal(await approve([owner,client,"lab_one",space,project,device,actor,
                                 "session_one",expiredResource,expiredIntent]),true);
-    await db.query("update private.ordax_workspace_owner_intents set expires_at=now()-interval '1 second', approved_at=now()-interval '6 minutes' where intent_id=$1",[expiredIntent]);
+    await db.query("update private.ordax_workspace_owner_intents set expires_at=now()-interval '2 minutes', approved_at=now()-interval '6 minutes' where intent_id=$1",[expiredIntent]);
     assert.equal(await commit([device,expiredIntent,actor,client,"session_one",expiredResource]),
                  false,"expired Owner approval cannot commit");
 
