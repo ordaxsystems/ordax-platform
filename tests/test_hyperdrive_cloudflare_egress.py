@@ -151,6 +151,16 @@ class HyperdriveEgressRepairTests(TestCase):
             "POST", "https://api.supabase.com/v1/projects/" + mod.PROJECT + "/network-bans/retrieve"))
         update.assert_not_called()
 
+    def test_inspection_accepts_one_documented_response_envelope(self):
+        with mock.patch.object(mod, "policy", return_value=(OLD, "applied")), \
+             mock.patch.object(mod, "request", return_value={
+                 "result": {"banned_ipv4_addresses": []}}), \
+             mock.patch.object(mod, "update_policy") as update, \
+             redirect_stdout(StringIO()) as capture:
+            mod.inspect_only("synthetic")
+        self.assertIn("ORDAX_NETWORK_BANS_IPV4_COUNT=0", capture.getvalue())
+        update.assert_not_called()
+
     def test_inspection_rejects_malformed_bans_without_writes(self):
         with mock.patch.object(mod, "policy", return_value=(OLD, "applied")), \
              mock.patch.object(mod, "request", return_value={"banned_ipv4_addresses": ["nonsense"]}), \
@@ -158,6 +168,18 @@ class HyperdriveEgressRepairTests(TestCase):
              redirect_stdout(StringIO()):
             with self.assertRaisesRegex(mod.RepairFailure, "network_bans_response_invalid"):
                 mod.inspect_only("synthetic")
+        update.assert_not_called()
+
+    def test_unknown_provider_receipt_logs_keys_only_without_values(self):
+        with mock.patch.object(mod, "policy", return_value=(OLD, "applied")), \
+             mock.patch.object(mod, "request", return_value={
+                 "unsupported": "private-credential-abcdef"}), \
+             mock.patch.object(mod, "update_policy") as update, \
+             redirect_stdout(StringIO()) as capture:
+            with self.assertRaisesRegex(mod.RepairFailure, "network_bans_response_invalid"):
+                mod.inspect_only("synthetic")
+        self.assertIn("ORDAX_NETWORK_BANS_RESPONSE_KEYS=", capture.getvalue())
+        self.assertNotIn("private-credential-abcdef", capture.getvalue())
         update.assert_not_called()
 
     def test_manual_protected_workflow_only(self):
