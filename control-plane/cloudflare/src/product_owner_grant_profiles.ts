@@ -43,6 +43,9 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
   ...computerProfiles,
   "app-intelligence-read": profile("device", APP_INTELLIGENCE_DEVICE_ACTIONS),
   "orchestrator-app-read": profile("device", ["orchestrator.app_read"]),
+  // Project snapshots are a separate least-privilege Product grant. Runtime
+  // still requires a live resource binding before it can read any local root.
+  "project-workspace-read": profile("project", ["workspace.project_snapshot"]),
   "project-browser-automation": profile("project", PROJECT_BROWSER_ACTIONS),
   "device-native-terminal": profile("device", ["computer.terminal_exec"]),
   "device-native-process": profile("device", [

@@ -58,6 +58,14 @@ test("owner grant profiles are explicit and observation remains least privilege"
   assert.deepEqual(browser.capabilities.map((item)=>item.capability), [...PROJECT_BROWSER_ACTIONS].sort());
   assert.equal(productCapabilityAccessMode("browser.snapshot"),"read");
   assert.equal(productCapabilityAccessMode("browser.navigate"),"write");
+  const workspace=OWNER_MCP_GRANT_PROFILES["project-workspace-read"];
+  assert.equal(workspace.scope,"project");
+  assert.deepEqual(workspace.capabilities,[{
+    capability:"workspace.project_snapshot",accessMode:"read",
+  }]);
+  assert.equal(productCapabilityAccessMode("workspace.project_snapshot"),"read");
+  assert.equal(workspace.capabilities.some(item=>item.accessMode==="write"),false);
+  assert.equal(workspace.capabilities.some(item=>item.capability.startsWith("computer.")),false);
 });
 
 test("owner grant admin fails closed before database access without signed owner session", async () => {
