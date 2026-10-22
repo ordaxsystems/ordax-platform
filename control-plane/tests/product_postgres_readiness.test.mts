@@ -112,6 +112,38 @@ test("a client constructor failure is a generic readiness error and does not exp
   assert.equal(JSON.stringify(result).includes(SECRET), false);
 });
 
+test("SQLSTATE connectivity failure remains private in response but visible as bounded readiness metadata", async () => {
+  const records: string[] = [];
+  const previous = console.error;
+  console.error = (...items: unknown[]) => { records.push(items.map(String).join(" ")); };
+  try {
+    const result = await checkCanonicalProductPostgresReadiness(ENV, () => ({
+      async connect() {
+        throw Object.assign(new Error("private provider " + SECRET), {
+          code: "58000",
+          cause: Object.assign(new Error("Server connection attempt failed: connection_refused " + SECRET), {
+            code: "08006",
+          }),
+        });
+      },
+      async query() { throw new Error("unexpected query"); },
+      async end() {},
+    }));
+    assert.deepEqual(result, { ok: false, error: "product_postgres_unavailable", failure_stage: "connect" });
+    assert.equal(records.length, 1);
+    assert.deepEqual(JSON.parse(records[0]), {
+      event: "product_postgres_readiness_failure",
+      phase: "connect",
+      code: "58000", cause_code: "08006",
+      classification: "hyperdrive_origin_connection_refused",
+      signals: ["server_connection_attempt", "connection_refused"],
+    });
+    assert.equal(records[0].includes(SECRET), false);
+  } finally {
+    console.error = previous;
+  }
+});
+
 test("invalid DB config fails without opening a connection", async () => {
   let opened = false;
   const res = await checkCanonicalProductPostgresReadiness({}, () => {
@@ -155,6 +187,8 @@ test("readiness logs only allowlisted classification, never connection strings o
     assert.deepEqual(JSON.parse(records[0]), {
       event: "product_postgres_readiness_failure",
       phase: "connect",
+      code: null,
+      cause_code: null,
       classification: "origin_authentication_failed",
       signals: ["authentication"],
     });
