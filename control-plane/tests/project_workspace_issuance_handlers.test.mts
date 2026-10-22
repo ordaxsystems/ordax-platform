@@ -104,7 +104,7 @@ test("issuance stays separately disabled, reuses only the canonical Postgres gra
     for(const forbidden of ["D1Database","ORDAX_OPERATOR_TOKEN","env.DB"])
       assert.equal(source.includes(forbidden),false,forbidden);
   }
-  assert.match(ownerSource,/owner(request, env)/);
+  assert.equal(ownerSource.includes("owner(request, env)"),true);
   assert.match(ownerSource,/canonicalOwnerWorkspaceApproval\(body\)/);
   assert.match(ownerSource,/ownerUserId: ownerId/);
   assert.match(deviceSource,/authenticateDeviceRequest\(request, env\)/);
