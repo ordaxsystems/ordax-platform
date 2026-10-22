@@ -1,4 +1,4 @@
-"""One-shot direct-origin Hyperdrive probe; NEVER changes the canonical binding.
+"""One-shot origin-mode Hyperdrive probe; NEVER changes the canonical binding.
 
 GitHub Actions is the only execution host. Secrets stay in runner memory; even
 Cloudflare rejection bodies and subprocess logs are not printed. Ephemeral
@@ -21,6 +21,10 @@ from pathlib import Path
 ACCOUNT = "42586bf13b61436219d21def299833e4"
 PROJECT = "jhfphsjptrpmtnzkpwud"
 ORIGIN = f"db.{PROJECT}.supabase.co"
+POOLER_ORIGIN = "aws-1-sa-east-1.pooler.supabase.com"
+# Each mode gets its own short-lived role, config and Worker, never the Product
+# MCP database role or live Hyperdrive. Compare paths before any production cutover.
+ORIGIN_MODES = ("direct_ipv6", "pooler_session", "pooler_transaction")
 CF_API = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}"
 DB_API = f"https://api.supabase.com/v1/projects/{PROJECT}/database/query"
 NAME_PREFIX = "ordax-direct-ipv6-diag-"
@@ -124,10 +128,23 @@ def delete_role(token: str, role: str):
     api("POST", DB_API, token, {"query": f"drop role if exists {role}"})
 
 
-def create_hyperdrive(token: str, name: str, role: str, credential: str) -> str:
+def origin_for_mode(mode: str, role: str) -> dict:
+    if mode not in ORIGIN_MODES:
+        raise ProbeError("origin_mode_not_allowlisted")
+    if mode == "direct_ipv6":
+        return {"scheme": "postgres", "database": "postgres",
+                "user": role, "host": ORIGIN, "port": 5432}
+    return {"scheme": "postgres", "database": "postgres",
+            "user": role + "." + PROJECT, "host": POOLER_ORIGIN,
+            "port": 5432 if mode == "pooler_session" else 6543}
+
+
+def create_hyperdrive(token: str, name: str, role: str, credential: str,
+                      mode: str = "direct_ipv6") -> str:
+    origin = origin_for_mode(mode, role)
+    origin["password"] = credential
     body = {"name": name,
-            "origin": {"scheme": "postgres", "database": "postgres",
-                       "user": role, "password": credential, "host": ORIGIN, "port": 5432},
+            "origin": origin,
             "mtls": {"sslmode": "require"},
             "caching": {"disabled": True},
             "origin_connection_limit": 5}
@@ -232,6 +249,9 @@ def run():
     if not cf or not db:
         raise ProbeError("authorized_environment_missing")
     name, role = identifiers(run_id)
+    mode = os.getenv("ORDAX_HYPERDRIVE_PROBE_MODE", "direct_ipv6")
+    # Refuse unreviewed upstreams before even creating an ephemeral SQL role.
+    origin_for_mode(mode, role)
     if not (PROBE_DIR / "src" / "hyperdrive_direct_probe.ts").is_file():
         raise ProbeError("isolated_source_missing")
     role_ownership = False
@@ -244,7 +264,8 @@ def run():
         role_ownership = True  # Even an ambiguous CREATE needs safe cleanup.
         create_role(db, role, credential)
         print("ORDAX_DIRECT_ROLE=CREATED_LOGIN_ONLY", flush=True)
-        hd_id = create_hyperdrive(cf, name, role, credential)
+        hd_id = create_hyperdrive(cf, name, role, credential, mode)
+        print("ORDAX_DIRECT_ORIGIN_MODE=" + mode, flush=True)
         print("ORDAX_DIRECT_HYPERDRIVE=CREATED", flush=True)
         deploy_attempted = True
         deploy_worker(name, hd_id)
