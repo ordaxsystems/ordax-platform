@@ -1,11 +1,8 @@
--- A discovery-only online OrdaX Native device must not cause a 24-second
--- pending loop for every Product MCP action. The existing Product presence
--- table owns the distinction: discovery sends NULL capability_digest while
--- the canonical action Runtime heartbeat sends a capabilities SHA-256.
---
--- This is a *readiness diagnostic*, not a new grant, action, heartbeat,
--- attestation method, or alternate target selector. The exact device still
--- MUST confirm the server-issued challenge with its enrolled token.
+-- Discovery is not device action-readiness. Use the existing canonical
+-- device presence heartbeat digest to avoid opening hopeless Central challenges
+-- for an OrdaX OS discovery-only worker. This hint is never authorization:
+-- exact device credential, existing grants and challenge confirmation remain
+-- mandatory and unchanged.
 begin;
 
 do $preflight$
@@ -90,65 +87,16 @@ begin
    return jsonb_build_object('ok',false,'error','central_device_offline');
  end if;
 
- -- Presence is discoverability, not evidence that the device can poll and
- -- confirm a Central challenge. OrdaX Native discovery deliberately reports
- -- capability_digest=NULL; the canonical action Runtime heartbeat sends its
- -- SHA-256 capabilities fingerprint. The fingerprint is only a *liveness
- -- preflight hint*, NEVER attestation/permission. Token-signed device challenge
- -- confirmation and current grants remain mandatory.
+ -- Discovery-only OrdaX OS presence has NULL capability_digest. An
+ -- action-capable Runtime supplies the canonical SHA-256 action-list digest.
+ -- This is a readiness preflight, NOT session attestation or a grant.
  if not exists (
    select 1 from public.ordax_device_presence p
     where p.device_id=v_device_id
       and p.agent_version is not null
-      and p.capability_digest ~ '^[0-9a-f]{64}
-     return jsonb_build_object(
-       'ok',true,'status','bound','device_id',v_device_id,
-       'request_id',v_existing.request_id,'expires_at',v_existing.expires_at
-     );
-   end if;
- end if;
-
- update private.ordax_central_device_session_challenges
-    set state='expired'
-  where owner_user_id=p_owner_user_id and client_id=p_client_id
-    and session_sha256=p_session_sha256 and state='pending' and expires_at<=v_now;
-
- select c.* into v_challenge
-   from private.ordax_central_device_session_challenges c
-  where c.owner_user_id=p_owner_user_id and c.client_id=p_client_id
-    and c.session_sha256=p_session_sha256 and c.state='pending'
-    and c.expires_at>v_now
-  limit 1;
- if found then
-   if v_challenge.device_id<>v_device_id then
-     return jsonb_build_object('ok',false,'error','central_session_target_mismatch');
-   end if;
-   return jsonb_build_object(
-     'ok',true,'status','pending','device_id',v_device_id,
-     'challenge_id',v_challenge.challenge_id,'expires_at',v_challenge.expires_at
-   );
- end if;
-
- v_challenge_id:=extensions.gen_random_uuid();
- v_expires:=v_now+interval '2 minutes';
- v_binding_expires:=v_now+interval '30 minutes';
- insert into private.ordax_central_device_session_challenges(
-   challenge_id,owner_user_id,client_id,device_id,session_sha256,
-   state,expires_at,binding_expires_at
- ) values (
-   v_challenge_id,p_owner_user_id,p_client_id,v_device_id,p_session_sha256,
-   'pending',v_expires,v_binding_expires
- );
- return jsonb_build_object(
-   'ok',true,'status','pending','device_id',v_device_id,
-   'challenge_id',v_challenge_id,'expires_at',v_expires
- );
-end;
-$$;
+      and p.capability_digest ~ '^[0-9a-f]{64}$'
  ) then
-   return jsonb_build_object(
-     'ok',false,'error','central_device_runtime_not_ready'
-   );
+   return jsonb_build_object('ok',false,'error','central_device_runtime_not_ready');
  end if;
 
  if v_existing.device_id is not null then
@@ -198,8 +146,7 @@ $$;
 end;
 $$;
 
--- Keep the existing edge-only executor boundary. Function replacement must
--- never grant authority to anon, authenticated or service_role.
+-- Preserve the existing edge executor ACL after function replacement.
 revoke all on function public.ordax_open_central_device_session_v1(uuid,text,text)
   from public,anon,authenticated,service_role;
 grant execute on function public.ordax_open_central_device_session_v1(uuid,text,text)
