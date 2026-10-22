@@ -141,7 +141,7 @@ test("Workspace verifier binds live Product scope and revocation without a new g
 });
 
 test("New schema has no issuance RPC, write grants or duplicate capability ledger",()=>{
-  const sql=read(migration).toLowerCase();
+  const sql=read(migration).toLowerCase().replace(/\s+/g," ");
   for(const required of [
     "references public.ordax_remote_capability_grants(grant_id)",
     "ordax_trusted_actor_auth_eligible_v1",
