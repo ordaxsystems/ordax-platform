@@ -303,3 +303,22 @@ test("omitted Space remains explicitly unscoped, not a fabricated Space grant", 
   assert.equal(body.result.structuredContent.error, "product_grant_not_resolved");
 });
 
+
+test("MCP projects cross-device attestation errors without leaking the bound device or proposing a grant", async () => {
+  const { body } = await call("computer_terminal_exec", {
+    createAction: async () => Response.json({
+      ok: false,
+      error: "product_attested_device_mismatch",
+      internal_device_id: "private-device",
+    }, { status: 403 }),
+    getAction: async () => { assert.fail("no action status after attestation denial"); },
+  }, { device_id: "22222222-2222-4222-8222-222222222222", argv: ["id"] });
+  assert.equal(body.result.isError, true);
+  assert.deepEqual(body.result.structuredContent, {
+    ok: false,
+    error: "product_attested_device_mismatch",
+    required_action: "establish_attested_session_for_requested_device",
+    grant_evaluated: false,
+  });
+  assert.equal(JSON.stringify(body).includes("private-device"), false);
+});

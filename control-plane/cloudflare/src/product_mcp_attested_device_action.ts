@@ -455,6 +455,17 @@ export function createAttestedDeviceActionHandler(
     }
 
     const body = await readBoundedJsonObject(request, 16 * 1024);
+    // This MCP session is attested for exactly one device. A different
+    // catalog target is not silently reachable through that attestation,
+    // even if it belongs to the same Owner account or reports online.
+    if (body && isCanonicalUuid(body.device_id)
+      && body.device_id.toLowerCase() !== trusted.deviceId.toLowerCase()) {
+      return json({
+        ok: false,
+        error: "product_attested_device_mismatch",
+        required_action: "establish_attested_session_for_requested_device",
+      }, 403);
+    }
     if (!body || !validCreateBody(body, trusted)) {
       return json({ ok: false, error: "product_device_action_invalid" }, 400);
     }
