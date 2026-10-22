@@ -394,7 +394,7 @@ begin
   ) values (
     v_intent.resource_id,v_binding,v_parent.grant_id,v_intent.actor_id,
     v_intent.workspace_session_id,v_intent.device_id,'trusted-runtime-picker',
-    v_now,pg_catalog.least(v_now+interval '1 hour',v_parent.valid_until)
+    v_now,least(v_now+interval '1 hour',v_parent.valid_until)
   ) on conflict(resource_id) do nothing;
   if not found then return false; end if;
   update private.ordax_workspace_owner_intents set consumed_at=v_now
