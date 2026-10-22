@@ -81,6 +81,39 @@ export async function resolveOwnerProjectScope(
   }
 }
 
+// SQL is the canonical authority, but its JSON envelope is not an API schema.
+// Never forward unexpected database columns, identities or diagnostic details
+// into the Owner response. A mismatched repository also fails closed.
+const PUBLIC_SCOPE_ERRORS = new Set([
+  "owner_project_scope_invalid",
+  "owner_project_scope_not_found",
+  "owner_project_scope_ambiguous",
+  "product_owner_auth_ineligible",
+  "device_not_owned",
+]);
+export function projectScopeResponse(raw: Json, requestedRepository: string): Json {
+  if (raw.ok === false && typeof raw.error === "string"
+      && PUBLIC_SCOPE_ERRORS.has(raw.error)) {
+    return { ok: false, error: raw.error };
+  }
+  if (raw.ok === true) {
+    const repository = canonicalGithubRepositoryFullName(raw.repository_full_name);
+    if (isCanonicalUuid(raw.space_id)
+        && isCanonicalUuid(raw.project_id)
+        && typeof raw.repository_id === "number"
+        && Number.isSafeInteger(raw.repository_id)
+        && raw.repository_id > 0
+        && repository !== null
+        && repository.toLowerCase() === requestedRepository.toLowerCase()) {
+      return {
+        ok: true, space_id: raw.space_id, project_id: raw.project_id,
+        repository_id: raw.repository_id, repository_full_name: repository,
+      };
+    }
+  }
+  throw new Error("product_postgres_invalid_response");
+}
+
 function resultStatus(result: Json): number {
   if (result.ok === true) return 200;
   switch (result.error) {
@@ -118,7 +151,8 @@ export function createOwnerProjectScopeHandler(env: Env, deps: Dependencies = {}
     }
 
     try {
-      const result = await resolve(env, identity.subjectId, deviceId, repositoryFullName);
+      const raw = await resolve(env, identity.subjectId, deviceId, repositoryFullName);
+      const result = projectScopeResponse(raw, repositoryFullName);
       return json(result, resultStatus(result));
     } catch (error) {
       const code = error instanceof Error ? error.message : "product_postgres_unavailable";
