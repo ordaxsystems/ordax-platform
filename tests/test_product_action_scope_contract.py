@@ -67,5 +67,41 @@ class ProductActionScopeContractTests(unittest.TestCase):
         self.assertIn("new Set<string>([", self.scope)
 
 
+class ProjectWorkspaceGrantBoundaryTests(unittest.TestCase):
+    """The M1 projection must not become a grant writer or an MCP tool."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.contract = (ROOT / "control-plane/cloudflare/src/project_workspace_grant_contract.ts").read_text(
+            encoding="utf-8"
+        )
+        cls.profiles = (ROOT / "control-plane/cloudflare/src/product_owner_grant_profiles.ts").read_text(
+            encoding="utf-8"
+        )
+        cls.worker = WORKER.read_text(encoding="utf-8")
+        cls.mcp = MCP.read_text(encoding="utf-8")
+
+    def test_project_scoped_resource_contract_is_strictly_projection_only(self):
+        self.assertIn("projectWorkspaceGrantProjection(", self.contract)
+        self.assertIn('r.issued_by !== "trusted-runtime-picker"', self.contract)
+        self.assertIn('r.allowed_actions[0] !== "read"', self.contract)
+        self.assertIn("r.revoked_at !== null", self.contract)
+        self.assertIn("expiry <= nowMs", self.contract)
+        self.assertIn("expiry > nowMs + 24 * 60 * 60 * 1000", self.contract)
+        for field in (
+            "owner_user_id", "space_id", "project_id", "lab_project_id",
+            "actor_id", "client_id", "workspace_session_id", "device_id",
+            "resource_id",
+        ):
+            self.assertIn("r." + field, self.contract)
+
+    def test_no_live_resource_grant_writer_or_implicit_computer_profile(self):
+        self.assertNotIn("projectWorkspaceGrantProjection", self.worker)
+        self.assertNotIn("projectWorkspaceGrantProjection", self.mcp)
+        self.assertNotIn("workspace.snapshot", self.profiles)
+        self.assertNotIn("workspace.verify_binding", self.profiles)
+        self.assertNotIn("projectWorkspaceGrantProjection", self.profiles)
+
+
 if __name__ == "__main__":
     unittest.main()
