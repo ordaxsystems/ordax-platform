@@ -71,7 +71,10 @@ test("Device confirmation request cannot pick Owner, device, Space, project or f
     assert.equal(canonicalDeviceWorkspaceConfirmation({...device,[field]:value}),null,field);
 });
 test("both staged handlers fail closed without signed Owner or enrolled Device", async () => {
-  const env={} as any;
+  const env={ PRODUCT_AUTH_ISSUER:"https://issuer.example/auth/v1",
+    PRODUCT_AUTH_AUDIENCE:"authenticated",
+    PRODUCT_AUTH_JWKS_URL:"https://issuer.example/auth/v1/.well-known/jwks.json",
+  } as any;
   const signedOwnerOnly="/v3/owner/workspace-resources/approvals";
   const response=await handleProductOwnerGrantAdmin(new Request(
     "https://mcp.example"+signedOwnerOnly,{
