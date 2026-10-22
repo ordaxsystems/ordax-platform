@@ -141,10 +141,44 @@ test("Workspace verifier binds live Product scope and revocation without a new g
     await assert.rejects(() => db.query(
       "insert into private.ordax_lab_project_authorities(binding_id,owner_user_id,client_id,lab_project_id,space_id,project_id) values($1,$2,$3,'lab_one',$4,$5)",
       [randomUUID(),owner,client,space,project]));
+
+    const revokeSig="public.ordax_revoke_project_workspace_resource_v1(uuid,uuid,text)";
+    for(const role of ["anon","authenticated","service_role","ordax_edge_executor"]){
+      const x=await db.query("select has_function_privilege($1,$2,'EXECUTE') as permitted",
+        [role,revokeSig]);
+      assert.equal(x.rows[0].permitted,false,"revoke privilege "+role);
+    }
+    const edgeAccess=await db.query(
+      "select has_function_privilege('ordax_edge_runtime',$1,'EXECUTE') as permitted",[revokeSig]);
+    assert.equal(edgeAccess.rows[0].permitted,true);
+
+    const revoke = async (values:[string,string,string]) => (await db.query(
+      "select public.ordax_revoke_project_workspace_resource_v1($1,$2,$3) as revoked",
+      values)).rows[0].revoked;
+    assert.equal(await revoke([other,client,resource]),false,"other Owner denied");
+    assert.equal(await revoke([owner,other,resource]),false,"other OAuth client denied");
+    assert.equal(await revoke([owner,client,"resource_"+randomUUID().replaceAll("-","")]),
+      false,"other resource denied");
+    assert.equal(await revoke([owner,client,"invalid/path"]),false,"untrusted path denied");
+    assert.equal((await verify()).ok,true,"other Owner attempts leave grant valid");
+
+    // Revocation remains possible AFTER a user withdraws OAuth consent:
+    // cancellation must never depend on an active permission to read.
+    await db.exec("update auth.oauth_consents set revoked_at=now()");
+    await db.exec("set role ordax_edge_runtime");
+    assert.equal(await revoke([owner,client,resource]),true,"Owner revokes its resource");
+    assert.equal(await revoke([owner,client,resource]),false,"revocation is idempotent");
+    await db.exec("reset role");
+    await db.exec("update auth.oauth_consents set revoked_at=null");
+    assert.equal((await verify()).ok,false,"reference stays revoked after consent returns");
+    const stored=await db.query("select revoked_at from private.ordax_workspace_resource_bindings where resource_id=$1",[resource]);
+    assert.ok(stored.rows[0].revoked_at,"revocation persisted once");
+    const ledger=await db.query("select state from public.ordax_remote_capability_grants where grant_id=$1",[grant]);
+    assert.equal(ledger.rows[0].state,"active","parent grant ledger must remain untouched");
   } finally { await db.close(); }
 });
 
-test("New schema has no issuance RPC, write grants or duplicate capability ledger",()=>{
+test("New schema revokes only subordinate resources without issuance or duplicate ledger",()=>{
   const sql=proposal().toLowerCase().replace(/\s+/g," ");
   for(const required of [
     "references public.ordax_remote_capability_grants(grant_id)",
@@ -157,6 +191,10 @@ test("New schema has no issuance RPC, write grants or duplicate capability ledge
     "r.revoked_at is null",
     "g.state='active'",
     "force row level security",
+    "ordax_revoke_project_workspace_resource_v1",
+    "a.owner_user_id=p_owner_user_id",
+    "a.client_id=p_client_id",
+    "r.revoked_at is null",
     "to ordax_edge_runtime"
   ])assert.ok(sql.includes(required),required);
   for(const forbidden of ["create function public.ordax_issue_","grant insert on","grant update on",
