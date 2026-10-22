@@ -419,27 +419,32 @@ create function public.ordax_revoke_project_workspace_resource_v1(
   p_owner_user_id uuid, p_client_id uuid, p_resource_id text
 )
 returns boolean
-language sql volatile security definer set search_path = ''
+language plpgsql volatile security definer set search_path = ''
 as $function$
-  with revoked as (
-    update private.ordax_workspace_resource_bindings as r
-    set revoked_at = pg_catalog.clock_timestamp()
-    from private.ordax_lab_project_authorities as a
-    where r.lab_binding_id = a.binding_id
-      and a.owner_user_id = p_owner_user_id
-      and a.client_id = p_client_id
-      and r.resource_id = p_resource_id
-      and r.revoked_at is null
-    returning r.resource_id
-  ), cancelled as (
-    update private.ordax_workspace_owner_intents as i
-    set revoked_at = pg_catalog.clock_timestamp()
-    where i.owner_user_id = p_owner_user_id
-      and i.client_id = p_client_id and i.resource_id = p_resource_id
-      and i.revoked_at is null
-    returning i.resource_id
-  )
-  select exists (select 1 from revoked) or exists (select 1 from cancelled);
+declare
+  v_pending_rows bigint := 0;
+  v_resource_rows bigint := 0;
+begin
+  -- FIRST lock/cancel the pending Owner intent. If the Device commit holds
+  -- its FOR UPDATE lock, this waits until that transaction completes.
+  -- The following statement then sees any resource the Device committed,
+  -- even if the revoke request began before that insertion.
+  update private.ordax_workspace_owner_intents as i
+  set revoked_at = pg_catalog.clock_timestamp()
+  where i.owner_user_id=p_owner_user_id and i.client_id=p_client_id
+    and i.resource_id=p_resource_id and i.revoked_at is null;
+  get diagnostics v_pending_rows = row_count;
+
+  update private.ordax_workspace_resource_bindings as r
+  set revoked_at = pg_catalog.clock_timestamp()
+  from private.ordax_lab_project_authorities as a
+  where r.lab_binding_id=a.binding_id
+    and a.owner_user_id=p_owner_user_id and a.client_id=p_client_id
+    and r.resource_id=p_resource_id and r.revoked_at is null;
+  get diagnostics v_resource_rows = row_count;
+
+  return v_pending_rows > 0 or v_resource_rows > 0;
+end;
 $function$;
 
 revoke all on function public.ordax_revoke_project_workspace_resource_v1(
