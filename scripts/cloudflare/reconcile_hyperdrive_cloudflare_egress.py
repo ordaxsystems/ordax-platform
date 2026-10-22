@@ -173,6 +173,49 @@ def rollback_if_ours(token: str, previous: dict, expected: dict) -> None:
     print("ORDAX_EGRESS_ROLLBACK=CONFIRMED", flush=True)
 
 
+def inspect_only(token: str) -> None:
+    """Read Supabase's existing network allowlist and explicit DB bans.
+
+    Logs contain summary counts/status only; never emit source CIDRs, banned
+    addresses, credentials, provider response payloads or grant material.
+    The check is observational and cannot call the ACL mutation path.
+    """
+    current, status = policy(token)
+    allowed_v4 = tuple(ipaddress.ip_network(x) for x in current["dbAllowedCidrs"])
+    allowed_v6 = tuple(ipaddress.ip_network(x) for x in current["dbAllowedCidrsV6"])
+
+    def covered(cidr: str, candidates: tuple) -> bool:
+        network = ipaddress.ip_network(cidr)
+        return any(network.subnet_of(allowed) for allowed in candidates)
+
+    print("ORDAX_NETWORK_STATUS=" + status, flush=True)
+    print("ORDAX_NETWORK_RESTRICTIONS_IPV4_COUNT=" + str(len(allowed_v4)), flush=True)
+    print("ORDAX_NETWORK_RESTRICTIONS_IPV6_COUNT=" + str(len(allowed_v6)), flush=True)
+    print("ORDAX_NETWORK_CLOUDFLARE_IPV4_COVERED=" + str(
+        all(covered(x, allowed_v4) for x in CF_V4)).lower(), flush=True)
+    print("ORDAX_NETWORK_CLOUDFLARE_IPV6_COVERED=" + str(
+        all(covered(x, allowed_v6) for x in CF_V6)).lower(), flush=True)
+    bans = request("POST", API.replace("/network-restrictions", "/network-bans/retrieve"),
+                   token, {})
+    blocked = bans.get("banned_ipv4_addresses")
+    if not isinstance(blocked, list) or not all(isinstance(ip, str) for ip in blocked):
+        raise RepairFailure("network_bans_response_invalid")
+    blocked_ips = []
+    for raw in blocked:
+        try:
+            item = ipaddress.ip_address(raw)
+            if item.version != 4:
+                raise ValueError("not_ipv4")
+            blocked_ips.append(item)
+        except ValueError:
+            raise RepairFailure("network_bans_response_invalid") from None
+    cf = tuple(ipaddress.ip_network(c) for c in CF_V4)
+    cloudflare_bans = sum(any(ip in net for net in cf) for ip in blocked_ips)
+    print("ORDAX_NETWORK_BANS_IPV4_COUNT=" + str(len(blocked_ips)), flush=True)
+    print("ORDAX_NETWORK_BANS_CLOUDFLARE_OVERLAP=" + str(cloudflare_bans), flush=True)
+    print("ORDAX_NETWORK_INSPECTION=COMPLETE_NO_CHANGES", flush=True)
+
+
 def run() -> None:
     token = os.environ.get("SUPABASE_ACCESS_TOKEN", "")
     if not token:
@@ -219,7 +262,15 @@ def run() -> None:
 
 if __name__ == "__main__":
     try:
-        run()
+        if os.environ.get("ORDAX_NETWORK_DIAGNOSTIC_MODE", "inspect") == "inspect":
+            auth = os.environ.get("SUPABASE_ACCESS_TOKEN", "")
+            if not auth:
+                raise RepairFailure("supabase_token_missing")
+            inspect_only(auth)
+        elif os.environ.get("ORDAX_NETWORK_DIAGNOSTIC_MODE") == "repair":
+            run()
+        else:
+            raise RepairFailure("diagnostic_mode_invalid")
     except RepairFailure as error:
         print("ORDAX_EGRESS_FINAL=" + str(error), flush=True)
         raise SystemExit(1)
