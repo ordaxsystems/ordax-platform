@@ -222,6 +222,34 @@ begin
      or p_resource_id is null
      or char_length(p_resource_id) not between 17 and 169
      or p_resource_id !~ '^resource_[A-Za-z0-9_-]{8,160}
+    return false;
+  end if;
+
+  update private.ordax_workspace_resource_bindings as r
+  set revoked_at=pg_catalog.clock_timestamp()
+  from private.ordax_lab_project_authorities as a
+  where r.lab_binding_id=a.binding_id
+    and a.owner_user_id=p_owner_user_id
+    and a.client_id=p_client_id
+    and r.resource_id=p_resource_id
+    and r.revoked_at is null
+  returning r.resource_id into v_revoked;
+
+  return v_revoked is not null;
+end;
+$function$;
+
+revoke all on function public.ordax_revoke_project_workspace_resource_v1(
+  uuid,uuid,text
+) from public,anon,authenticated,service_role,ordax_edge_executor,ordax_edge_runtime;
+grant execute on function public.ordax_revoke_project_workspace_resource_v1(
+  uuid,uuid,text
+) to ordax_edge_runtime;
+
+-- No issuance, insertion, grant mutation, local path resolution or network
+-- route is authorized by this source-only proposal. The owner revoker is
+-- inactive until the same governed migration as the read-only verifier.
+commit;
 
   then
     return false;
