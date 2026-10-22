@@ -220,17 +220,15 @@ def inspect_only(token: str) -> None:
         try:
             if not isinstance(candidate, str):
                 raise ValueError("invalid_ban_record")
-            # Some Supabase receipts encode individual banned hosts as /32.
-            # Accept only a single IPv4 host, never a broader banned network.
+            # Supabase can return IPv6 ban entries even under the legacy
+            # 'banned_ipv4_addresses' name. Accept exact host addresses only.
             if "/" in candidate:
                 network = ipaddress.ip_network(candidate, strict=True)
-                if network.version != 4 or network.prefixlen != 32:
-                    raise ValueError("ban_must_be_single_ipv4")
+                if network.prefixlen != network.max_prefixlen:
+                    raise ValueError("ban_must_be_single_host")
                 item = network.network_address
             else:
                 item = ipaddress.ip_address(candidate)
-            if item.version != 4:
-                raise ValueError("not_ipv4")
             blocked_ips.append(item)
         except ValueError:
             # Only bounded data types and key names are observable; addresses
@@ -247,9 +245,12 @@ def inspect_only(token: str) -> None:
                               1 <= len(k) <= 48 and k.replace("_", "").isalnum())
                 print("ORDAX_NETWORK_BANS_ITEM_KEYS=" + json.dumps(keys), flush=True)
             raise RepairFailure("network_bans_response_invalid") from None
-    cf = tuple(ipaddress.ip_network(c) for c in CF_V4)
-    cloudflare_bans = sum(any(ip in net for net in cf) for ip in blocked_ips)
-    print("ORDAX_NETWORK_BANS_IPV4_COUNT=" + str(len(blocked_ips)), flush=True)
+    cf_v4 = tuple(ipaddress.ip_network(c) for c in CF_V4)
+    cf_v6 = tuple(ipaddress.ip_network(c) for c in CF_V6)
+    cloudflare_bans = sum(any(ip in net for net in (
+        cf_v4 if ip.version == 4 else cf_v6)) for ip in blocked_ips)
+    print("ORDAX_NETWORK_BANS_IPV4_COUNT=" + str(sum(ip.version == 4 for ip in blocked_ips)), flush=True)
+    print("ORDAX_NETWORK_BANS_IPV6_COUNT=" + str(sum(ip.version == 6 for ip in blocked_ips)), flush=True)
     print("ORDAX_NETWORK_BANS_CLOUDFLARE_OVERLAP=" + str(cloudflare_bans), flush=True)
     print("ORDAX_NETWORK_INSPECTION=COMPLETE_NO_CHANGES", flush=True)
 
