@@ -11,7 +11,7 @@ import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 type Env = ProductAuthEnv & ProductPostgresEnv;
 type UsageReader = typeof readProductMcpUsage;
 export const PRODUCT_OWNER_MCP_USAGE_PATH = "/v3/product/usage";
-const MONTH = /^\\d{4}-(?:0[1-9]|1[0-2])-01$/;
+const MONTH = /^\d{4}-(?:0[1-9]|1[0-2])-01$/;
 const TOOL = /^[a-z][a-z0-9._-]{1,95}$/;
 
 export function validOwnerMcpUsage(value: unknown): value is {
