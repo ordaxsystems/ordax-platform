@@ -57,7 +57,7 @@ class CentralRuntimeHeartbeatPreflightContractTests(unittest.TestCase):
         self.assertIn("from public,anon,authenticated,service_role;", self.sql)
         self.assertIn("to ordax_edge_executor;", self.sql)
         self.assertIn("to_regprocedure('private.ordax_product_presence_online_v1(", self.sql)
-        self.assertRegex(self.sql, re.compile(r"\bbegin;\b", re.I) if False else r"^begin;$")
+        self.assertIn("\nbegin;\n", self.sql)
 
 
 if __name__ == "__main__":
