@@ -13,6 +13,7 @@ import {
   recordProductPresence,
   renewProductActionLease,
   resolveOrchestratorReadAuthorization,
+  verifyProjectWorkspaceResource,
   reportProductAction,
   startProductAction,
   ProductPostgresError,
@@ -21,6 +22,7 @@ import {
 } from "./product_postgres_store.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
+import { projectWorkspaceGrantProjection } from "./project_workspace_grant_contract.ts";
 
 type Json = Record<string, unknown>;
 type RuntimeKind = "ordax-os" | "desktop-agent" | "mobile-client" | "other";
@@ -298,6 +300,96 @@ async function progress(request: Request, env: ProductPostgresEnv, deviceId: str
   return respond({ ok, ...(ok ? {} : { error: "lease_not_active" }) }, ok ? 200 : 409);
 }
 
+/** Product-workspace proof travels exclusively over the existing device-
+ * authenticated transport, never through public MCP/LLM/UI inputs. Lab/actor
+ * values are lookup keys; the SQL verifier owns their authorization.
+ */
+export type DeviceWorkspaceProofQuery = Readonly<{
+  ownerUserId: string;
+  actorId: string;
+  clientId: string;
+  labProjectId: string;
+  workspaceSessionId: string;
+  deviceId: string;
+  resourceId: string;
+}>;
+
+const RESOURCE_ID = /^resource_[A-Za-z0-9_-]{8,160}$/;
+const LAB_ID = /^[A-Za-z0-9_-]{1,180}$/;
+const WORKSPACE_PROOF_KEYS = new Set([
+  "owner_user_id", "actor_id", "client_id", "lab_project_id",
+  "workspace_session_id", "resource_id",
+]);
+const VERIFIED_GRANT_KEYS = new Set([
+  "grant_id", "owner_user_id", "space_id", "project_id",
+  "lab_project_id", "actor_id", "client_id", "workspace_session_id",
+  "device_id", "resource_id", "allowed_actions", "issued_by",
+  "issued_at", "valid_until", "revoked_at", "active",
+]);
+
+export function canonicalDeviceWorkspaceProofQuery(
+  body: unknown,
+  authenticatedDeviceId: string,
+): DeviceWorkspaceProofQuery | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)
+      || !isCanonicalUuid(authenticatedDeviceId)) return null;
+  const raw = body as Json;
+  if (Object.keys(raw).length !== WORKSPACE_PROOF_KEYS.size
+      || Object.keys(raw).some(key => !WORKSPACE_PROOF_KEYS.has(key))
+      || !isCanonicalUuid(raw.owner_user_id)
+      || !isCanonicalUuid(raw.actor_id)
+      || !isCanonicalUuid(raw.client_id)
+      || typeof raw.lab_project_id !== "string" || !LAB_ID.test(raw.lab_project_id)
+      || typeof raw.workspace_session_id !== "string" || !LAB_ID.test(raw.workspace_session_id)
+      || typeof raw.resource_id !== "string" || !RESOURCE_ID.test(raw.resource_id))
+    return null;
+  return Object.freeze({
+    ownerUserId: raw.owner_user_id, actorId: raw.actor_id, clientId: raw.client_id,
+    labProjectId: raw.lab_project_id, workspaceSessionId: raw.workspace_session_id,
+    deviceId: authenticatedDeviceId, resourceId: raw.resource_id,
+  });
+}
+
+export function projectWorkspaceVerifierResponse(
+  result: unknown,
+  query: DeviceWorkspaceProofQuery,
+): Json | null {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+  const raw = result as Json;
+  if (Object.keys(raw).length !== 3 || raw.ok !== true
+      || raw.schema !== "ordax.project-workspace-resource/1"
+      || !raw.grant || typeof raw.grant !== "object" || Array.isArray(raw.grant))
+    return null;
+  const grant = raw.grant as Json;
+  if (Object.keys(grant).length !== VERIFIED_GRANT_KEYS.size
+      || Object.keys(grant).some(key => !VERIFIED_GRANT_KEYS.has(key))
+      || !isCanonicalUuid(grant.space_id) || !isCanonicalUuid(grant.project_id))
+    return null;
+  const trusted = {
+    ownerUserId: query.ownerUserId, spaceId: grant.space_id,
+    projectId: grant.project_id, labProjectId: query.labProjectId,
+    actorId: query.actorId, clientId: query.clientId,
+    workspaceSessionId: query.workspaceSessionId, deviceId: query.deviceId,
+    resourceId: query.resourceId,
+  };
+  if (!projectWorkspaceGrantProjection(grant, trusted, Date.now())) return null;
+  return { ok: true, schema: "ordax.project-workspace-resource/1", grant };
+}
+
+async function workspaceResourceProof(
+  request: Request, env: ProductPostgresEnv, deviceId: string,
+): Promise<Response> {
+  const body = await readBoundedJsonObject(request, 2048);
+  const query = canonicalDeviceWorkspaceProofQuery(body, deviceId);
+  if (!query) return respond({ ok: false, error: "workspace_proof_invalid" }, 400);
+  // The SQL function is SECURITY DEFINER, read-only, and re-evaluates live
+  // consent/grant/revocation. There is no code path for issuing a grant here.
+  const result = await verifyProjectWorkspaceResource(env, query);
+  const proof = projectWorkspaceVerifierResponse(result, query);
+  return proof ? respond(proof)
+    : respond({ ok: false, error: "workspace_authorization_required" }, 403);
+}
+
 async function orchestratorAuthorization(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
   const body = await readBoundedJsonObject(request, 4096);
   const allowed = new Set(["job_id", "effect_id", "attempt_id", "lease_id",
@@ -371,6 +463,13 @@ export async function handleProductDeviceTransport(
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/lease") return lease(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/orchestrator-read-authorization")
       return orchestratorAuthorization(request, env, auth.deviceId);
+    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-proof") {
+      // The SQL is still a proposal. Deploying this source cannot enable the
+      // capability; explicit migration governance and this opt-in are required.
+      if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled")
+        return respond({ ok: false, error: "not_found" }, 404);
+      return workspaceResourceProof(request, env, auth.deviceId);
+    }
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/progress") return progress(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/report"
         || path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/recover-report") {

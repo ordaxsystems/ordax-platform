@@ -12,6 +12,9 @@ type JsonObject = Record<string, unknown>;
 
 export interface ProductPostgresEnv {
   POSTGRES?: Hyperdrive;
+  // Deliberately opt-in after SQL migration and end-to-end attestation gates.
+  // Absence/any other string keeps the workspace-proof route unavailable.
+  WORKSPACE_RESOURCE_VERIFIER_ENABLED?: string;
 }
 
 export type ProductRemoteJob = {
@@ -157,6 +160,14 @@ export function safePostgresFailure(error: unknown, rpc: string): SafePostgresFa
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const RPC_SPECS = {
+  // Staged read-only RPC: remains unavailable until the separately governed
+  // PostgreSQL proposal is applied. No new grant authority is created here.
+  ordax_verify_project_workspace_resource_v1: {
+    keys: ["p_owner_user_id", "p_actor_id", "p_client_id",
+      "p_workspace_session_id", "p_lab_project_id",
+      "p_device_id", "p_resource_id"],
+    casts: ["uuid", "uuid", "uuid", "text", "text", "uuid", "text"],
+  },
   ordax_orchestrator_read_authorization_v1: {
     keys: ["p_device_id", "p_request_id", "p_effect_id", "p_attempt_id",
       "p_lease_id", "p_execution_epoch", "p_agent_instance_id", "p_boot_id"],
@@ -584,6 +595,35 @@ export async function startProductAction(
     p_execution_epoch: input.executionEpoch,
     p_agent_instance_id: input.agentInstanceId,
     p_boot_id: input.bootId,
+  });
+}
+
+export type WorkspaceResourceVerificationInput = Readonly<{
+  ownerUserId: string;
+  actorId: string;
+  clientId: string;
+  workspaceSessionId: string;
+  labProjectId: string;
+  deviceId: string;
+  resourceId: string;
+}>;
+
+/** Execute only the canonical PostgreSQL read-only resource verifier.
+ * Caller authentication belongs to the existing Product Device transport.
+ * No issuer, path lookup, grant cache, or shadow permissions table.
+ */
+export async function verifyProjectWorkspaceResource(
+  env: ProductPostgresEnv,
+  input: WorkspaceResourceVerificationInput,
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_verify_project_workspace_resource_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_actor_id: input.actorId,
+    p_client_id: input.clientId,
+    p_workspace_session_id: input.workspaceSessionId,
+    p_lab_project_id: input.labProjectId,
+    p_device_id: input.deviceId,
+    p_resource_id: input.resourceId,
   });
 }
 
