@@ -92,6 +92,9 @@ const PUBLIC_SCOPE_ERRORS = new Set([
   "device_not_owned",
 ]);
 export function projectScopeResponse(raw: Json, requestedRepository: string): Json {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("product_postgres_invalid_response");
+  }
   if (raw.ok === false && typeof raw.error === "string"
       && PUBLIC_SCOPE_ERRORS.has(raw.error)) {
     return { ok: false, error: raw.error };
@@ -155,7 +158,11 @@ export function createOwnerProjectScopeHandler(env: Env, deps: Dependencies = {}
       const result = projectScopeResponse(raw, repositoryFullName);
       return json(result, resultStatus(result));
     } catch (error) {
-      const code = error instanceof Error ? error.message : "product_postgres_unavailable";
+      // Database transport exceptions must not become an error-reflection API.
+      const reported = error instanceof Error ? error.message : "";
+      const code = reported === "owner_project_scope_invalid" || reported === "product_postgres_unconfigured"
+        || reported === "product_postgres_invalid_response"
+        ? reported : "product_postgres_unavailable";
       const status = code === "owner_project_scope_invalid" ? 400 : 503;
       return json({ ok: false, error: code }, status);
     }
