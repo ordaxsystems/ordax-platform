@@ -3,14 +3,17 @@ begin;
 -- Project-First M1: a Lab project binding is an identity mapping, NOT a grant.
 -- Resource references below are subordinate to the existing canonical
 -- ordax_remote_capability_grants ledger, never an alternative authority.
--- Only Owner-scoped revocation is proposed; no issuance/write privilege to
--- the Edge is granted. Issuance requires future attested Runtime picker proof.
+-- Staged issuance requires independent signed Owner approval and enrolled
+-- Device confirmation; neither is a permission on its own. No new ledger.
 do $preflight$
 begin
   if to_regclass('private.ordax_lab_project_authorities') is not null
      or to_regclass('private.ordax_workspace_resource_bindings') is not null
      or to_regprocedure('public.ordax_verify_project_workspace_resource_v1(uuid,uuid,uuid,text,text,uuid,text)') is not null
      or to_regprocedure('public.ordax_revoke_project_workspace_resource_v1(uuid,uuid,text)') is not null
+     or to_regprocedure('public.ordax_approve_project_workspace_resource_v1(uuid,uuid,text,uuid,uuid,uuid,uuid,text,text,uuid)') is not null
+     or to_regprocedure('public.ordax_commit_project_workspace_resource_v1(uuid,uuid,uuid,uuid,text,text)') is not null
+     or to_regclass('private.ordax_workspace_owner_intents') is not null
      or to_regprocedure('private.ordax_trusted_actor_auth_eligible_v1(uuid)') is null
      or to_regprocedure('private.ordax_subject_can_admin_space_v1(uuid,uuid)') is null
      or to_regprocedure('private.ordax_subject_can_access_project_v1(uuid,uuid)') is null
@@ -66,6 +69,38 @@ create table private.ordax_workspace_resource_bindings (
   revoked_at timestamptz,
   check(expires_at > issued_at and expires_at <= issued_at + interval '24 hours')
 );
+-- A pending Owner decision is NOT a grant. It lives at most five minutes,
+-- contains no path or credential, and is consumed by one authenticated Device
+-- confirmation. A revoked pending intent cannot later produce a resource.
+create table private.ordax_workspace_owner_intents (
+  intent_id uuid primary key,
+  owner_user_id uuid not null references public.ordax_accounts(user_id),
+  client_id uuid not null,
+  lab_project_id text not null check (
+    char_length(lab_project_id) between 1 and 180
+    and lab_project_id ~ '^[A-Za-z0-9_-]+$'
+  ),
+  space_id uuid not null,
+  project_id uuid not null,
+  actor_id uuid not null,
+  workspace_session_id text not null check (
+    char_length(workspace_session_id) between 1 and 180
+    and workspace_session_id ~ '^[A-Za-z0-9_-]+$'
+  ),
+  device_id uuid not null references public.ordax_product_devices(device_id),
+  resource_id text not null unique check (
+    char_length(resource_id) between 17 and 169
+    and resource_id ~ '^resource_[A-Za-z0-9_-]{8,160}$'
+  ),
+  approved_at timestamptz not null default pg_catalog.clock_timestamp(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  revoked_at timestamptz,
+  foreign key(project_id,space_id)
+    references public.ordax_projects(project_id,space_id),
+  check(expires_at > approved_at and expires_at <= approved_at + interval '5 minutes')
+);
+
 create index ordax_workspace_resource_lab_idx
   on private.ordax_workspace_resource_bindings(lab_binding_id)
   where revoked_at is null;
@@ -77,6 +112,10 @@ alter table private.ordax_workspace_resource_bindings force row level security;
 revoke all on table private.ordax_lab_project_authorities
   from public,anon,authenticated,service_role,ordax_edge_executor,ordax_edge_runtime;
 revoke all on table private.ordax_workspace_resource_bindings
+  from public,anon,authenticated,service_role,ordax_edge_executor,ordax_edge_runtime;
+alter table private.ordax_workspace_owner_intents enable row level security;
+alter table private.ordax_workspace_owner_intents force row level security;
+revoke all on table private.ordax_workspace_owner_intents
   from public,anon,authenticated,service_role,ordax_edge_executor,ordax_edge_runtime;
 
 -- READ-ONLY verifier for a caller whose identity has already been attested
