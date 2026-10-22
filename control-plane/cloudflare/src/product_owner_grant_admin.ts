@@ -24,6 +24,22 @@ const json = (body: unknown, status = 200) => Response.json(body, {
   status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
 });
 
+/** Strict shape parser only. Ownership comes from the already authenticated
+ * Owner session and is checked by the canonical PostgreSQL RPC.
+ */
+export function parseOwnerWorkspaceResourceRevocation(
+  url: URL,
+): { clientId: string; resourceId: string } | null {
+  if (!url.pathname.startsWith(WORKSPACE_RESOURCES)) return null;
+  const resourceId = url.pathname.slice(WORKSPACE_RESOURCES.length);
+  const clientId = url.searchParams.get("client_id") ?? "";
+  if (!RESOURCE_ID_RE.test(resourceId) || !isCanonicalUuid(clientId)
+      || [...url.searchParams.keys()].some(key => key !== "client_id")
+      || url.searchParams.getAll("client_id").length !== 1)
+    return null;
+  return { clientId, resourceId };
+}
+
 async function owner(request: Request, env: Env): Promise<string | Response> {
   const identity = await authenticateProductRequest(request, env);
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
@@ -69,14 +85,11 @@ export async function handleProductOwnerGrantAdmin(request: Request, env: Env): 
         return json({ ok: false, error: "not_found" }, 404);
       if (request.method !== "DELETE")
         return json({ ok: false, error: "method_not_allowed" }, 405);
-      const resourceId = url.pathname.slice(WORKSPACE_RESOURCES.length);
-      const clientId = url.searchParams.get("client_id") ?? "";
-      if (!RESOURCE_ID_RE.test(resourceId) || !isCanonicalUuid(clientId)
-          || [...url.searchParams.keys()].some(key => key !== "client_id")
-          || url.searchParams.getAll("client_id").length !== 1)
+      const input = parseOwnerWorkspaceResourceRevocation(url);
+      if (!input)
         return json({ ok: false, error: "workspace_resource_invalid" }, 400);
       const revoked = await revokeProjectWorkspaceResource(env, {
-        ownerUserId: ownerId, clientId, resourceId,
+        ownerUserId: ownerId, ...input,
       });
       return json({ ok: true, revoked });
     }
