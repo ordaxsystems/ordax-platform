@@ -703,6 +703,17 @@
         "path": "control-plane/supabase/migrations/20261022154600_central_session_runtime_heartbeat_preflight_v1.sql",
         "blob_sha": "aeb4f5397a53536ed07da7ee61f46c5c2a59f357"
       }
+    },
+    {
+      "name": "20261022201500_product_mcp_usage_self_read_v1",
+      "applied_version": "20261022204940",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261022201500_product_mcp_usage_self_read_v1.sql",
+        "blob_sha": "307421bfe91c5479ca6b3925886a89651b225ed4"
+      }
     }
   ]
 }

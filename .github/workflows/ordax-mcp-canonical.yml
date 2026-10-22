@@ -11,6 +11,7 @@ on:
       - "control-plane/supabase/migrations/**"
       - "control-plane/cloudflare/production-foundation.json"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_mcp_usage_read.ts"
       - "control-plane/cloudflare/src/product_mcp_discovery_store.ts"
       - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
@@ -23,6 +24,7 @@ on:
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/tests/product_mcp_entry.test.mts"
       - "control-plane/tests/product_mcp_usage_meter_sql.test.mts"
+      - "control-plane/tests/product_mcp_usage_self_read.test.mts"
       - "control-plane/tests/product_postgres_readiness.test.mts"
       - "control-plane/tests/product_mcp_discovery_store.test.mts"
       - "control-plane/tests/product_mcp_trusted_client_ingress.test.mts"
@@ -40,6 +42,7 @@ on:
       - "control-plane/supabase/migrations/**"
       - "control-plane/cloudflare/production-foundation.json"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_mcp_usage_read.ts"
       - "control-plane/cloudflare/src/product_mcp_discovery_store.ts"
       - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
@@ -52,6 +55,7 @@ on:
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/tests/product_mcp_entry.test.mts"
       - "control-plane/tests/product_mcp_usage_meter_sql.test.mts"
+      - "control-plane/tests/product_mcp_usage_self_read.test.mts"
       - "control-plane/tests/product_postgres_readiness.test.mts"
       - "control-plane/tests/product_mcp_discovery_store.test.mts"
       - "control-plane/tests/product_mcp_trusted_client_ingress.test.mts"
@@ -94,7 +98,7 @@ jobs:
       - name: Install pinned canonical PostgreSQL driver
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
       - name: Validate OAuth, trusted ingress and attested interactive MCP protocol
-        run: node --test control-plane/tests/product_mcp_discovery_store.test.mts control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_trusted_client_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_usage_meter_sql.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_postgres_readiness.test.mts
+        run: node --test control-plane/tests/product_mcp_discovery_store.test.mts control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_trusted_client_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_usage_meter_sql.test.mts control-plane/tests/product_mcp_usage_self_read.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_postgres_readiness.test.mts
       - name: Build exact canonical Worker candidate, no deploy
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.mcp.toml --outdir .mcp-candidate-bundle

@@ -14,6 +14,7 @@
 import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
+import { handleProductOwnerMcpUsageRead, PRODUCT_OWNER_MCP_USAGE_PATH } from "./product_mcp_usage_read.ts";
 import { productAuthConfigured, productOwnerAccountSession, type ProductAuthEnv } from "./product_auth.ts";
 import {
   checkCanonicalProductPostgresReadiness,
@@ -61,7 +62,8 @@ type Env = ProductAuthEnv & ProductPostgresEnv;
 export const PRODUCT_TRUSTED_CLIENT_HOSTNAME = "ordax-mcp.ordaxsystems.workers.dev";
 export const PRODUCT_OWNER_SESSION_PATH = "/v3/product/session";
 export function isProductTrustedClientPath(pathname: string): boolean {
-  return pathname === PRODUCT_OWNER_SESSION_PATH
+  return pathname === PRODUCT_OWNER_MCP_USAGE_PATH
+    || pathname === PRODUCT_OWNER_SESSION_PATH
     || pathname === PRODUCT_DEVICE_SETUP_PATH
     || pathname === PRODUCT_DEVICE_PRESENCE_PATH
     || pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH
@@ -307,6 +309,9 @@ export function createCanonicalProductMcpGateway(
       // Studio owner validation shares the same signed Product identity boundary
       // as enrollment. It does not grant MCP client permissions or remote actions.
       return productOwnerAccountSession(request, env);
+    }
+    if (url.pathname === PRODUCT_OWNER_MCP_USAGE_PATH) {
+      return handleProductOwnerMcpUsageRead(request, env);
     }
     if (url.pathname === PRODUCT_DEVICE_SETUP_PATH) {
       return handleProductDeviceSetup(request, env);

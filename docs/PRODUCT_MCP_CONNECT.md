@@ -85,7 +85,7 @@ Esse primeiro corte é somente de observação: a flag `MCP_USAGE_METER_MODE`
 fica desligada por padrão e só pode ser habilitada com esse segredo configurado.
 Não existe bloqueio por quota nem cobrança, e o
 usuário continua pagando o uso do modelo diretamente ao provedor de IA. Os
-agregados são por conta, cliente OAuth, ferramenta e mês-calendário UTC; ficam
+agregados são por conta, ferramenta e mês-calendário UTC (somente a deduplicação é separada por cliente OAuth); ficam
 somente o mês atual e o anterior. O digest de deduplicação é limpo após 24 horas
 por uma rotina diária, normalmente em até 48 horas. Antes de habilitar a coleta,
 a migration deve estar aplicada e o Worker implantado com a política publicada.
@@ -93,6 +93,30 @@ a migration deve estar aplicada e o Worker implantado com a política publicada.
 Preços e direitos dos planos continuam definidos no catálogo comercial do
 OrdaX OS. Este ledger do Platform mede chamadas do MCP e não é uma segunda
 autoridade de assinatura, grant ou entitlement.
+
+### Consulta autenticada de consumo MCP
+
+A Platform expõe `GET /v3/product/usage` no Worker Product MCP já existente,
+sem criar outro servidor MCP ou banco paralelo. A rota exige o **JWT assinado
+da Conta OrdaX**, com papel autenticado; o sujeito do token escolhe a conta.
+Parâmetros de URL e payloads não podem escolher outro usuário. A leitura usa
+somente `public.ordax_get_product_mcp_usage_v1`, sob a função privilegiada
+existente no PostgreSQL, com seleção do agregado privado da própria conta.
+`anon`, `authenticated` e `service_role` não executam diretamente essa RPC.
+
+A resposta contém apenas mês UTC, nome de ferramenta e número de chamadas
+observadas nos dois meses retidos. `collection_active_now` representa o
+estado de implantação **no momento da consulta**; não comprova coleta completa
+desde o começo do mês. `coverage=partial_observational` e
+`billable=false` impedem interpretar os números como fatura, saldo,
+franquia ou obrigação de pagamento. Um agregado vazio com coleta desativada
+**não significa uso zero**.
+
+A Conta pública do OS usa cookies HttpOnly e **ainda não consome essa rota**:
+a integração futura precisa reutilizar seu gateway autenticado, sem expor o
+JWT ao JavaScript, e apresentar apenas valores reais com esse aviso de cobertura.
+Nenhuma assinatura, medição de storage ou limite comercial foi ativado por
+este endpoint.
 
 ## Descoberta dos dispositivos
 
