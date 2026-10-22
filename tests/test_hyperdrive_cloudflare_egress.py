@@ -2,6 +2,8 @@
 import importlib.util
 import ipaddress
 import json
+from contextlib import redirect_stdout
+from io import StringIO
 import os
 from pathlib import Path
 from unittest import TestCase, main, mock
@@ -129,12 +131,43 @@ class HyperdriveEgressRepairTests(TestCase):
                 mod.rollback_if_ours("synthetic", OLD, updated)
             update.assert_not_called()
 
+    def test_inspection_reports_bans_without_leaking_addresses_or_mutation(self):
+        acl = mod.merge(OLD)
+        receipt = {"banned_ipv4_addresses": ["173.245.48.3", "198.51.100.12"]}
+        with mock.patch.object(mod, "policy", return_value=(acl, "applied")), \
+             mock.patch.object(mod, "request", return_value=receipt) as read, \
+             mock.patch.object(mod, "update_policy") as update, \
+             redirect_stdout(StringIO()) as capture:
+            mod.inspect_only("synthetic-token")
+        output = capture.getvalue()
+        self.assertIn("ORDAX_NETWORK_INSPECTION=COMPLETE_NO_CHANGES", output)
+        self.assertIn("ORDAX_NETWORK_CLOUDFLARE_IPV4_COVERED=true", output)
+        self.assertIn("ORDAX_NETWORK_BANS_IPV4_COUNT=2", output)
+        self.assertIn("ORDAX_NETWORK_BANS_CLOUDFLARE_OVERLAP=1", output)
+        self.assertNotIn("173.245.48.3", output)
+        self.assertNotIn("198.51.100.12", output)
+        self.assertNotIn("synthetic-token", output)
+        self.assertEqual(read.call_args.args[:2], (
+            "POST", "https://api.supabase.com/v1/projects/" + mod.PROJECT + "/network-bans/retrieve"))
+        update.assert_not_called()
+
+    def test_inspection_rejects_malformed_bans_without_writes(self):
+        with mock.patch.object(mod, "policy", return_value=(OLD, "applied")), \
+             mock.patch.object(mod, "request", return_value={"banned_ipv4_addresses": ["nonsense"]}), \
+             mock.patch.object(mod, "update_policy") as update, \
+             redirect_stdout(StringIO()):
+            with self.assertRaisesRegex(mod.RepairFailure, "network_bans_response_invalid"):
+                mod.inspect_only("synthetic")
+        update.assert_not_called()
+
     def test_manual_protected_workflow_only(self):
         c = (ROOT / ".github/workflows/hyperdrive-egress-repair.yml").read_text("utf8")
         self.assertIn("workflow_dispatch", c)
         self.assertIn("environment: cloudflare-v3", c)
         self.assertIn("github.ref == 'refs/heads/main'", c)
         self.assertNotIn("schedule:", c)
+        self.assertIn("default: inspect", c)
+        self.assertIn("ORDAX_NETWORK_DIAGNOSTIC_MODE: ${{ inputs.mode }}", c)
 
 
 if __name__ == "__main__":
