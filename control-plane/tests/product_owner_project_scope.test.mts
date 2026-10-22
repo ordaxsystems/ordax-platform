@@ -166,12 +166,9 @@ test("malformed, mismatched or unexpected SQL projection cannot claim project au
     {...value,repository_full_name:"C:\\\\users\\\\folder"},
     {...value,repository_full_name:"../../path"},
     {ok:true}, {ok:false,error:"internal_stack_trace"},
-    {ok:false,error:"device_not_owned",extra:true,owner:OWNER},
     null, [], 7,
   ];
   for (const row of wrong) {
-    if (typeof row === "object" && row && !Array.isArray(row)
-        && row.ok === false && row.error === "device_not_owned") continue;
     assert.throws(() => projectScopeResponse(row as any,"ordaxsystems/ordax-runtime"),
       /product_postgres_invalid_response/);
   }
