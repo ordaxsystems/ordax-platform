@@ -29,3 +29,15 @@ test("supervisor grant retains independent read and write modes", () => {
     assert.equal(productCapabilityAccessMode(capability), "read", capability);
   }
 });
+
+test("workspace snapshot grant is project-scoped and read-only", () => {
+  const workspace = ownerMcpGrantProfile("project-workspace-read");
+  assert.deepEqual(workspace, {
+    scope: "project",
+    capabilities: [{ capability: "workspace.project_snapshot", accessMode: "read" }],
+  });
+  assert.equal(productCapabilityAccessMode("workspace.project_snapshot"), "read");
+  assert.equal(ownerMcpGrantProfile("full-computer-control")?.capabilities.some(
+    item => item.capability === "workspace.project_snapshot",
+  ), false);
+});
