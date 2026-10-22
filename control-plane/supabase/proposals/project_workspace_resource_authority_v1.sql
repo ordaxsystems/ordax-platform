@@ -3,13 +3,14 @@ begin;
 -- Project-First M1: a Lab project binding is an identity mapping, NOT a grant.
 -- Resource references below are subordinate to the existing canonical
 -- ordax_remote_capability_grants ledger, never an alternative authority.
--- No issuing/writing RPC is shipped: only a future attested Runtime picker
--- may request creation, after separate reviewed Owner/Runtime authorization.
+-- Only Owner-scoped revocation is proposed; no issuance/write privilege to
+-- the Edge is granted. Issuance requires future attested Runtime picker proof.
 do $preflight$
 begin
   if to_regclass('private.ordax_lab_project_authorities') is not null
      or to_regclass('private.ordax_workspace_resource_bindings') is not null
      or to_regprocedure('public.ordax_verify_project_workspace_resource_v1(uuid,uuid,uuid,text,text,uuid,text)') is not null
+     or to_regprocedure('public.ordax_revoke_project_workspace_resource_v1(uuid,uuid,text)') is not null
      or to_regprocedure('private.ordax_trusted_actor_auth_eligible_v1(uuid)') is null
      or to_regprocedure('private.ordax_subject_can_admin_space_v1(uuid,uuid)') is null
      or to_regprocedure('private.ordax_subject_can_access_project_v1(uuid,uuid)') is null
@@ -202,6 +203,40 @@ grant execute on function public.ordax_verify_project_workspace_resource_v1(
   uuid,uuid,uuid,text,text,uuid,text
 ) to ordax_edge_runtime;
 
--- No insertion, issuance, revocation, resource picker, network route, local
--- directory resolution or deployment is authorized by this source migration.
+-- Revocation of an existing non-bearer resource is separate from issuance.
+-- The Worker authenticates the signed Owner session and supplies the Owner
+-- UUID. Neither an arbitrary client ID nor a resourceId is an authorization
+-- secret; both must match the existing private Owner/client binding.
+-- This function intentionally does NOT require a live OAuth consent/grant:
+-- the Owner must still be able to revoke a resource after consent is withdrawn.
+create function public.ordax_revoke_project_workspace_resource_v1(
+  p_owner_user_id uuid, p_client_id uuid, p_resource_id text
+)
+returns boolean
+language sql volatile security definer set search_path = ''
+as $function$
+  with revoked as (
+    update private.ordax_workspace_resource_bindings as r
+    set revoked_at = pg_catalog.clock_timestamp()
+    from private.ordax_lab_project_authorities as a
+    where r.lab_binding_id = a.binding_id
+      and a.owner_user_id = p_owner_user_id
+      and a.client_id = p_client_id
+      and r.resource_id = p_resource_id
+      and r.revoked_at is null
+    returning r.resource_id
+  )
+  select exists (select 1 from revoked);
+$function$;
+
+revoke all on function public.ordax_revoke_project_workspace_resource_v1(
+  uuid,uuid,text
+) from public,anon,authenticated,service_role,ordax_edge_executor,ordax_edge_runtime;
+grant execute on function public.ordax_revoke_project_workspace_resource_v1(
+  uuid,uuid,text
+) to ordax_edge_runtime;
+
+-- No issuance, insertion, grant mutation, local path resolution or network
+-- route is authorized by this source-only proposal. The owner revoker is
+-- inactive until the same governed migration as the read-only verifier.
 commit;

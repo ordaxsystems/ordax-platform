@@ -21,15 +21,25 @@ A função de store `verifyProjectWorkspaceResource` reutiliza o `callRpc` com p
 
 Os testes cobrem request allowlist, impossibilidade de escolher outro device pelo corpo, grant de outro Owner/actor/client/session/projeto/recurso, revogação, conteúdo extra, expiração e ausência de autenticação. A nova consulta **não** cria, renova ou revoga grants nem implementa o picker; a migração e a ativação permanecem bloqueadas pela issue #266. A credencial Device identifica o transportador, enquanto o PostgreSQL valida o grant e seu ator: não interpretar uma chamada com resourceId como consentimento novo.
 
+## Revogação pelo proprietário — proposta, bloqueada por padrão
+
+A mesma proposta PostgreSQL agora inclui `public.ordax_revoke_project_workspace_resource_v1(uuid,uuid,text)`: função restrita à role `ordax_edge_runtime`, sem `INSERT`, sem `GRANT UPDATE` em tabelas privadas e sem modificar `ordax_remote_capability_grants`. A operação altera exclusivamente `revoked_at` da referência opaca já existente, **quando Owner, client UUID e resourceId coincidem** com o vínculo privado. Outro proprietário, outro cliente ou ID desconhecido retornam `false` e não causam efeitos. Repetições também retornam `false`. A revogação continua permitida se o consentimento OAuth tiver sido retirado; negar a revogação nessa situação prenderia o usuário a uma autorização antiga.
+
+O endpoint `DELETE /v3/owner/workspace-resources/{resourceId}?client_id={clientUUID}` reaproveita a autenticação de Owner assinada de `product_owner_grant_admin` e o `callRpc` parametrizado existente. A identidade do Owner **nunca é aceita do request**: somente a sessão validada a fornece. `client_id` é um filtro exato, não uma autorização independente. Outras query strings, seleção arbitrária de device, caminhos e token no request não são aceitos.
+
+O mesmo gate `WORKSPACE_RESOURCE_VERIFIER_ENABLED=enabled` permanece obrigatório. Sem ele, retorna `not_found` e nada é alterado. **Não habilitar o gate** até a migração aprovada, o emissor atestado e os testes Windows E2E. A revogação funcional futura é apenas uma parte do ciclo de vida dos recursos; **a emissão ainda não existe**.
+
+Os testes SQL PGlite verificam Owner/client errados, revogação repetida, persistência, privilégio exclusivo da role Edge e que a revogação funciona após retirada do consentimento. O ledger de grants continua intocado. Os testes HTTP verificam que o endpoint exige autenticação e rejeita formas ambíguas/indevidas.
+
 ## Operações ausentes por design
 
-O SQL de proposta em `control-plane/supabase/proposals/project_workspace_resource_authority_v1.sql` **não inclui emissão, inserção, renovação, revogação remota ou rota HTTP**. As relações privadas têm RLS habilitado e nenhuma escrita concedida ao Edge. Sem picker de pasta confiável e consentimento explícito, o port do App continua `capability_unavailable`; não usar SQL direto para fabricar evidência do picker.
+O SQL de proposta em `control-plane/supabase/proposals/project_workspace_resource_authority_v1.sql` **não inclui emissão, inserção nem renovação**; inclui somente a revogação restrita de referências já existentes, condicionada à futura migração aprovada. A rota HTTP é implementada no handler Owner existente, mas permanece desabilitada. As relações privadas têm RLS habilitado e nenhuma escrita concedida ao Edge. Sem picker de pasta confiável e consentimento explícito, o port do App continua `capability_unavailable`; não usar SQL direto para fabricar evidência do picker.
 
 ## Ordem de promoção
 
 1. Provar CI SQL real PGlite com as próprias funções canônicas de elegibilidade e casos negativos; auditar privilégios e FKs do PostgreSQL canônico somente por leitura. A proposta vive fora de `migrations/` e não altera o ledger aplicado.
 2. Após autorização específica futura, gerar a migração com o CLI canônico, revisar, aplicar pelo owner e registrar no `control-plane/supabase/migration-registry.json` somente a versão realmente aplicada e o hash Git exato. Não adicionar migração não aplicada nem registrar uma aplicação fictícia. Não aplicar em produção neste gate.
-3. Criar seletor atestado no Runtime e mecanismo de emissão Owner restrito, com recibo/auditoria transacional e revogação. Revisar o escopo do grant e o modo de autenticar actor/session no canal real.
+3. Integrar seletor atestado no Runtime e mecanismo de emissão Owner restrito com recibo/auditoria transacional; revalidar a revogação Owner proposta após consentimento real. Revisar o escopo do grant e o modo de autenticar actor/session no canal real.
 4. Conectar verificação ao transporte Device/Product autenticado e ao `ProjectWorkspacePort` já existente; negar payload que contenha path, token ou identidade de ator derivada de modelo.
 5. E2E Windows com fixture VESTE descartável: seleção humana, ler snapshot, revogar, mover pasta, reiniciar, provar nenhuma leitura sem grant e nenhuma escrita. Somente então reclassificar M1 como operacional.
 
