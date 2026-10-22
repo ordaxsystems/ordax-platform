@@ -412,8 +412,12 @@ test("model-selected device never overrides the attested Product device", async 
   });
   const other = "66666666-6666-4666-8666-666666666666";
   const response = await handler(actionRequest("computer.click", { x: 1, y: 2 }, other));
-  assert.equal(response.status, 400);
-  assert.equal((await response.json()).error, "product_device_action_invalid");
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    error: "product_attested_device_mismatch",
+    required_action: "establish_attested_session_for_requested_device",
+  });
   assert.equal(touched, false);
 });
 
