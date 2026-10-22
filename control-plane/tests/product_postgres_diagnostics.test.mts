@@ -28,6 +28,25 @@ test("PostgreSQL diagnostics expose only allowlisted non-secret fields", () => {
   assert.equal(Object.hasOwn(diagnostic, "stack"), false);
 });
 
+test("nested Hyperdrive PostgreSQL diagnostics extract only allowlisted failure class", () => {
+  const error = Object.assign(new Error("provider rejected: " + SECRET), {
+    code: "58000", detail: "Server connection attempt failed: connection_refused; " + SECRET,
+    hint: "private-not-for-logs",
+    cause: { message: "Failed to acquire a connection from the pool; " + SECRET },
+  });
+  const info = safePostgresFailure(error, "fixture_rpc");
+  assert.equal(info.code, "58000");
+  assert.equal(info.classification, "hyperdrive_pool_acquire_failed");
+  assert.ok(info.signals.includes("pool_acquire"));
+  assert.ok(info.signals.includes("server_connection_attempt"));
+  assert.ok(info.signals.includes("connection_refused"));
+  assert.equal(JSON.stringify(info).includes(SECRET), false);
+  assert.equal(JSON.stringify(info).includes("private-not-for-logs"), false);
+  assert.equal(Object.hasOwn(info, "detail"), false);
+  assert.equal(Object.hasOwn(info, "hint"), false);
+  assert.equal(Object.hasOwn(info, "cause"), false);
+});
+
 test("store logs only the safe diagnostic envelope before generic failure", () => {
   const source = fs.readFileSync(new URL("../cloudflare/src/product_postgres_store.ts", import.meta.url), "utf8");
   assert.match(source, /const diagnostic = safePostgresFailure\(error, rpc\)/);

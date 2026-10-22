@@ -117,8 +117,16 @@ const POSTGRES_FAILURE_SIGNAL_MARKERS = Object.freeze([
 ] as const);
 
 function postgresFailureMessage(error: unknown): string {
+  // Postgres/Hyperdrive may wrap origin failures in structured ErrorResponse
+  // fields or a single nested cause. Only inspect locally to classify known
+  // errors: never copy provider messages, details, hints or connection URLs
+  // into logs or public responses.
   const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
-  return typeof record.message === "string" ? record.message.toLowerCase() : "";
+  const cause = record.cause && typeof record.cause === "object"
+    ? record.cause as Record<string, unknown> : {};
+  const fields = [record.message, record.detail, record.hint, cause.message, cause.detail];
+  return fields.filter((value): value is string => typeof value === "string")
+    .map(value => value.toLowerCase()).join(" ");
 }
 
 function postgresFailureSignals(error: unknown): string[] {
@@ -476,6 +484,8 @@ export async function checkCanonicalProductPostgresReadiness(
     console.error(JSON.stringify({
       event: "product_postgres_readiness_failure",
       phase,
+      code: /^[A-Z0-9]{5}$/.test(safe.code ?? "") ? safe.code : null,
+      cause_code: /^[A-Z0-9]{5}$/.test(safe.cause_code ?? "") ? safe.cause_code : null,
       classification: safe.classification,
       signals: safe.signals,
     }));
