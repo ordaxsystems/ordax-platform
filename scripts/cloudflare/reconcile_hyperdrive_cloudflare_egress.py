@@ -220,7 +220,15 @@ def inspect_only(token: str) -> None:
         try:
             if not isinstance(candidate, str):
                 raise ValueError("invalid_ban_record")
-            item = ipaddress.ip_address(candidate)
+            # Some Supabase receipts encode individual banned hosts as /32.
+            # Accept only a single IPv4 host, never a broader banned network.
+            if "/" in candidate:
+                network = ipaddress.ip_network(candidate, strict=True)
+                if network.version != 4 or network.prefixlen != 32:
+                    raise ValueError("ban_must_be_single_ipv4")
+                item = network.network_address
+            else:
+                item = ipaddress.ip_address(candidate)
             if item.version != 4:
                 raise ValueError("not_ipv4")
             blocked_ips.append(item)
