@@ -85,6 +85,62 @@ class DirectOriginProbeContracts(unittest.TestCase):
                 self.assertEqual(payload["mtls"]["sslmode"], "require")
                 self.assertEqual(payload["caching"], {"disabled": True})
 
+    def test_pooler_preflight_uses_exact_tenant_credentials_without_argv_leak(self):
+        for mode, port in (("pooler_session", "5432"), ("pooler_transaction", "6543")):
+            with self.subTest(mode=mode), \
+                 mock.patch.object(probe.shutil, "which", return_value="/usr/bin/psql"), \
+                 mock.patch.object(probe.subprocess, "run", return_value=mock.Mock(
+                     returncode=0, stdout=b"1\\n")) as runner:
+                probe.verify_pooler_credential(
+                    mode, "ordax_direct_diag_39478283587", "mock-secret")
+            command = runner.call_args.args[0]
+            env = runner.call_args.kwargs["env"]
+            self.assertNotIn("mock-secret", " ".join(command))
+            self.assertEqual(env["PGPASSWORD"], "mock-secret")
+            self.assertEqual(env["PGPORT"], port)
+            self.assertEqual(env["PGUSER"],
+                             "ordax_direct_diag_39478283587." + probe.PROJECT)
+            self.assertEqual(env["PGSSLMODE"], "require")
+            self.assertEqual(env["PGHOST"], probe.POOLER_ORIGIN)
+            self.assertEqual(runner.call_args.kwargs["input"], b"")
+
+    def test_pooler_preflight_denies_failure_without_dumping_stderr(self):
+        failed = mock.Mock(returncode=2, stdout=b"",
+                           stderr=b"private-secret-not-for-logs")
+        with mock.patch.object(probe.shutil, "which", return_value="/usr/bin/psql"), \
+             mock.patch.object(probe.subprocess, "run", return_value=failed) as runner, \
+             mock.patch.object(probe.time, "sleep") as wait:
+            with self.assertRaisesRegex(probe.ProbeError, "pooler_credential_not_authenticated") as caught:
+                probe.verify_pooler_credential(
+                    "pooler_transaction", "ordax_direct_diag_39478283587", "mock-secret")
+        self.assertEqual(runner.call_count, 8)
+        self.assertEqual(wait.call_count, 7)
+        self.assertNotIn("private-secret", str(caught.exception))
+        with self.assertRaisesRegex(probe.ProbeError, "pooler_preflight_mode_invalid"):
+            probe.verify_pooler_credential(
+                "direct_ipv6", "ordax_direct_diag_39478283587", "mock-secret")
+
+    def test_failed_origin_credential_stops_before_cloudflare_resources(self):
+        fake_env = {"CLOUDFLARE_API_TOKEN": "fake-cf",
+                    "SUPABASE_ACCESS_TOKEN": "fake-db",
+                    "GITHUB_RUN_ID": "39478283587",
+                    "ORDAX_HYPERDRIVE_PROBE_MODE": "pooler_session"}
+        with mock.patch.dict(probe.os.environ, fake_env), \
+             mock.patch.object(probe, "require_unique_role"), \
+             mock.patch.object(probe, "create_role"), \
+             mock.patch.object(probe, "verify_pooler_credential",
+                               side_effect=probe.ProbeError("pooler_credential_not_authenticated")), \
+             mock.patch.object(probe, "find_hyperdrive", return_value=None), \
+             mock.patch.object(probe, "create_hyperdrive") as create_hd, \
+             mock.patch.object(probe, "delete_role") as drop, \
+             redirect_stdout(StringIO()) as output:
+            with self.assertRaisesRegex(probe.ProbeError, "gate_failed"):
+                probe.run()
+        create_hd.assert_not_called()
+        drop.assert_called_once()
+        self.assertIn("ORDAX_DIRECT_ROLE_CLEANUP=PASS", output.getvalue())
+        self.assertNotIn("fake-db", output.getvalue())
+
     def test_unknown_origin_refused_before_creating_any_resource(self):
         with self.assertRaisesRegex(probe.ProbeError, "origin_mode_not_allowlisted"):
             probe.origin_for_mode("attacker.host:5432", "ordax_direct_diag_39478283587")

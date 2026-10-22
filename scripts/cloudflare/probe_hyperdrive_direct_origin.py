@@ -139,6 +139,40 @@ def origin_for_mode(mode: str, role: str) -> dict:
             "port": 5432 if mode == "pooler_session" else 6543}
 
 
+def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
+    """Prove the exact temporary tenant role before blaming Cloudflare.
+
+    Supavisor may temporarily cache stale database role verifiers after CREATE
+    ROLE or ALTER ROLE. A direct psql SELECT 1 rules out that misleading
+    precondition; it never performs SQL writes or exposes the password.
+    """
+    if mode not in ("pooler_session", "pooler_transaction"):
+        raise ProbeError("pooler_preflight_mode_invalid")
+    if shutil.which("psql") is None:
+        raise ProbeError("pooler_probe_cli_missing")
+    origin = origin_for_mode(mode, role)
+    env = {key: value for key, value in os.environ.items()
+           if key in {"PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT"}}
+    env.update({"PGHOST": origin["host"], "PGPORT": str(origin["port"]),
+                "PGDATABASE": "postgres", "PGUSER": origin["user"],
+                "PGPASSWORD": credential, "PGSSLMODE": "require",
+                "PGCONNECT_TIMEOUT": "6"})
+    command = ["psql", "--no-psqlrc", "--no-password", "--tuples-only",
+               "--no-align", "--command", "SELECT 1;"]
+    for attempt in range(8):
+        try:
+            response = subprocess.run(command, input=b"", env=env,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                      timeout=11, check=False)
+            if response.returncode == 0 and response.stdout.strip() == b"1":
+                return
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if attempt < 7:
+            time.sleep(3)
+    raise ProbeError("pooler_credential_not_authenticated")
+
+
 def create_hyperdrive(token: str, name: str, role: str, credential: str,
                       mode: str = "direct_ipv6") -> str:
     origin = origin_for_mode(mode, role)
@@ -264,6 +298,9 @@ def run():
         role_ownership = True  # Even an ambiguous CREATE needs safe cleanup.
         create_role(db, role, credential)
         print("ORDAX_DIRECT_ROLE=CREATED_LOGIN_ONLY", flush=True)
+        if mode in ("pooler_session", "pooler_transaction"):
+            verify_pooler_credential(mode, role, credential)
+            print("ORDAX_DIRECT_POOLER_CREDENTIAL=VERIFIED", flush=True)
         hd_id = create_hyperdrive(cf, name, role, credential, mode)
         print("ORDAX_DIRECT_ORIGIN_MODE=" + mode, flush=True)
         print("ORDAX_DIRECT_HYPERDRIVE=CREATED", flush=True)
