@@ -236,6 +236,12 @@ def inspect_only(token: str) -> None:
             # Only bounded data types and key names are observable; addresses
             # and provider return values remain secret to the runner.
             print("ORDAX_NETWORK_BANS_ITEM_TYPE=" + type(raw).__name__, flush=True)
+            if isinstance(candidate, str):
+                mask = "".join("9" if c.isdecimal() else "a" if c.isalpha()
+                               else c if c in "./:_-[]()" else "?"
+                               for c in candidate[:80])
+                print("ORDAX_NETWORK_BANS_ITEM_PATTERN=" + mask, flush=True)
+                print("ORDAX_NETWORK_BANS_ITEM_LENGTH=" + str(len(candidate)), flush=True)
             if isinstance(raw, dict):
                 keys = sorted(k for k in raw if isinstance(k, str) and
                               1 <= len(k) <= 48 and k.replace("_", "").isalnum())
