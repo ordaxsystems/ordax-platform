@@ -15,6 +15,8 @@ export interface ProductPostgresEnv {
   // Deliberately opt-in after SQL migration and end-to-end attestation gates.
   // Absence/any other string keeps the workspace-proof route unavailable.
   WORKSPACE_RESOURCE_VERIFIER_ENABLED?: string;
+  // Separate rollout gate: verifier approval must NOT enable grant issuance.
+  WORKSPACE_RESOURCE_ISSUANCE_ENABLED?: string;
 }
 
 export type ProductRemoteJob = {
@@ -162,6 +164,17 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const RPC_SPECS = {
   // Staged read-only RPC: remains unavailable until the separately governed
   // PostgreSQL proposal is applied. No new grant authority is created here.
+  ordax_approve_project_workspace_resource_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_lab_project_id", "p_space_id",
+      "p_project_id", "p_device_id", "p_actor_id", "p_workspace_session_id",
+      "p_resource_id", "p_intent_id"],
+    casts: ["uuid", "uuid", "text", "uuid", "uuid", "uuid", "uuid", "text", "text", "uuid"],
+  },
+  ordax_commit_project_workspace_resource_v1: {
+    keys: ["p_device_id", "p_intent_id", "p_actor_id",
+      "p_client_id", "p_workspace_session_id", "p_resource_id"],
+    casts: ["uuid", "uuid", "uuid", "uuid", "text", "text"],
+  },
   ordax_revoke_project_workspace_resource_v1: {
     keys: ["p_owner_user_id", "p_client_id", "p_resource_id"],
     casts: ["uuid", "uuid", "text"],
@@ -599,6 +612,53 @@ export async function startProductAction(
     p_execution_epoch: input.executionEpoch,
     p_agent_instance_id: input.agentInstanceId,
     p_boot_id: input.bootId,
+  });
+}
+
+export type WorkspaceOwnerApprovalInput = Readonly<{
+  ownerUserId: string;
+  clientId: string;
+  labProjectId: string;
+  spaceId: string;
+  projectId: string;
+  deviceId: string;
+  actorId: string;
+  workspaceSessionId: string;
+  resourceId: string;
+  intentId: string;
+}>;
+export type WorkspaceDeviceConfirmationInput = Readonly<{
+  deviceId: string;
+  intentId: string;
+  actorId: string;
+  clientId: string;
+  workspaceSessionId: string;
+  resourceId: string;
+}>;
+
+/** Two independent authenticated transport boundaries, one existing ledger.
+ * Workers MUST supply Owner subject and enrolled Device ID from canonical
+ * authentication; the body merely narrows which exact row may be approved.
+ */
+export async function approveProjectWorkspaceResource(
+  env: ProductPostgresEnv, input: WorkspaceOwnerApprovalInput,
+): Promise<boolean> {
+  return callRpc<boolean>(env, "ordax_approve_project_workspace_resource_v1", {
+    p_owner_user_id: input.ownerUserId, p_client_id: input.clientId,
+    p_lab_project_id: input.labProjectId, p_space_id: input.spaceId,
+    p_project_id: input.projectId, p_device_id: input.deviceId,
+    p_actor_id: input.actorId, p_workspace_session_id: input.workspaceSessionId,
+    p_resource_id: input.resourceId, p_intent_id: input.intentId,
+  });
+}
+export async function commitProjectWorkspaceResource(
+  env: ProductPostgresEnv, input: WorkspaceDeviceConfirmationInput,
+): Promise<boolean> {
+  return callRpc<boolean>(env, "ordax_commit_project_workspace_resource_v1", {
+    p_device_id: input.deviceId, p_intent_id: input.intentId,
+    p_actor_id: input.actorId, p_client_id: input.clientId,
+    p_workspace_session_id: input.workspaceSessionId,
+    p_resource_id: input.resourceId,
   });
 }
 
