@@ -7,6 +7,7 @@
  */
 import {
   authenticateProductDevice,
+  commitProjectWorkspaceResource,
   bindProductActionRuntimeProvenance,
   claimProductAction,
   progressProductAction,
@@ -23,6 +24,7 @@ import {
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { projectWorkspaceGrantProjection } from "./project_workspace_grant_contract.ts";
+import { canonicalDeviceWorkspaceConfirmation } from "./project_workspace_issue_contract.ts";
 
 type Json = Record<string, unknown>;
 type RuntimeKind = "ordax-os" | "desktop-agent" | "mobile-client" | "other";
@@ -390,6 +392,24 @@ async function workspaceResourceProof(
     : respond({ ok: false, error: "workspace_authorization_required" }, 403);
 }
 
+/** The source-only Device confirmation MUST be composed by the already
+ * enrolled trusted Runtime host after its native Owner picker and exact
+ * in-process opaque resource selection. An arbitrary JSON payload/Device
+ * bearer is NOT proof of a GUI event. Both SQL gates remain independent.
+ */
+async function workspaceResourceConfirmation(
+  request: Request, env: ProductPostgresEnv, deviceId: string,
+): Promise<Response> {
+  const body = await readBoundedJsonObject(request, 2048);
+  const input = canonicalDeviceWorkspaceConfirmation(body);
+  if (!input)
+    return respond({ ok: false, error: "workspace_confirmation_invalid" }, 400);
+  const committed = await commitProjectWorkspaceResource(env, {
+    deviceId, ...input,
+  });
+  return respond({ ok: committed, committed }, committed ? 200 : 403);
+}
+
 async function orchestratorAuthorization(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
   const body = await readBoundedJsonObject(request, 4096);
   const allowed = new Set(["job_id", "effect_id", "attempt_id", "lease_id",
@@ -463,6 +483,12 @@ export async function handleProductDeviceTransport(
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/lease") return lease(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/orchestrator-read-authorization")
       return orchestratorAuthorization(request, env, auth.deviceId);
+    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-confirm") {
+      if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled"
+          || env.WORKSPACE_RESOURCE_ISSUANCE_ENABLED !== "enabled")
+        return respond({ ok: false, error: "not_found" }, 404);
+      return workspaceResourceConfirmation(request, env, auth.deviceId);
+    }
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-proof") {
       // The SQL is still a proposal. Deploying this source cannot enable the
       // capability; explicit migration governance and this opt-in are required.
