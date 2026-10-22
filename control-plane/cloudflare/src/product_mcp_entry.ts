@@ -190,6 +190,7 @@ type SessionRecoveryDependencies = Readonly<{
 // not established, but never grant a device or dispatch an action.
 const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
   "central_device_offline",
+  "central_device_runtime_not_ready",
   "central_session_marker_required",
   "central_device_target_missing",
   "central_device_target_ambiguous",

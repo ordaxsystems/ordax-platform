@@ -141,10 +141,140 @@ test("Workspace verifier binds live Product scope and revocation without a new g
     await assert.rejects(() => db.query(
       "insert into private.ordax_lab_project_authorities(binding_id,owner_user_id,client_id,lab_project_id,space_id,project_id) values($1,$2,$3,'lab_one',$4,$5)",
       [randomUUID(),owner,client,space,project]));
+
+    // Owner + Device two-phase issuance: no SQL path, JWT, or second ledger.
+    const approve = async (values:unknown[]) => (await db.query(
+      "select public.ordax_approve_project_workspace_resource_v1($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) as approved",
+      values)).rows[0].approved as boolean;
+    const commit = async (values:unknown[]) => (await db.query(
+      "select public.ordax_commit_project_workspace_resource_v1($1,$2,$3,$4,$5,$6) as committed",
+      values)).rows[0].committed as boolean;
+    const candidate="resource_"+randomUUID().replaceAll("-","");
+    const intent=randomUUID();
+    const ownerDecision=[owner,client,"lab_one",space,project,device,actor,
+                         "session_one",candidate,intent];
+    const deviceCommit=[device,intent,actor,client,"session_one",candidate];
+    assert.equal(await approve([other,...ownerDecision.slice(1)]),false,"Owner mismatch");
+    assert.equal(await approve([owner,other,...ownerDecision.slice(2)]),false,"OAuth client mismatch");
+    assert.equal(await approve([owner,client,"lab_one",space,other,...ownerDecision.slice(5)]),
+                 false,"Product project mismatch");
+    assert.equal(await approve([owner,client,"lab_one",space,project,other,
+                               ...ownerDecision.slice(6)]),false,"foreign Device");
+    assert.equal(await approve(ownerDecision),true,"authenticated Owner approves pending");
+    assert.equal(await approve(ownerDecision),false,"approval cannot replay");
+    assert.equal((await verify([owner,actor,client,"session_one","lab_one",device,candidate])).ok,
+                 false,"pending intent grants no read");
+
+    for(let i=0;i<deviceCommit.length;i++){
+      const mutated=[...deviceCommit];
+      mutated[i]=(i===4?"other_session":i===5?"resource_"+randomUUID().replaceAll("-",""):other);
+      assert.equal(await commit(mutated),false,"Device confirmation mismatch "+i);
+    }
+    assert.equal(await commit(deviceCommit),true,"Device commits only exact approved selection");
+    assert.equal(await commit(deviceCommit),false,"Device replay denied");
+    const activeCandidate=await verify([owner,actor,client,"session_one","lab_one",device,candidate]);
+    assert.equal(activeCandidate.ok,true,"two-party issuance readable only after commit");
+    assert.equal(activeCandidate.grant.grant_id,grant,"parent ledger reused");
+    assert.ok(Date.parse(activeCandidate.grant.valid_until)-Date.now()<61*60*1000,
+              "new resource lifetime at most one hour");
+    assert.equal(await (async()=> (await db.query(
+      "select count(*)::int as total from public.ordax_remote_capability_grants"
+    )).rows[0].total)(),1,"issuance does not mint parent grants");
+
+    const ownerCancelResource="resource_"+randomUUID().replaceAll("-","");
+    const cancelIntent=randomUUID();
+    const cancelledDecision=[owner,client,"lab_one",space,project,device,actor,
+                             "session_one",ownerCancelResource,cancelIntent];
+    assert.equal(await approve(cancelledDecision),true);
+    const ownerRevoke=async (values:unknown[]) => (await db.query(
+      "select public.ordax_revoke_project_workspace_resource_v1($1,$2,$3) as revoked",
+      values)).rows[0].revoked as boolean;
+    assert.equal(await ownerRevoke([other,client,ownerCancelResource]),false);
+    assert.equal(await ownerRevoke([owner,other,ownerCancelResource]),false);
+    assert.equal(await ownerRevoke([owner,client,ownerCancelResource]),true,
+                 "Owner cancels pending intent before Device confirmation");
+    assert.equal(await ownerRevoke([owner,client,ownerCancelResource]),false,
+                 "pending revocation idempotent");
+    assert.equal(await commit([device,cancelIntent,actor,client,"session_one",ownerCancelResource]),
+                 false,"cancelled intent cannot create resource");
+
+    const expiredResource="resource_"+randomUUID().replaceAll("-","");
+    const expiredIntent=randomUUID();
+    assert.equal(await approve([owner,client,"lab_one",space,project,device,actor,
+                                "session_one",expiredResource,expiredIntent]),true);
+    await db.query("update private.ordax_workspace_owner_intents set expires_at=now()-interval '2 minutes', approved_at=now()-interval '6 minutes' where intent_id=$1",[expiredIntent]);
+    assert.equal(await commit([device,expiredIntent,actor,client,"session_one",expiredResource]),
+                 false,"expired Owner approval cannot commit");
+
+    const revokeDuringResource="resource_"+randomUUID().replaceAll("-","");
+    const revokeDuringIntent=randomUUID();
+    assert.equal(await approve([owner,client,"lab_one",space,project,device,actor,
+                                "session_one",revokeDuringResource,revokeDuringIntent]),true);
+    await db.exec("update auth.oauth_consents set revoked_at=now()");
+    assert.equal(await commit([device,revokeDuringIntent,actor,client,"session_one",revokeDuringResource]),
+                 false,"OAuth consent revoked before Device confirmation");
+    await db.exec("update auth.oauth_consents set revoked_at=null");
+    assert.equal(await ownerRevoke([owner,client,candidate]),true,
+                 "issued resource can also be revoked by Owner");
+    assert.equal((await verify([owner,actor,client,"session_one","lab_one",device,candidate])).ok,
+                 false,"previously issued resource remains revoked");
+
+    for(const fn of [
+      "public.ordax_approve_project_workspace_resource_v1(uuid,uuid,text,uuid,uuid,uuid,uuid,text,text,uuid)",
+      "public.ordax_commit_project_workspace_resource_v1(uuid,uuid,uuid,uuid,text,text)"
+    ]){
+      for(const role of ["anon","authenticated","service_role","ordax_edge_executor"]){
+        const x=await db.query("select has_function_privilege($1,$2,'EXECUTE') as permitted",[role,fn]);
+        assert.equal(x.rows[0].permitted,false,"no public issuance function "+role);
+      }
+      const edge=await db.query("select has_function_privilege('ordax_edge_runtime',$1,'EXECUTE') as permitted",[fn]);
+      assert.equal(edge.rows[0].permitted,true,"only canonic Edge role may invoke gated RPC");
+    }
+    const internalFn="private.ordax_eligible_workspace_parent_grant_v1(uuid,uuid,uuid,uuid,uuid)";
+    const exec=await db.query("select has_function_privilege('ordax_edge_runtime',$1,'EXECUTE') as permitted",[internalFn]);
+    assert.equal(exec.rows[0].permitted,false,"internal issuer helper not exposed to Edge");
+    for(const role of ["anon","authenticated","service_role","ordax_edge_executor","ordax_edge_runtime"]){
+      const x=await db.query("select has_table_privilege($1,'private.ordax_workspace_owner_intents','INSERT') as permitted",[role]);
+      assert.equal(x.rows[0].permitted,false,"no direct pending intent writes "+role);
+    }
+
+    const revokeSig="public.ordax_revoke_project_workspace_resource_v1(uuid,uuid,text)";
+    for(const role of ["anon","authenticated","service_role","ordax_edge_executor"]){
+      const x=await db.query("select has_function_privilege($1,$2,'EXECUTE') as permitted",
+        [role,revokeSig]);
+      assert.equal(x.rows[0].permitted,false,"revoke privilege "+role);
+    }
+    const edgeAccess=await db.query(
+      "select has_function_privilege('ordax_edge_runtime',$1,'EXECUTE') as permitted",[revokeSig]);
+    assert.equal(edgeAccess.rows[0].permitted,true);
+
+    const revoke = async (values:[string,string,string]) => (await db.query(
+      "select public.ordax_revoke_project_workspace_resource_v1($1,$2,$3) as revoked",
+      values)).rows[0].revoked;
+    assert.equal(await revoke([other,client,resource]),false,"other Owner denied");
+    assert.equal(await revoke([owner,other,resource]),false,"other OAuth client denied");
+    assert.equal(await revoke([owner,client,"resource_"+randomUUID().replaceAll("-","")]),
+      false,"other resource denied");
+    assert.equal(await revoke([owner,client,"invalid/path"]),false,"untrusted path denied");
+    assert.equal((await verify()).ok,true,"other Owner attempts leave grant valid");
+
+    // Revocation remains possible AFTER a user withdraws OAuth consent:
+    // cancellation must never depend on an active permission to read.
+    await db.exec("update auth.oauth_consents set revoked_at=now()");
+    await db.exec("set role ordax_edge_runtime");
+    assert.equal(await revoke([owner,client,resource]),true,"Owner revokes its resource");
+    assert.equal(await revoke([owner,client,resource]),false,"revocation is idempotent");
+    await db.exec("reset role");
+    await db.exec("update auth.oauth_consents set revoked_at=null");
+    assert.equal((await verify()).ok,false,"reference stays revoked after consent returns");
+    const stored=await db.query("select revoked_at from private.ordax_workspace_resource_bindings where resource_id=$1",[resource]);
+    assert.ok(stored.rows[0].revoked_at,"revocation persisted once");
+    const ledger=await db.query("select state from public.ordax_remote_capability_grants where grant_id=$1",[grant]);
+    assert.equal(ledger.rows[0].state,"active","parent grant ledger must remain untouched");
   } finally { await db.close(); }
 });
 
-test("New schema has no issuance RPC, write grants or duplicate capability ledger",()=>{
+test("New schema requires two-party issuance using preexisting grant ledger only",()=>{
   const sql=proposal().toLowerCase().replace(/\s+/g," ");
   for(const required of [
     "references public.ordax_remote_capability_grants(grant_id)",
@@ -157,6 +287,13 @@ test("New schema has no issuance RPC, write grants or duplicate capability ledge
     "r.revoked_at is null",
     "g.state='active'",
     "force row level security",
+    "ordax_revoke_project_workspace_resource_v1",
+    "ordax_approve_project_workspace_resource_v1",
+    "ordax_commit_project_workspace_resource_v1",
+    "ordax_workspace_owner_intents",
+    "a.owner_user_id=p_owner_user_id",
+    "a.client_id=p_client_id",
+    "r.revoked_at is null",
     "to ordax_edge_runtime"
   ])assert.ok(sql.includes(required),required);
   for(const forbidden of ["create function public.ordax_issue_","grant insert on","grant update on",

@@ -825,14 +825,19 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   const created = await handlers.createAction(createRequest);
   const createdPayload = await bodyJson(created);
   if (!created.ok) {
-    if (createdPayload.error === "central_device_offline" || createdPayload.error === "central_session_pending") {
+    if (createdPayload.error === "central_device_offline"
+      || createdPayload.error === "central_device_runtime_not_ready"
+      || createdPayload.error === "central_session_pending") {
       const offline = createdPayload.error === "central_device_offline";
+      const runtimeMissing = createdPayload.error === "central_device_runtime_not_ready";
       return textToolResult({
         ok: false,
         error: createdPayload.error,
         retryable: true,
         action_dispatched: false,
-        required_action: offline ? "reconnect_authorized_device_runtime" : "wait_for_device_session_confirmation",
+        required_action: offline ? "reconnect_authorized_device_runtime"
+          : runtimeMissing ? "start_or_restore_authorized_product_action_runtime"
+          : "wait_for_device_session_confirmation",
       }, true);
     }
     if (spec.projectRequired && createdPayload.error === "product_project_scope_not_found") {

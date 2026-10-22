@@ -422,6 +422,33 @@ test("offline authorized device returns reconnect guidance without waiting or ob
   assert.equal(calls.getAction, 0);
 });
 
+test("discovery-only online device gives immediate Runtime remediation without dispatching", async () => {
+  const { handlers, calls } = fakeHandlers();
+  let openings = 0;
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+    new Set(["computer_access_status"]), {
+      resolve: async () => ({ ok: false, error: "central_session_unbound" }),
+      open: async () => {
+        openings++;
+        return Response.json({ ok: false, error: "central_device_runtime_not_ready" }, { status: 409 });
+      },
+      wait: async () => { assert.fail("do not wait for a Runtime that has not heartbeated"); },
+    });
+  const response = await gateway(request("computer_access_status", {
+    device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  }));
+  const body = await response.json() as any;
+  assert.equal(body.result.isError, true);
+  assert.deepEqual(body.result.structuredContent, {
+    ok: false, error: "central_device_runtime_not_ready",
+    retryable: true, action_dispatched: false,
+    required_action: "start_or_restore_authorized_product_action_runtime",
+  });
+  assert.equal(openings, 1);
+  assert.equal(calls.targets, 0);
+  assert.equal(calls.getAction, 0);
+});
+
 test("unclassified Central session failure remains fail-closed and generic", async () => {
   const { handlers } = fakeHandlers();
   const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,

@@ -681,6 +681,28 @@
         "path": "control-plane/supabase/migrations/20261022014630_product_presence_freshness_v1.sql",
         "blob_sha": "b31806ed347d38bf74084313ee2608a1812c00ac"
       }
+    },
+    {
+      "name": "20261022071118_ordax_product_mcp_usage_meter_v1",
+      "applied_version": "20261022200530",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261022071118_ordax_product_mcp_usage_meter_v1.sql",
+        "blob_sha": "982642e1969cc3b17a4597e305c0f41173719d4b"
+      }
+    },
+    {
+      "name": "20261022154600_central_session_runtime_heartbeat_preflight_v1",
+      "applied_version": "20261022190228",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261022154600_central_session_runtime_heartbeat_preflight_v1.sql",
+        "blob_sha": "aeb4f5397a53536ed07da7ee61f46c5c2a59f357"
+      }
     }
   ]
 }
