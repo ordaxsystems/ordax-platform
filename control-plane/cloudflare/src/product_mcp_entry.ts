@@ -184,6 +184,7 @@ type SessionRecoveryDependencies = Readonly<{
 // Public, bounded remediation codes. They explain why a trusted session was
 // not established, but never grant a device or dispatch an action.
 const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
+  "central_device_offline",
   "central_session_marker_required",
   "central_device_target_missing",
   "central_device_target_ambiguous",
@@ -377,3 +378,4 @@ export default {
     return createCanonicalProductMcpGateway(env)(request);
   },
 };
+

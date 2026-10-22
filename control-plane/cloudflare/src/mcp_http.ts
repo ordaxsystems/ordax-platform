@@ -815,6 +815,16 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   const created = await handlers.createAction(createRequest);
   const createdPayload = await bodyJson(created);
   if (!created.ok) {
+    if (createdPayload.error === "central_device_offline" || createdPayload.error === "central_session_pending") {
+      const offline = createdPayload.error === "central_device_offline";
+      return textToolResult({
+        ok: false,
+        error: createdPayload.error,
+        retryable: true,
+        action_dispatched: false,
+        required_action: offline ? "reconnect_authorized_device_runtime" : "wait_for_device_session_confirmation",
+      }, true);
+    }
     if (spec.projectRequired && createdPayload.error === "product_project_scope_not_found") {
       // A missing Owner-managed Space/project/repository/device association
       // precedes grant evaluation. Never suggest a Windows global grant,
@@ -892,3 +902,4 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
   }
   return rpcError(id, -32601, "Method not found");
 }
+
