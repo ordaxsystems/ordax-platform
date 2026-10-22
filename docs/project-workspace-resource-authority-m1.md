@@ -33,7 +33,17 @@ O fluxo exige **duas autenticações independentes** e a existência prévia do 
 
 A segurança do segundo passo **depende da composição no host Owner/Device confiável**: a Platform não consegue inferir confirmação humana de um campo JSON, nem de um token Device isolado. **Não expor essas RPCs diretamente ao modelo, UI renderer, MCP genérico ou HTTP remoto não atestado**. Ambas usam `SECURITY DEFINER` com role Edge restrita porque precisam acessar tabelas privadas; não há `INSERT` direto nem bypass de `RLS` concedido às demais roles. Os testes PGlite são descartáveis e verificam owner/device/client cruzados, negativa antes da confirmação, duplicação, revogação, expiração e privilégios.
 
-**Gates não cumpridos:** não existem endpoints HTTP Owner/Device que emitam o grant, nem composição real dos diálogos e identidade do host para esta operação. Esta SQL segue em `proposals/`, sem migração nem registro de hash aplicado. Configuração `WORKSPACE_RESOURCE_VERIFIER_ENABLED` continua desligada; nenhuma conta, pasta ou autorização real foi alterada. A proposta especifica o contrato seguro, não habilita a funcionalidade.
+**Gates não cumpridos:** os endpoints de emissão foram preparados **somente em código e default-off**, mas não há composição real dos diálogos e identidade do host para esta operação. Esta SQL segue em `proposals/`, sem migração nem registro de hash aplicado. Configuração `WORKSPACE_RESOURCE_VERIFIER_ENABLED` continua desligada; nenhuma conta, pasta ou autorização real foi alterada. A proposta especifica o contrato seguro, não habilita a funcionalidade.
+
+## Rotas autenticadas em código — emissão com opt-in independente
+
+A implementação da Platform reutiliza **os handlers já canônicos**, sem criar MCP ou transportes paralelos:
+
+- `POST /v3/owner/workspace-resources/approvals` passa pela **sessão Product Owner assinada existente** e derivação server-side obrigatória do Owner UUID. Não aceita `owner_user_id`, `path`, token, permissão ou grant do body; admite apenas `intent_id`, `client_id`, `lab_project_id`, `space_id`, `project_id`, `device_id`, `actor_id`, `workspace_session_id` e `resource_id`. Executa o RPC parametrizado `ordax_approve_project_workspace_resource_v1`.
+- `POST /v3/device/transport/workspace-confirm` passa pela **mesma autenticação Device já instalada**. O ID do dispositivo é obtido do token enrolled; a requisição admite somente `intent_id`, `actor_id`, `client_id`, `workspace_session_id` e `resource_id`. Executa `ordax_commit_project_workspace_resource_v1`. Um `resourceId` apresentado pelo modelo não deve jamais ser usado como prova da confirmação nativa; **o Runtime deve enviar esse evento só a partir do host Owner/Device confiável, depois de ambos os diálogos nativos**.
+- O parser `project_workspace_issue_contract.ts` é o SSOT das duas formas estritas. O store reaproveita `callRpc` allowlisted e o mesmo ledger de `ordax_remote_capability_grants`. Não emite token, nem armazena pasta ou dispositivo no Lab SQLite.
+
+As duas rotas exigem **simultaneamente** `WORKSPACE_RESOURCE_VERIFIER_ENABLED=enabled` e a **nova flag independente** `WORKSPACE_RESOURCE_ISSUANCE_ENABLED=enabled`. Ambas ficam ausentes/desligadas na configuração padrão. Habilitar apenas a leitura de provas **não ativa a emissão**. Não definir nenhuma dessas flags em produção até a migração governada, o host Windows atestado e E2E completo. Sem a migração, a emissão também falha fechada.
 
 ## Revogação pelo proprietário — proposta, bloqueada por padrão
 
@@ -47,7 +57,7 @@ Os testes SQL PGlite verificam Owner/client errados, revogação repetida, persi
 
 ## Operações ausentes por design
 
-O SQL de proposta em `control-plane/supabase/proposals/project_workspace_resource_authority_v1.sql` inclui apenas funções restritas de consentimento Owner e confirmação Device, verificador de leitura e revogação. **Nenhum endpoint de emissão, migração aplicada ou capacidade instalada existe.** A rota HTTP é implementada no handler Owner existente, mas permanece desabilitada. As relações privadas têm RLS forçado, sem escrita direta concedida ao Edge; as alterações futuras são feitas somente dentro de funções `SECURITY DEFINER` explicitamente allowlisted. Sem picker de pasta confiável e consentimento explícito, o port do App continua `capability_unavailable`; não usar SQL direto para fabricar evidência do picker.
+O SQL de proposta em `control-plane/supabase/proposals/project_workspace_resource_authority_v1.sql` inclui apenas funções restritas de consentimento Owner e confirmação Device, verificador de leitura e revogação. **Nenhum endpoint de emissão está habilitado, nenhuma migração foi aplicada e nenhuma capacidade está instalada.** A rota HTTP é implementada no handler Owner existente, mas permanece desabilitada. As relações privadas têm RLS forçado, sem escrita direta concedida ao Edge; as alterações futuras são feitas somente dentro de funções `SECURITY DEFINER` explicitamente allowlisted. Sem picker de pasta confiável e consentimento explícito, o port do App continua `capability_unavailable`; não usar SQL direto para fabricar evidência do picker.
 
 ## Ordem de promoção
 
