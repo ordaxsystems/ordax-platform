@@ -350,7 +350,7 @@ export function canonicalDeviceWorkspaceProofQuery(
   });
 }
 
-function projectWorkspaceVerifierResponse(
+export function projectWorkspaceVerifierResponse(
   result: unknown,
   query: DeviceWorkspaceProofQuery,
 ): Json | null {
