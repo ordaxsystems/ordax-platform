@@ -1,6 +1,6 @@
 # Project-First M1 — recurso local subordinado ao Product grant
 
-**Estado: candidato de código/revisão, não migrado nem habilitado em produção.** Issue: [#266](https://github.com/ordaxsystems/ordax-platform/issues/266). Uma PR de schema não autoriza migração, deploy, troca de grant ou leitura de pastas pessoais.
+**Estado: proposta SQL validável, não migração aplicada nem capacidade habilitada em produção.** Issue: [#266](https://github.com/ordaxsystems/ordax-platform/issues/266). Uma PR de schema não autoriza migração, deploy, troca de grant ou leitura de pastas pessoais.
 
 ## SSOT e isolamento
 
@@ -13,12 +13,12 @@
 
 ## Operações ausentes por design
 
-A migração proposta **não inclui emissão, inserção, renovação, revogação remota ou rota HTTP**. As relações privadas têm RLS habilitado e nenhuma escrita concedida ao Edge. Sem picker de pasta confiável e consentimento explícito, o port do App continua `capability_unavailable`; não usar SQL direto para fabricar evidência do picker.
+O SQL de proposta em `control-plane/supabase/proposals/project_workspace_resource_authority_v1.sql` **não inclui emissão, inserção, renovação, revogação remota ou rota HTTP**. As relações privadas têm RLS habilitado e nenhuma escrita concedida ao Edge. Sem picker de pasta confiável e consentimento explícito, o port do App continua `capability_unavailable`; não usar SQL direto para fabricar evidência do picker.
 
 ## Ordem de promoção
 
-1. Provar CI SQL real PGlite com as próprias funções canônicas de elegibilidade e casos negativos; auditar privilégio efetivo e FK no PostgreSQL canônico somente por leitura.
-2. Rever compatibilidade e políticas de migração no `control-plane/supabase/migration-registry.json`. Registro pendente **não pode ser mesclado** à main como se a migração tivesse sido aplicada. Não aplicar em produção neste gate.
+1. Provar CI SQL real PGlite com as próprias funções canônicas de elegibilidade e casos negativos; auditar privilégios e FKs do PostgreSQL canônico somente por leitura. A proposta vive fora de `migrations/` e não altera o ledger aplicado.
+2. Após autorização específica futura, gerar a migração com o CLI canônico, revisar, aplicar pelo owner e registrar no `control-plane/supabase/migration-registry.json` somente a versão realmente aplicada e o hash Git exato. Não adicionar migração não aplicada nem registrar uma aplicação fictícia. Não aplicar em produção neste gate.
 3. Criar seletor atestado no Runtime e mecanismo de emissão Owner restrito, com recibo/auditoria transacional e revogação. Revisar o escopo do grant e o modo de autenticar actor/session no canal real.
 4. Conectar verificação ao transporte Device/Product autenticado e ao `ProjectWorkspacePort` já existente; negar payload que contenha path, token ou identidade de ator derivada de modelo.
 5. E2E Windows com fixture VESTE descartável: seleção humana, ler snapshot, revogar, mover pasta, reiniciar, provar nenhuma leitura sem grant e nenhuma escrita. Somente então reclassificar M1 como operacional.
