@@ -6,7 +6,6 @@
  * No D1, global operator bearer, legacy pairing database or business-state DO is used.
  */
 import {
-  authenticateProductDevice,
   bindProductActionRuntimeProvenance,
   claimProductAction,
   progressProductAction,
@@ -23,6 +22,8 @@ import {
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { projectWorkspaceGrantProjection } from "./project_workspace_grant_contract.ts";
+import { authenticateProductDeviceRequest } from "./product_device_auth.ts";
+import { sha256Hex } from "./product_crypto.ts";
 
 type Json = Record<string, unknown>;
 type RuntimeKind = "ordax-os" | "desktop-agent" | "mobile-client" | "other";
@@ -56,11 +57,6 @@ export function isProductReportJsonbSafe(value: unknown): boolean {
   return true;
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest), (item) => item.toString(16).padStart(2, "0")).join("");
-}
-
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   for (let offset = 0; offset < bytes.length; offset += 0x8000) {
@@ -78,33 +74,6 @@ function base64ToBytes(value: string): Uint8Array | null {
     return bytes;
   } catch {
     return null;
-  }
-}
-
-async function authenticateDeviceRequest(
-  request: Request,
-  env: ProductPostgresEnv,
-): Promise<{ ok: true; deviceId: string } | { ok: false; response: Response }> {
-  const deviceId = (request.headers.get("x-ordax-device-id") ?? "").trim().toLowerCase();
-  const rawToken = request.headers.get("x-ordax-device-token") ?? "";
-  if (!isCanonicalUuid(deviceId) || rawToken.length < 32 || rawToken.length > 512
-      || /[\r\n]/.test(rawToken)) {
-    return { ok: false, response: respond({ ok: false, error: "device_auth_required" }, 401) };
-  }
-  try {
-    const accepted = await authenticateProductDevice(env, {
-      deviceId,
-      tokenSha256: await sha256Hex(rawToken),
-    });
-    if (!accepted) {
-      return { ok: false, response: respond({ ok: false, error: "invalid_device_token" }, 401) };
-    }
-    return { ok: true, deviceId };
-  } catch (error) {
-    if (error instanceof ProductPostgresError) {
-      return { ok: false, response: respond({ ok: false, error: error.code }, error.status) };
-    }
-    return { ok: false, response: respond({ ok: false, error: "product_postgres_unavailable" }, 503) };
   }
 }
 
@@ -453,7 +422,7 @@ export async function handleProductDeviceTransport(
   env: ProductPostgresEnv,
 ): Promise<Response> {
   if (request.method !== "POST") return respond({ ok: false, error: "method_not_allowed" }, 405);
-  const auth = await authenticateDeviceRequest(request, env);
+  const auth = await authenticateProductDeviceRequest(request, env);
   if (!auth.ok) return auth.response;
   const path = new URL(request.url).pathname;
   try {

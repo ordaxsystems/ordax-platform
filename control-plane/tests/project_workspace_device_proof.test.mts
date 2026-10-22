@@ -128,7 +128,7 @@ test("workspace endpoint is default-off, uses the existing device transport and 
   const transport=fs.readFileSync(new URL("../cloudflare/src/product_device_transport.ts",import.meta.url),"utf8");
   const store=fs.readFileSync(new URL("../cloudflare/src/product_postgres_store.ts",import.meta.url),"utf8");
   assert.match(transport,/WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled"/);
-  assert.match(transport,/authenticateDeviceRequest\(request, env\)/);
+  assert.match(transport,/authenticateProductDeviceRequest\(request, env\)/);
   assert.match(transport,/path === PRODUCT_DEVICE_TRANSPORT_PREFIX \+ "\/workspace-proof"/);
   assert.match(store,/ordax_verify_project_workspace_resource_v1/);
   assert.match(store,/p_device_id: input\.deviceId/);

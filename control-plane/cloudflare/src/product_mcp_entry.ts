@@ -45,6 +45,10 @@ import {
   handleProductOwnerProjectScope,
   PRODUCT_OWNER_PROJECT_SCOPE_PATH,
 } from "./product_owner_project_scope.ts";
+import {
+  handleProductOwnerWorkspaceResource,
+  PRODUCT_OWNER_WORKSPACE_RESOURCES_PATH,
+} from "./product_workspace_resource_api.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 
@@ -61,6 +65,8 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_DEVICE_PRESENCE_PATH
     || pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH
     || pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH
+    || pathname === PRODUCT_OWNER_WORKSPACE_RESOURCES_PATH
+    || pathname.startsWith(PRODUCT_OWNER_WORKSPACE_RESOURCES_PATH + "/")
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
     || pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
     || pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")
@@ -317,6 +323,10 @@ export function createCanonicalProductMcpGateway(
     }
     if (url.pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH) {
       return handleProductOwnerProjectScope(request, env);
+    }
+    if (url.pathname === PRODUCT_OWNER_WORKSPACE_RESOURCES_PATH
+        || url.pathname.startsWith(PRODUCT_OWNER_WORKSPACE_RESOURCES_PATH + "/")) {
+      return handleProductOwnerWorkspaceResource(request, env);
     }
     if (url.pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
         || url.pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH

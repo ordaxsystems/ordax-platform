@@ -168,6 +168,15 @@ const RPC_SPECS = {
       "p_device_id", "p_resource_id"],
     casts: ["uuid", "uuid", "uuid", "text", "text", "uuid", "text"],
   },
+  ordax_register_project_workspace_resource_v1: {
+    keys: ["p_owner_user_id", "p_actor_id", "p_client_id", "p_workspace_session_id",
+      "p_lab_project_id", "p_device_id", "p_resource_id", "p_space_id", "p_project_id"],
+    casts: ["uuid", "uuid", "uuid", "text", "text", "uuid", "text", "uuid", "uuid"],
+  },
+  ordax_revoke_project_workspace_resource_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_resource_id"],
+    casts: ["uuid", "uuid", "text"],
+  },
   ordax_orchestrator_read_authorization_v1: {
     keys: ["p_device_id", "p_request_id", "p_effect_id", "p_attempt_id",
       "p_lease_id", "p_execution_epoch", "p_agent_instance_id", "p_boot_id"],
@@ -624,6 +633,51 @@ export async function verifyProjectWorkspaceResource(
     p_lab_project_id: input.labProjectId,
     p_device_id: input.deviceId,
     p_resource_id: input.resourceId,
+  });
+}
+
+export async function registerProjectWorkspaceResource(
+  env: ProductPostgresEnv,
+  input: {
+    ownerUserId: string; actorId: string; clientId: string;
+    workspaceSessionId: string; labProjectId: string; deviceId: string;
+    resourceId: string; spaceId: string; projectId: string;
+  },
+): Promise<JsonObject> {
+  if (![input.ownerUserId, input.actorId, input.clientId, input.deviceId,
+    input.spaceId, input.projectId].every(isCanonicalUuid)
+      || !/^[A-Za-z0-9_-]{1,180}$/.test(input.workspaceSessionId)
+      || !/^[A-Za-z0-9_-]{1,180}$/.test(input.labProjectId)
+      || !/^resource_[A-Za-z0-9_-]{8,160}$/.test(input.resourceId)) {
+    throw new ProductPostgresError("workspace_resource_invalid", 400);
+  }
+  return callRpc<JsonObject>(env, "ordax_register_project_workspace_resource_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_actor_id: input.actorId,
+    p_client_id: input.clientId,
+    p_workspace_session_id: input.workspaceSessionId,
+    p_lab_project_id: input.labProjectId,
+    p_device_id: input.deviceId,
+    p_resource_id: input.resourceId,
+    p_space_id: input.spaceId,
+    p_project_id: input.projectId,
+  });
+}
+
+export async function revokeProjectWorkspaceResource(
+  env: ProductPostgresEnv,
+  ownerUserId: string,
+  clientId: string,
+  resourceId: string,
+): Promise<JsonObject> {
+  if (!isCanonicalUuid(ownerUserId) || !isCanonicalUuid(clientId)
+      || !/^resource_[A-Za-z0-9_-]{8,160}$/.test(resourceId)) {
+    throw new ProductPostgresError("workspace_resource_revoke_invalid", 400);
+  }
+  return callRpc<JsonObject>(env, "ordax_revoke_project_workspace_resource_v1", {
+    p_owner_user_id: ownerUserId,
+    p_client_id: clientId,
+    p_resource_id: resourceId,
   });
 }
 

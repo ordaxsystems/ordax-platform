@@ -3,13 +3,17 @@ begin;
 -- Project-First M1: a Lab project binding is an identity mapping, NOT a grant.
 -- Resource references below are subordinate to the existing canonical
 -- ordax_remote_capability_grants ledger, never an alternative authority.
--- No issuing/writing RPC is shipped: only a future attested Runtime picker
--- may request creation, after separate reviewed Owner/Runtime authorization.
+-- The resource lifecycle RPCs below are candidate source only. Registration is
+-- limited to the existing read grant and is reachable only through a route
+-- requiring both the signed Owner session and the authenticated Product device.
+-- This proposal is not an applied migration or production authorization.
 do $preflight$
 begin
   if to_regclass('private.ordax_lab_project_authorities') is not null
      or to_regclass('private.ordax_workspace_resource_bindings') is not null
      or to_regprocedure('public.ordax_verify_project_workspace_resource_v1(uuid,uuid,uuid,text,text,uuid,text)') is not null
+     or to_regprocedure('public.ordax_register_project_workspace_resource_v1(uuid,uuid,uuid,text,text,uuid,text,uuid,uuid)') is not null
+     or to_regprocedure('public.ordax_revoke_project_workspace_resource_v1(uuid,uuid,text)') is not null
      or to_regprocedure('private.ordax_trusted_actor_auth_eligible_v1(uuid)') is null
      or to_regprocedure('private.ordax_subject_can_admin_space_v1(uuid,uuid)') is null
      or to_regprocedure('private.ordax_subject_can_access_project_v1(uuid,uuid)') is null
@@ -195,13 +199,219 @@ begin
 end;
 $function$;
 
+-- Bind one opaque ID returned by the trusted Runtime picker to the already
+-- consented, project-scoped read grant. This does not create or broaden a
+-- capability grant; that remains the existing Owner grant-group flow above.
+-- The Cloudflare route additionally requires both the signed Owner session and
+-- this device's existing Product credential before it calls this transaction.
+create function public.ordax_register_project_workspace_resource_v1(
+  p_owner_user_id uuid,
+  p_actor_id uuid,
+  p_client_id uuid,
+  p_workspace_session_id text,
+  p_lab_project_id text,
+  p_device_id uuid,
+  p_resource_id text,
+  p_space_id uuid,
+  p_project_id uuid
+)
+returns jsonb
+language plpgsql volatile security definer set search_path = ''
+as $function$
+declare
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_binding_id uuid;
+  v_binding_space_id uuid;
+  v_binding_project_id uuid;
+  v_binding_revoked_at timestamptz;
+  v_grant_count integer := 0;
+  v_grant_id uuid;
+  v_grant_valid_until timestamptz;
+  v_expires_at timestamptz;
+  v_resource record;
+begin
+  if p_owner_user_id is null or p_actor_id is null or p_client_id is null
+     or p_device_id is null or p_space_id is null or p_project_id is null
+     or p_lab_project_id is null
+     or char_length(p_lab_project_id) not between 1 and 180
+     or p_lab_project_id !~ '^[A-Za-z0-9_-]+$'
+     or p_workspace_session_id is null
+     or char_length(p_workspace_session_id) not between 1 and 180
+     or p_workspace_session_id !~ '^[A-Za-z0-9_-]+$'
+     or p_resource_id is null
+     or p_resource_id !~ '^resource_[A-Za-z0-9_-]{8,160}$'
+     or not private.ordax_trusted_actor_auth_eligible_v1(p_owner_user_id)
+  then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_authorization_required');
+  end if;
+
+  if not exists (
+    select 1 from public.ordax_product_devices d
+    where d.device_id=p_device_id and d.owner_user_id=p_owner_user_id and d.state='active'
+  ) then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_authorization_required');
+  end if;
+  if not exists (
+    select 1 from public.ordax_spaces s
+    join public.ordax_projects p on p.project_id=p_project_id and p.space_id=s.space_id
+    where s.space_id=p_space_id and s.state='active' and p.state='active'
+      and private.ordax_subject_can_admin_space_v1(p_owner_user_id,p_space_id)
+      and private.ordax_subject_can_access_project_v1(p_owner_user_id,p_project_id)
+  ) then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_authorization_required');
+  end if;
+  if not exists (
+    select 1 from public.ordax_space_devices sd
+    where sd.space_id=p_space_id and sd.device_id=p_device_id
+      and sd.state='active' and sd.access_mode='execute'
+  ) or not exists (
+    select 1 from public.ordax_device_project_bindings dp
+    where dp.project_id=p_project_id and dp.device_id=p_device_id
+      and dp.state='active' and 'workspace.project_snapshot'=any(dp.allowed_capabilities)
+  ) or not exists (
+    select 1 from auth.oauth_consents consent
+    join auth.oauth_clients client on client.id=consent.client_id and client.deleted_at is null
+    where consent.user_id=p_owner_user_id and consent.client_id=p_client_id
+      and consent.revoked_at is null
+  ) then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_authorization_required');
+  end if;
+
+  select count(*)::integer into v_grant_count
+  from public.ordax_remote_capability_grants g
+  where g.owner_user_id=p_owner_user_id and g.space_id=p_space_id
+    and g.project_id=p_project_id and g.device_id=p_device_id
+    and g.client_kind='product-mcp' and g.client_id=p_client_id::text
+    and g.scope_kind='project' and g.profile_key='project-workspace-read'
+    and g.capability='workspace.project_snapshot' and g.access_mode='read'
+    and g.approved_by_user_id=p_owner_user_id and g.state='active'
+    and g.valid_until is not null and g.valid_until>v_now;
+  if v_grant_count <> 1 then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_authorization_required');
+  end if;
+  select g.grant_id,g.valid_until into v_grant_id,v_grant_valid_until
+  from public.ordax_remote_capability_grants g
+  where g.owner_user_id=p_owner_user_id and g.space_id=p_space_id
+    and g.project_id=p_project_id and g.device_id=p_device_id
+    and g.client_kind='product-mcp' and g.client_id=p_client_id::text
+    and g.scope_kind='project' and g.profile_key='project-workspace-read'
+    and g.capability='workspace.project_snapshot' and g.access_mode='read'
+    and g.approved_by_user_id=p_owner_user_id and g.state='active'
+    and g.valid_until is not null and g.valid_until>v_now
+  for update of g;
+  if not found or v_grant_id is null or v_grant_valid_until is null
+     or v_grant_valid_until<=v_now then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_authorization_required');
+  end if;
+  v_expires_at := least(v_grant_valid_until,v_now+interval '24 hours');
+  if v_expires_at <= v_now then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_authorization_required');
+  end if;
+
+  insert into private.ordax_lab_project_authorities(
+    binding_id,owner_user_id,client_id,lab_project_id,space_id,project_id
+  ) values (
+    pg_catalog.gen_random_uuid(),p_owner_user_id,p_client_id,p_lab_project_id,p_space_id,p_project_id
+  ) on conflict(owner_user_id,client_id,lab_project_id) do nothing;
+  select a.binding_id,a.space_id,a.project_id,a.revoked_at
+    into v_binding_id,v_binding_space_id,v_binding_project_id,v_binding_revoked_at
+  from private.ordax_lab_project_authorities a
+  where a.owner_user_id=p_owner_user_id and a.client_id=p_client_id
+    and a.lab_project_id=p_lab_project_id
+  for update;
+  if not found or v_binding_id is null then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_project_binding_conflict');
+  end if;
+  if v_binding_revoked_at is not null or v_binding_space_id<>p_space_id
+     or v_binding_project_id<>p_project_id then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_project_binding_conflict');
+  end if;
+
+  insert into private.ordax_workspace_resource_bindings(
+    resource_id,lab_binding_id,grant_id,actor_id,workspace_session_id,device_id,
+    issued_by,issued_at,expires_at
+  ) values (
+    p_resource_id,v_binding_id,v_grant_id,p_actor_id,p_workspace_session_id,p_device_id,
+    'trusted-runtime-picker',v_now,v_expires_at
+  ) on conflict(resource_id) do nothing;
+  select r.* into v_resource
+  from private.ordax_workspace_resource_bindings r
+  where r.resource_id=p_resource_id
+  for update;
+  if not found then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_resource_conflict');
+  end if;
+  if v_resource.lab_binding_id<>v_binding_id or v_resource.grant_id<>v_grant_id
+     or v_resource.actor_id<>p_actor_id
+     or v_resource.workspace_session_id<>p_workspace_session_id
+     or v_resource.device_id<>p_device_id or v_resource.revoked_at is not null
+  then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_resource_conflict');
+  end if;
+
+  -- resource_id is the idempotency key: retrying an uncertain registration
+  -- for the same selection returns the same live proof and never extends it.
+  return public.ordax_verify_project_workspace_resource_v1(
+    p_owner_user_id,p_actor_id,p_client_id,p_workspace_session_id,
+    p_lab_project_id,p_device_id,p_resource_id
+  );
+end;
+$function$;
+
+-- Revoke only this resource reference; the existing project grant group is
+-- untouched and continues to govern all other resources under that project.
+create function public.ordax_revoke_project_workspace_resource_v1(
+  p_owner_user_id uuid,
+  p_client_id uuid,
+  p_resource_id text
+)
+returns jsonb
+language plpgsql volatile security definer set search_path = ''
+as $function$
+declare
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_changed integer;
+begin
+  if p_owner_user_id is null or p_client_id is null or p_resource_id is null
+     or p_resource_id !~ '^resource_[A-Za-z0-9_-]{8,160}$'
+     or not private.ordax_trusted_actor_auth_eligible_v1(p_owner_user_id)
+  then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_resource_revoke_invalid');
+  end if;
+
+  update private.ordax_workspace_resource_bindings r
+    set revoked_at=coalesce(r.revoked_at,v_now)
+  from private.ordax_lab_project_authorities a
+  where a.binding_id=r.lab_binding_id
+    and a.owner_user_id=p_owner_user_id and a.client_id=p_client_id
+    and r.resource_id=p_resource_id;
+  get diagnostics v_changed = row_count;
+  if v_changed=0 then
+    return pg_catalog.jsonb_build_object('ok',false,'error','workspace_resource_not_found');
+  end if;
+  return pg_catalog.jsonb_build_object(
+    'ok',true,'resource_id',p_resource_id,'revoked',true,'revoked_at',v_now
+  );
+end;
+$function$;
+
 revoke all on function public.ordax_verify_project_workspace_resource_v1(
   uuid,uuid,uuid,text,text,uuid,text
 ) from public,anon,authenticated,service_role,ordax_edge_executor,ordax_edge_runtime;
+revoke all on function public.ordax_register_project_workspace_resource_v1(
+  uuid,uuid,uuid,text,text,uuid,text,uuid,uuid
+) from public,anon,authenticated,service_role,ordax_edge_executor,ordax_edge_runtime;
+revoke all on function public.ordax_revoke_project_workspace_resource_v1(uuid,uuid,text)
+  from public,anon,authenticated,service_role,ordax_edge_executor,ordax_edge_runtime;
 grant execute on function public.ordax_verify_project_workspace_resource_v1(
   uuid,uuid,uuid,text,text,uuid,text
 ) to ordax_edge_runtime;
+grant execute on function public.ordax_register_project_workspace_resource_v1(
+  uuid,uuid,uuid,text,text,uuid,text,uuid,uuid
+) to ordax_edge_runtime;
+grant execute on function public.ordax_revoke_project_workspace_resource_v1(uuid,uuid,text)
+  to ordax_edge_runtime;
 
--- No insertion, issuance, revocation, resource picker, network route, local
--- directory resolution or deployment is authorized by this source migration.
+-- The candidate includes only the narrow lifecycle RPCs over the existing
+-- owner grant. It remains under proposals and is NOT applied or deployed.
 commit;
