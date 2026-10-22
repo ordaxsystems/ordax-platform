@@ -207,7 +207,7 @@ def inspect_only(token: str) -> None:
             if isinstance(obj, dict) and isinstance(obj.get("banned_ipv4_addresses"), list):
                 blocked = obj["banned_ipv4_addresses"]
                 break
-    if not isinstance(blocked, list) or not all(isinstance(ip, str) for ip in blocked):
+    if not isinstance(blocked, list):
         safe_keys = sorted(key for key in bans if
                            isinstance(key, str) and 1 <= len(key) <= 48 and
                            key.replace("_", "").isalnum())
