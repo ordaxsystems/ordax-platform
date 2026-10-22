@@ -401,6 +401,27 @@ test("ambiguous Central device selection yields a safe remediation instead of op
   assert.equal(opens, 1);
 });
 
+test("offline authorized device returns reconnect guidance without waiting or observing actions", async () => {
+  const { handlers, calls } = fakeHandlers();
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+    new Set(["computer_terminal_exec"]), {
+      resolve: async () => ({ ok: false, error: "central_session_unbound" }),
+      open: async () => Response.json({ ok: false, error: "central_device_offline" }, { status: 409 }),
+      wait: async () => { assert.fail("offline device must not enter the confirmation wait loop"); },
+    });
+  const response = await gateway(request("computer_terminal_exec", {
+    device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", argv: ["uname", "-s"],
+  }));
+  const body = await response.json() as any;
+  assert.equal(body.result.isError, true);
+  assert.deepEqual(body.result.structuredContent, {
+    ok: false, error: "central_device_offline", retryable: true, action_dispatched: false,
+    required_action: "reconnect_authorized_device_runtime",
+  });
+  assert.equal(calls.targets, 0);
+  assert.equal(calls.getAction, 0);
+});
+
 test("unclassified Central session failure remains fail-closed and generic", async () => {
   const { handlers } = fakeHandlers();
   const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
@@ -455,3 +476,4 @@ test("first device operation waits through installed 20-second Runtime cadence",
   assert.equal(waits, 11);
   assert.equal(checks, 12);
 });
+

@@ -670,6 +670,17 @@
         "path": "control-plane/supabase/migrations/20261021183531_orchestrator_read_authorization_v1.sql",
         "blob_sha": "3a9102639fe12ac008f4717a4c4af6fde41c1be4"
       }
+    },
+    {
+      "name": "20261022014630_product_presence_freshness_v1",
+      "applied_version": "20261022015014",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261022014630_product_presence_freshness_v1.sql",
+        "blob_sha": "b31806ed347d38bf74084313ee2608a1812c00ac"
+      }
     }
   ]
 }

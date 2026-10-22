@@ -160,6 +160,22 @@ test("malformed dispatch acknowledgement cannot start polling or export private 
   }
 });
 
+test("availability failures explain recovery without blaming arguments or leaking backend fields", async () => {
+  for (const [error, required_action] of [
+    ["central_device_offline", "reconnect_authorized_device_runtime"],
+    ["central_session_pending", "wait_for_device_session_confirmation"],
+  ]) {
+    const { body } = await call("computer_terminal_exec", {
+      createAction: async () => Response.json({ ok: false, error, private_token: "secret" }, { status: 409 }),
+      getAction: async () => { assert.fail("no dispatched action to observe"); },
+    }, { argv: ["uname", "-s"] });
+    assert.equal(body.result.isError, true);
+    assert.deepEqual(body.result.structuredContent, {
+      ok: false, error, retryable: true, action_dispatched: false, required_action,
+    });
+  }
+});
+
 test("grant denial still points to owner authorization without exporting arbitrary backend columns", async () => {
   const { body } = await call("computer_windows", { createAction: async () => Response.json({
     ok: false, error: "product_grant_not_resolved", private_token: "secret", raw_path: "C:/private",
@@ -286,3 +302,4 @@ test("omitted Space remains explicitly unscoped, not a fabricated Space grant", 
   assert.equal(body.result.isError, true);
   assert.equal(body.result.structuredContent.error, "product_grant_not_resolved");
 });
+
