@@ -1,5 +1,6 @@
 import { authenticateProductRequest, type ProductAuthEnv } from "./product_auth.ts";
 import {
+  approveProjectWorkspaceResource,
   listOwnerMcpRemoteAuthority,
   replaceOwnerMcpGrantGroup,
   revokeOwnerMcpGrantGroup,
@@ -10,12 +11,14 @@ import {
 import { ownerMcpGrantProfile } from "./product_owner_grant_profiles.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
+import { canonicalOwnerWorkspaceApproval } from "./project_workspace_issue_contract.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 type Json = Record<string, unknown>;
 const ROOT = "/v3/owner/remote-authority";
 const GROUPS = "/v3/owner/remote-grant-groups";
 const WORKSPACE_RESOURCES = "/v3/owner/workspace-resources/";
+const WORKSPACE_APPROVALS = WORKSPACE_RESOURCES + "approvals";
 const RESOURCE_ID_RE = /^resource_[A-Za-z0-9_-]{8,160}$/;
 const CLIENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PROFILE_KEY_RE = /^[a-z][a-z0-9._-]{1,79}$/;
@@ -79,6 +82,26 @@ export async function handleProductOwnerGrantAdmin(request: Request, env: Env): 
 
   try {
     if (url.pathname.startsWith(WORKSPACE_RESOURCES)) {
+      // Owner consent cannot be issued just because the READ verifier gate is
+      // enabled. This second gate remains OFF pending native picker E2E.
+      if (url.pathname === WORKSPACE_APPROVALS) {
+        if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled"
+            || env.WORKSPACE_RESOURCE_ISSUANCE_ENABLED !== "enabled")
+          return json({ ok: false, error: "not_found" }, 404);
+        if (request.method !== "POST")
+          return json({ ok: false, error: "method_not_allowed" }, 405);
+        if (url.search.length !== 0)
+          return json({ ok: false, error: "workspace_approval_invalid" }, 400);
+        const body = await readBoundedJsonObject(request, 2048);
+        const input = canonicalOwnerWorkspaceApproval(body);
+        if (!input) return json({ ok: false, error: "workspace_approval_invalid" }, 400);
+        // The Owner ID comes exclusively from the signed Product session
+        // above; neither a body field nor opaque resourceId authenticates it.
+        const approved = await approveProjectWorkspaceResource(env, {
+          ownerUserId: ownerId, ...input,
+        });
+        return json({ ok: approved, approved }, approved ? 200 : 403);
+      }
       // Disabled until governance-approved SQL migration and real picker
       // attestation. Explicitly signed Owner identity is already verified.
       if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled")
