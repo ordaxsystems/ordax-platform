@@ -161,6 +161,18 @@ class HyperdriveEgressRepairTests(TestCase):
         self.assertIn("ORDAX_NETWORK_BANS_IPV4_COUNT=0", capture.getvalue())
         update.assert_not_called()
 
+    def test_inspection_accepts_enriched_banned_address_records(self):
+        receipt = {"banned_ipv4_addresses": [
+            {"banned_address": "173.245.48.4", "identifier": "safe", "type": "fail2ban"}]}
+        with mock.patch.object(mod, "policy", return_value=(OLD, "applied")), \
+             mock.patch.object(mod, "request", return_value=receipt), \
+             mock.patch.object(mod, "update_policy") as update, \
+             redirect_stdout(StringIO()) as output:
+            mod.inspect_only("synthetic")
+        self.assertIn("ORDAX_NETWORK_BANS_CLOUDFLARE_OVERLAP=1", output.getvalue())
+        self.assertNotIn("173.245.48.4", output.getvalue())
+        update.assert_not_called()
+
     def test_inspection_rejects_malformed_bans_without_writes(self):
         with mock.patch.object(mod, "policy", return_value=(OLD, "applied")), \
              mock.patch.object(mod, "request", return_value={"banned_ipv4_addresses": ["nonsense"]}), \
