@@ -198,7 +198,21 @@ def inspect_only(token: str) -> None:
     bans = request("POST", API.replace("/network-restrictions", "/network-bans/retrieve"),
                    token, {})
     blocked = bans.get("banned_ipv4_addresses")
+    if not isinstance(blocked, list):
+        # Provider implementations may wrap the API response; accept the
+        # documented field under one known envelope, but never guess an empty
+        # list or print values when the shape is unexpected.
+        for wrapper in ("result", "data"):
+            obj = bans.get(wrapper)
+            if isinstance(obj, dict) and isinstance(obj.get("banned_ipv4_addresses"), list):
+                blocked = obj["banned_ipv4_addresses"]
+                break
     if not isinstance(blocked, list) or not all(isinstance(ip, str) for ip in blocked):
+        safe_keys = sorted(key for key in bans if
+                           isinstance(key, str) and 1 <= len(key) <= 48 and
+                           key.replace("_", "").isalnum())
+        print("ORDAX_NETWORK_BANS_RESPONSE_KEYS=" + json.dumps(safe_keys), flush=True)
+        print("ORDAX_NETWORK_BANS_IPV4_TYPE=" + type(blocked).__name__, flush=True)
         raise RepairFailure("network_bans_response_invalid")
     blocked_ips = []
     for raw in blocked:
