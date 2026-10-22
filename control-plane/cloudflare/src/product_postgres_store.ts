@@ -12,6 +12,9 @@ type JsonObject = Record<string, unknown>;
 
 export interface ProductPostgresEnv {
   POSTGRES?: Hyperdrive;
+  // Deliberately opt-in after SQL migration and end-to-end attestation gates.
+  // Absence/any other string keeps the workspace-proof route unavailable.
+  WORKSPACE_RESOURCE_VERIFIER_ENABLED?: string;
 }
 
 export type ProductRemoteJob = {
