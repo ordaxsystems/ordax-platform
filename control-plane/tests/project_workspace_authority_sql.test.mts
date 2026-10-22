@@ -9,7 +9,11 @@ const require = createRequire(new URL("../cloudflare/package.json", import.meta.
 const { PGlite } = require("@electric-sql/pglite");
 const base = new URL("../supabase/migrations/", import.meta.url);
 const read = (name: string) => fs.readFileSync(new URL(name, base), "utf8");
-const migration = "20261022060000_project_workspace_resource_authority_v1.sql";
+// This candidate is intentionally NOT in canonical migrations or its applied registry.
+const proposal = () => fs.readFileSync(new URL(
+  "../supabase/proposals/project_workspace_resource_authority_v1.sql",
+  import.meta.url,
+), "utf8");
 
 test("Workspace verifier binds live Product scope and revocation without a new grant authority", async () => {
   const db = new PGlite();
@@ -50,7 +54,7 @@ test("Workspace verifier binds live Product scope and revocation without a new g
       assert.ok(match,name);
       await db.exec(match[0]);
     }
-    await db.exec(read(migration));
+    await db.exec(proposal());
     await db.query("insert into auth.users(id) values($1)",[owner]);
     await db.query("insert into public.ordax_accounts values($1)",[owner]);
     await db.query("insert into auth.oauth_clients(id) values($1)",[client]);
@@ -141,7 +145,7 @@ test("Workspace verifier binds live Product scope and revocation without a new g
 });
 
 test("New schema has no issuance RPC, write grants or duplicate capability ledger",()=>{
-  const sql=read(migration).toLowerCase().replace(/\s+/g," ");
+  const sql=proposal().toLowerCase().replace(/\s+/g," ");
   for(const required of [
     "references public.ordax_remote_capability_grants(grant_id)",
     "ordax_trusted_actor_auth_eligible_v1",
