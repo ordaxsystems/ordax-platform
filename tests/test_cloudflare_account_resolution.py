@@ -247,7 +247,7 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         source = WORKER_SOURCE.read_text(encoding="utf-8")
         transport = (CLOUDFLARE_SRC / "product_device_transport.ts").read_text(encoding="utf-8")
         self.assertNotIn("async webSocketMessage(", source)
-        self.assertIn("authenticateDeviceRequest(request, env)", transport)
+        self.assertIn("authenticateProductDeviceRequest(request, env)", transport)
         self.assertIn("authenticateProductDevice", transport)
         self.assertIn("recordProductPresence(env,", transport)
 
