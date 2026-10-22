@@ -431,8 +431,15 @@ as $function$
       and r.resource_id = p_resource_id
       and r.revoked_at is null
     returning r.resource_id
+  ), cancelled as (
+    update private.ordax_workspace_owner_intents as i
+    set revoked_at = pg_catalog.clock_timestamp()
+    where i.owner_user_id = p_owner_user_id
+      and i.client_id = p_client_id and i.resource_id = p_resource_id
+      and i.revoked_at is null
+    returning i.resource_id
   )
-  select exists (select 1 from revoked);
+  select exists (select 1 from revoked) or exists (select 1 from cancelled);
 $function$;
 
 revoke all on function public.ordax_revoke_project_workspace_resource_v1(
@@ -442,7 +449,9 @@ grant execute on function public.ordax_revoke_project_workspace_resource_v1(
   uuid,uuid,text
 ) to ordax_edge_runtime;
 
--- No issuance, insertion, grant mutation, local path resolution or network
--- route is authorized by this source-only proposal. The owner revoker is
--- inactive until the same governed migration as the read-only verifier.
+-- Both issuance functions depend on separate, independently authenticated
+-- Owner and Device routes. A raw request, model output, resourceId, enrolled
+-- token alone, or arbitrary SQL client is NOT attestation of a native picker.
+-- This proposal does not create a Worker endpoint, migrate PostgreSQL,
+-- mutate grant ledger, store paths, or enable actual resource reading.
 commit;
