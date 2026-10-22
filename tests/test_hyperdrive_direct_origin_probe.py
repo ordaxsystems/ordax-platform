@@ -59,6 +59,56 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertEqual(payload["caching"], {"disabled": True})
         self.assertEqual(payload["mtls"], {"sslmode": "require"})
 
+    def test_isolated_pooler_modes_pin_hostname_port_and_tenant_user(self):
+        role = "ordax_direct_diag_39478283587"
+        self.assertEqual(probe.ORIGIN_MODES, ("direct_ipv6", "pooler_session", "pooler_transaction"))
+        self.assertEqual(probe.origin_for_mode("direct_ipv6", role), {
+            "scheme": "postgres", "database": "postgres", "user": role,
+            "host": probe.ORIGIN, "port": 5432})
+        for mode, port in (("pooler_session", 5432), ("pooler_transaction", 6543)):
+            with self.subTest(mode=mode):
+                origin = probe.origin_for_mode(mode, role)
+                self.assertEqual(origin["host"], "aws-1-sa-east-1.pooler.supabase.com")
+                self.assertEqual(origin["port"], port)
+                self.assertEqual(origin["user"], role + "." + probe.PROJECT)
+                self.assertNotIn("password", origin)
+                with mock.patch.object(probe, "api", return_value={
+                    "success": True, "result": {"id": "a" * 32},
+                }) as call:
+                    self.assertEqual("a" * 32, probe.create_hyperdrive(
+                        "fake-token", "ordax-direct-ipv6-diag-39478283587",
+                        role, "mock-secret", mode))
+                payload = call.call_args.args[3]
+                self.assertEqual(payload["origin"]["port"], port)
+                self.assertEqual(payload["origin"]["user"], role + "." + probe.PROJECT)
+                self.assertEqual(payload["origin"]["password"], "mock-secret")
+                self.assertEqual(payload["mtls"]["sslmode"], "require")
+                self.assertEqual(payload["caching"], {"disabled": True})
+
+    def test_unknown_origin_refused_before_creating_any_resource(self):
+        with self.assertRaisesRegex(probe.ProbeError, "origin_mode_not_allowlisted"):
+            probe.origin_for_mode("attacker.host:5432", "ordax_direct_diag_39478283587")
+        env = {"CLOUDFLARE_API_TOKEN": "fake-cf",
+               "SUPABASE_ACCESS_TOKEN": "fake-db",
+               "GITHUB_RUN_ID": "39478283587",
+               "ORDAX_HYPERDRIVE_PROBE_MODE": "unknown_mode"}
+        with mock.patch.dict(probe.os.environ, env), \
+             mock.patch.object(probe, "require_unique_role") as preflight, \
+             mock.patch.object(probe, "create_role") as create:
+            with self.assertRaisesRegex(probe.ProbeError, "origin_mode_not_allowlisted"):
+                probe.run()
+        preflight.assert_not_called()
+        create.assert_not_called()
+
+    def test_workflow_requires_reviewed_mode_and_protected_main(self):
+        workflow = (ROOT / ".github/workflows/hyperdrive-direct-origin-probe.yml").read_text("utf-8")
+        self.assertIn("origin_mode:", workflow)
+        self.assertIn("pooler_transaction", workflow)
+        self.assertIn("pooler_session", workflow)
+        self.assertIn("ORDAX_HYPERDRIVE_PROBE_MODE: ${{ inputs.origin_mode }}", workflow)
+        self.assertIn("github.ref == 'refs/heads/main'", workflow)
+        self.assertIn("environment: cloudflare-v3", workflow)
+
     def test_cf_error_never_logs_provider_message_or_sql_secret(self):
         uri = probe.CF_API + "/hyperdrive/configs"
         error = urllib.error.HTTPError(
