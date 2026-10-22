@@ -15,7 +15,12 @@ import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
 import { productAuthConfigured, productOwnerAccountSession, type ProductAuthEnv } from "./product_auth.ts";
-import { checkCanonicalProductPostgresReadiness, productPostgresConfigured, type ProductPostgresEnv } from "./product_postgres_store.ts";
+import {
+  checkCanonicalProductPostgresReadiness,
+  productPostgresConfigured,
+  pruneProductMcpUsage,
+  type ProductPostgresEnv,
+} from "./product_postgres_store.ts";
 import { checkCanonicalProductOAuthDiscovery } from "./product_oauth_readiness.ts";
 import {
   handleProductDeviceCentralSession,
@@ -141,7 +146,7 @@ export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
 ]);
 // Compatibility export for callers/tests that previously consumed the read-only name.
 export const PRODUCT_MCP_DIRECT_READ_TOOLS = PRODUCT_MCP_DIRECT_TOOLS;
-type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction">;
+type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction" | "recordUsage">;
 function respond(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 }
@@ -376,6 +381,13 @@ export function createCanonicalProductMcpGateway(
 export default {
   fetch(request: Request, env: Env): Promise<Response> {
     return createCanonicalProductMcpGateway(env)(request);
+  },
+  scheduled(_controller: { scheduledTime: number; cron: string }, env: Env, context: { waitUntil(promise: Promise<unknown>): void }): void {
+    context.waitUntil(pruneProductMcpUsage(env).catch(() => {
+      // The database adapter already emits a bounded diagnostic. Never log
+      // owner ids, request fingerprints, SQL, or connection details here.
+      console.error(JSON.stringify({ event: "product_mcp_usage_cleanup_failed" }));
+    }));
   },
 };
 

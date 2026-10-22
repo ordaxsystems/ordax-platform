@@ -12,7 +12,26 @@ type JsonObject = Record<string, unknown>;
 
 export interface ProductPostgresEnv {
   POSTGRES?: Hyperdrive;
+  /** Usage recording stays off until the privacy and database rollout gates pass. */
+  MCP_USAGE_METER_MODE?: string;
+  /** High-entropy Cloudflare secret; required for retry fingerprints. */
+  MCP_USAGE_FINGERPRINT_KEY?: string;
 }
+
+export type ProductMcpUsageRecording = Readonly<{
+  ownerUserId: string;
+  clientId: string;
+  toolName: string;
+  requestFingerprint: string;
+}>;
+
+export type ProductMcpUsageRecordResult = Readonly<{
+  ok: boolean;
+  recorded?: boolean;
+  usage_month?: string;
+  tool_calls?: number;
+  error?: string;
+}>;
 
 export type ProductRemoteJob = {
   request_id: string;
@@ -320,6 +339,14 @@ const RPC_SPECS = {
       "p_force",
     ],
     casts: ["uuid", "boolean", "text", "text", "text", "boolean"],
+  },
+  ordax_record_product_mcp_usage_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_tool_name", "p_request_fingerprint"],
+    casts: ["uuid", "uuid", "text", "text"],
+  },
+  ordax_prune_product_mcp_usage_v1: {
+    keys: [],
+    casts: [],
   },
   ordax_enroll_product_device_v1: {
     keys: [
@@ -759,6 +786,33 @@ export async function recordProductPresence(
     p_capability_digest: input.capabilityDigest,
     p_force: input.force ?? false,
   });
+}
+
+export function productMcpUsageMeterEnabled(env: ProductPostgresEnv): boolean {
+  return env.MCP_USAGE_METER_MODE === "shadow"
+    && typeof env.MCP_USAGE_FINGERPRINT_KEY === "string"
+    && env.MCP_USAGE_FINGERPRINT_KEY.length >= 32;
+}
+
+export async function recordProductMcpUsage(
+  env: ProductPostgresEnv,
+  input: ProductMcpUsageRecording,
+): Promise<ProductMcpUsageRecordResult> {
+  if (!isCanonicalUuid(input.ownerUserId) || !isCanonicalUuid(input.clientId)
+      || typeof input.toolName !== "string" || !/^[a-z][a-z0-9._-]{1,95}$/.test(input.toolName)
+      || typeof input.requestFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(input.requestFingerprint)) {
+    throw new ProductPostgresError("product_mcp_usage_input_invalid", 400);
+  }
+  return callRpc<ProductMcpUsageRecordResult>(env, "ordax_record_product_mcp_usage_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_client_id: input.clientId,
+    p_tool_name: input.toolName,
+    p_request_fingerprint: input.requestFingerprint,
+  });
+}
+
+export async function pruneProductMcpUsage(env: ProductPostgresEnv): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_prune_product_mcp_usage_v1", {});
 }
 
 export async function enrollProductDevice(
