@@ -27,3 +27,13 @@ PRODUCT_AUTH_JWKS_URL = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1/.well-
 [[hyperdrive]]
 binding = "POSTGRES"
 id = "4b601ec5815f43259bd8040053825d2a"
+
+# Advisory per-device wake. PostgreSQL remains the only persistent queue,
+# lease and authorization authority; hibernated connections store no jobs.
+[[durable_objects.bindings]]
+name = "DEVICE_WAKE"
+class_name = "ProductDeviceWake"
+
+[[migrations]]
+tag = "product-device-wake-v1"
+new_sqlite_classes = ["ProductDeviceWake"]
