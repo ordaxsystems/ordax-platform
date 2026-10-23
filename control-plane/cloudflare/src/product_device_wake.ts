@@ -12,7 +12,11 @@ const INTERNAL_ORIGIN = "https://ordax-device-wake.internal";
 const MAX_DEVICE_WATCHERS = 4;
 
 export class ProductDeviceWake {
-  constructor(private readonly ctx: DurableObjectState) {}
+  private readonly ctx: DurableObjectState;
+
+  constructor(ctx: DurableObjectState) {
+    this.ctx = ctx;
+  }
 
   async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
