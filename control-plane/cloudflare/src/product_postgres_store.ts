@@ -15,6 +15,8 @@ export interface ProductPostgresEnv {
   POSTGRES?: Hyperdrive;
   /** Advisory wake channel only; SQL retains all action/grant authority. */
   DEVICE_WAKE?: DurableObjectNamespace;
+  /** Explicitly disabled until both the Worker and installed Runtime are validated. */
+  PRODUCT_DEVICE_WAKE_ENABLED?: string;
   // Deliberately opt-in after SQL migration and end-to-end attestation gates.
   // Absence/any other string keeps the workspace-proof route unavailable.
   WORKSPACE_RESOURCE_VERIFIER_ENABLED?: string;
