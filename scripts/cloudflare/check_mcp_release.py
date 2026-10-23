@@ -84,9 +84,19 @@ def validate(foundation:dict,config:dict)->bool:
     if "device_machine_ingress" in release:
         raise McpReleaseError("mcp_obsolete_device_machine_ingress_present")
     if any(key in config for key in (
-        "d1_databases","kv_namespaces","durable_objects","r2_buckets",
+        "d1_databases","kv_namespaces","r2_buckets",
         "services","routes","unsafe")):
         raise McpReleaseError("mcp_must_not_bind_other_authorities_or_routes")
+    # One audited, nonauthoritative wake channel. DOs are otherwise forbidden:
+    # no durable identity, SQL/grants, job storage, MCP tool or backup queue.
+    # The only Product authority remains the existing POSTGRES Hyperdrive.
+    if config.get("durable_objects") != {"bindings":[{
+        "name":"DEVICE_WAKE","class_name":"ProductDeviceWake",
+    }]} or config.get("migrations") != [{
+        "tag":"product-device-wake-v1",
+        "new_sqlite_classes":["ProductDeviceWake"],
+    }]:
+        raise McpReleaseError("mcp_wake_binding_contract_invalid")
     policy=release.get("safety") or {}
     if any(policy.get(k) is not False for k in (
         "allow_d1","allow_legacy_fallback","allow_untrusted_model_dispatch",

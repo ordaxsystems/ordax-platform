@@ -1,4 +1,5 @@
 import { openPostgresSession } from "./data_postgres_driver.ts";
+import { notifyProductDeviceWake } from "./product_device_wake.ts";
 import { encodePostgresTextArrayLiteral, InvalidPostgresTextArrayError } from "./product_postgres_text_array.ts";
 import {
   canonicalRemoteClient,
@@ -12,6 +13,10 @@ type JsonObject = Record<string, unknown>;
 
 export interface ProductPostgresEnv {
   POSTGRES?: Hyperdrive;
+  /** Advisory wake channel only; SQL retains all action/grant authority. */
+  DEVICE_WAKE?: DurableObjectNamespace;
+  /** Explicitly disabled until both the Worker and installed Runtime are validated. */
+  PRODUCT_DEVICE_WAKE_ENABLED?: string;
   // Deliberately opt-in after SQL migration and end-to-end attestation gates.
   // Absence/any other string keeps the workspace-proof route unavailable.
   WORKSPACE_RESOURCE_VERIFIER_ENABLED?: string;
@@ -591,7 +596,7 @@ export async function enqueueProductAction(
   if (!client || client.p_client_id === null) {
     throw new ProductPostgresError("product_action_client_identity_invalid", 400);
   }
-  return callRpc<ProductActionEnqueueResult>(
+  const recorded = await callRpc<ProductActionEnqueueResult>(
     env,
     "ordax_enqueue_product_action_v1",
     {
@@ -608,6 +613,13 @@ export async function enqueueProductAction(
       p_expires_at: input.expiresAt,
     },
   );
+  // Only a committed queue operation may emit a non-authoritative wake.
+  // Even a replayed accepted enqueue is safe: the device must still claim
+  // the actual lease through PostgreSQL. A missing DO never changes the RPC.
+  if (recorded.ok && recorded.request_id) {
+    await notifyProductDeviceWake(env, input.deviceId);
+  }
+  return recorded;
 }
 
 export async function claimProductAction(
