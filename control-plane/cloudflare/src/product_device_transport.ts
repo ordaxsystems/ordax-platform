@@ -25,6 +25,7 @@ import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { projectWorkspaceGrantProjection } from "./project_workspace_grant_contract.ts";
 import { canonicalDeviceWorkspaceConfirmation } from "./project_workspace_issue_contract.ts";
+import { subscribeProductDeviceWake } from "./product_device_wake.ts";
 
 type Json = Record<string, unknown>;
 type RuntimeKind = "ordax-os" | "desktop-agent" | "mobile-client" | "other";
@@ -472,10 +473,18 @@ export async function handleProductDeviceTransport(
   request: Request,
   env: ProductPostgresEnv,
 ): Promise<Response> {
+  const path = new URL(request.url).pathname;
+  // Advisory signal subscribes through the same PostgreSQL-authenticated
+  // device ingress. No second credential, grant or job queue is introduced.
+  if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/wake") {
+    if (request.method !== "GET") return respond({ ok: false, error: "method_not_allowed" }, 405);
+    const auth = await authenticateDeviceRequest(request, env);
+    if (!auth.ok) return auth.response;
+    return subscribeProductDeviceWake(env, auth.deviceId, request);
+  }
   if (request.method !== "POST") return respond({ ok: false, error: "method_not_allowed" }, 405);
   const auth = await authenticateDeviceRequest(request, env);
   if (!auth.ok) return auth.response;
-  const path = new URL(request.url).pathname;
   try {
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/heartbeat") return heartbeat(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/claim") return claim(request, env, auth.deviceId);
