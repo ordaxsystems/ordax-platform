@@ -56,7 +56,7 @@ export class ProductDeviceWake {
 }
 
 export function productWakeBound(env: ProductPostgresEnv): boolean {
-  return env.DEVICE_WAKE !== undefined;
+  return env.DEVICE_WAKE !== undefined && env.PRODUCT_DEVICE_WAKE_ENABLED === "enabled";
 }
 
 export function subscribeProductDeviceWake(
