@@ -36,9 +36,21 @@ test("no signalling binding is a safe opt-out with no alternate execution backen
   assert.equal(subscribed.status, 503);
 });
 
+test("signalling stays disabled on bound Worker until explicit rollout", async () => {
+  let touched = false;
+  const env = { DEVICE_WAKE: { idFromName: () => { touched = true; return "unused"; } } } as any;
+  await notifyProductDeviceWake(env, DEVICE);
+  const rejected = await subscribeProductDeviceWake(env, DEVICE, new Request(
+    "https://mcp.example/v3/device/transport/wake", { headers: { Upgrade: "websocket" } },
+  ));
+  assert.equal(rejected.status, 503);
+  assert.equal(touched, false);
+});
+
 test("subscriber sends no credentials or untrusted arguments to signalling coordinator", async () => {
   const forwarded: Array<{ id: string; url: string; options: RequestInit }> = [];
   const env = {
+    PRODUCT_DEVICE_WAKE_ENABLED: "enabled",
     DEVICE_WAKE: {
       idFromName(name: string) { assert.equal(name, DEVICE); return "internal-id"; },
       get(id: string) {
@@ -63,7 +75,7 @@ test("subscriber sends no credentials or untrusted arguments to signalling coord
 
 test("wake notification is only a best-effort internal signal with no payload", async () => {
   const requests: Array<{ method: string; url: string }> = [];
-  const env = { DEVICE_WAKE: {
+  const env = { PRODUCT_DEVICE_WAKE_ENABLED: "enabled", DEVICE_WAKE: {
     idFromName(name: string) { assert.equal(name, DEVICE); return "internal-id"; },
     get(id: string) {
       assert.equal(id, "internal-id");
