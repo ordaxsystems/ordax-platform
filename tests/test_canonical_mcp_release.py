@@ -23,7 +23,13 @@ class McpReleaseContract(unittest.TestCase):
         self.assertEqual(c["name"],f["mcp_release"]["worker_name"])
         self.assertEqual(c["main"],"src/product_mcp_entry.ts")
         self.assertNotIn("d1_databases",c)
-        self.assertNotIn("durable_objects",c)
+        self.assertEqual(c["durable_objects"], {"bindings": [
+            {"name":"DEVICE_WAKE","class_name":"ProductDeviceWake"},
+        ]})
+        self.assertEqual(c["migrations"], [{
+            "tag":"product-device-wake-v1",
+            "new_sqlite_classes":["ProductDeviceWake"],
+        }])
         self.assertNotIn("r2_buckets",c)
         self.assertEqual(c["hyperdrive"][0]["binding"],"POSTGRES")
 
@@ -158,6 +164,12 @@ class McpReleaseContract(unittest.TestCase):
             {"main":"src/index.ts"},
             {"d1_databases":[{"binding":"DB","database_id":"legacy"}]},
             {"durable_objects":{"bindings":[{"name":"DEVICE_SESSIONS"}]}},
+            {"durable_objects":{"bindings":[
+                {"name":"DEVICE_WAKE","class_name":"ProductDeviceWake"},
+                {"name":"SECOND_QUEUE","class_name":"ProductDeviceWake"},
+            ]}},
+            {"migrations":[{"tag":"product-device-wake-v2",
+                "new_sqlite_classes":["DeviceActionAuthority"]}]},
             {"r2_buckets":[{"binding":"ARTIFACTS"}]},
             {"routes":["mcp.ordax.com.br/*"]},
             {"workers_dev":False},
