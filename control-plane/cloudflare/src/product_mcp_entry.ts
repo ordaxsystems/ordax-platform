@@ -11,6 +11,7 @@
  * authorization source. Device actions are dispatched only through the
  * Runtime-attested Product session and current canonical PostgreSQL grants.
  */
+export { ProductDeviceWake } from "./product_device_wake.ts";
 import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
