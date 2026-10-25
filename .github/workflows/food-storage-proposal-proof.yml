@@ -1,0 +1,66 @@
+name: Food Storage Proposal Proof (isolated PostgreSQL)
+
+on:
+  pull_request:
+    paths:
+      - "control-plane/supabase/proposals/food_order_core_storage_v1.sql"
+      - "control-plane/supabase/tests/food_order_storage_proposal.sql"
+      - ".github/workflows/food-storage-proposal-proof.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres17-isolated:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: food_ci_ephemeral
+          POSTGRES_DB: food_ci
+        options: >-
+          --health-cmd "pg_isready -U postgres -d food_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create only fixture roles and canonical Space FK targets
+        env:
+          PG_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          test -n "$PG_ID"
+          docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_ci <<'SQL'
+          create role anon nologin;
+          create role authenticated nologin;
+          create role service_role nologin;
+          create role ordax_edge_executor nologin;
+          create role ordax_edge_runtime nologin;
+          create schema private;
+          create table public.ordax_spaces(space_id uuid primary key);
+          create table public.ordax_accounts(user_id uuid primary key);
+          SQL
+      - name: Apply proposal only to isolated ephemeral PostgreSQL 17
+        env:
+          PG_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_ci \
+            < control-plane/supabase/proposals/food_order_core_storage_v1.sql
+      - name: Prove tenant constraints and no browser or executor access
+        env:
+          PG_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_ci \
+            < control-plane/supabase/tests/food_order_storage_proposal.sql
+      - name: Verify Food proposal did not mutate the real migration registry
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- control-plane/supabase/migration-registry.json
+          test ! -e control-plane/supabase/migrations/food_order_core_storage_v1.sql
+          echo "FOOD_POSTGRES_PROPOSAL=PASS ISOLATED_ONLY=YES"
