@@ -106,6 +106,42 @@ begin
   get diagnostics v_changed = row_count;
   if v_changed <> 0 then raise exception 'food_integrated_stale_cas_accepted'; end if;
 
+  -- Missing JSON revision used to pass a plain CHECK because PostgreSQL
+  -- accepts UNKNOWN. The canonical proposal must reject incomplete documents.
+  begin
+    update private.ordax_food_space_state
+    set revision=1,
+        document='{"schema":"ordax.food-pizzeria-state/6"}'::jsonb
+    where space_id=v_other and revision=0;
+    raise exception 'food_integrated_incomplete_document_accepted';
+  exception when check_violation then null;
+  end;
+  if (select revision from private.ordax_food_space_state
+      where space_id=v_other) <> 0
+  then raise exception 'food_integrated_invalid_document_changed_other_space'; end if;
+
+  -- A receipt with matching visible identifiers but NO commitId must fail,
+  -- not silently pass via SQL three-valued CHECK logic.
+  begin
+    insert into private.ordax_food_command_journal(
+      space_id,command_id,digest,actor_user_id,
+      order_id,status,revision,receipt
+    ) values (
+      v_space,'food-missing-commit',repeat('d',64),v_admin,
+      'food-integrated-order-1','received',1,
+      pg_catalog.jsonb_build_object(
+        'schema','ordax.food-order-commit-receipt/1',
+        'spaceId',v_space::text,
+        'commandId','food-missing-commit',
+        'orderId','food-integrated-order-1',
+        'status','received',
+        'revision',1
+      )
+    );
+    raise exception 'food_integrated_incomplete_receipt_accepted';
+  exception when check_violation then null;
+  end;
+
   -- Same command ID with a different digest must never create a second row.
   begin
     insert into private.ordax_food_command_journal(
