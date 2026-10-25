@@ -59,6 +59,44 @@ transaction before commit. No SQL grant/role for invoking it, server
 transport, adapter `authorizeAction`, session-lifecycle hookup or deployed
 policy is part of this proposal. This SQL alone cannot enable orders.
 
+## Least-privilege SQL executor proposal (no deployment)
+
+`food_order_executor_boundary_v1.sql` proposes **one NOLOGIN, NOINHERIT,
+NOBYPASSRLS** role `ordax_food_executor` that owns no tables and has no
+direct SELECT/INSERT/UPDATE/DELETE on any Food table, Space, member or Auth
+session. Its only permissions are `USAGE` on the nonexposed `private` schema
+and `EXECUTE` on four reviewed Food-only routines:
+
+- `ordax_food_verify_action_v1`: consult the existing private action policy.
+- `ordax_food_read_state_v1`: reauthorize and acquire a Space-scoped row lock.
+- `ordax_food_find_command_v1`: reauthorize before reading an idempotency receipt.
+- `ordax_food_commit_order_v1`: reauthorize inside the same backend
+  transaction, apply CAS and create the command journal and receipt atomically.
+
+These narrow `SECURITY DEFINER` functions are owned by the SQL migration
+owner, explicitly schema-qualified and unavailable to client/MCP/service roles.
+They are a proposed way to reach the existing **forced RLS + zero policy**
+tables *without granting general relation privileges*. The current Apps
+`postgres-order-transactions.mjs` **still uses direct table SQL and cannot be
+used with the least-privilege role**. Its PostgreSQL integration tests to date
+run as an ephemeral superuser; they do not establish least-privilege readiness.
+Before commercial use, the Apps owner must repoint that one adapter to the
+reviewed SQL operations (not keep both production backends) and prove real
+PostgreSQL E2E under a restricted role.
+
+A `SECURITY DEFINER` routine is privileged: each routine validates the exact
+action and Space and never accepts untrusted SQL. The *host* is still required
+to independently authenticate the caller and bind `p_actor` and `p_space`
+to a current, authorized session and selection. Without that verified host,
+possession of an executor credential could impersonate users by supplying
+their UUIDs. **No LOGIN credential, membership, transport, endpoint or
+operational grant is created here.**
+
+CI executes this proposal in a fresh PostgreSQL 17 database with synthetic
+Identity and Spaces; it proves direct-table denial, private RPC ACLs,
+per-action role checks, revocation, CAS, atomic rollback on a duplicate and
+receipt lookup. This is not a deployed migration or live-host E2E.
+
 ## Rollout gates (all required before real deployment)
 
 1. Authorize execution of FOOD-001 by the owner of the OS roadmap.
