@@ -85,9 +85,9 @@ begin
   begin
     insert into private.ordax_food_command_journal(
       space_id,command_id,digest,actor_user_id,
-      order_id,status,revision,receipt
+      order_id,status,revision,commit_id,receipt
     ) values(v_space,'order-command-ci',repeat('b',64),v_actor,
-      'food-order-ci','received',1,v_receipt);
+      'food-order-ci','received',1,v_commit,v_receipt);
     raise exception 'food_duplicate_key_was_accepted';
   exception when unique_violation then null;
   end;
