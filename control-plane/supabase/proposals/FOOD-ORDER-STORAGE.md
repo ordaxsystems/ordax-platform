@@ -83,6 +83,24 @@ policy is part of this proposal. This SQL alone cannot enable orders.
    version and Git blob in `migration-registry.json`. A proposal must
    **not** be merged as an applied migration or deployed prematurely.
 
+## Combined isolated PostgreSQL proof and JSON integrity
+
+The PostgreSQL 17 CI also applies the **existing Space/Identity fixture,
+private Food action policy and private Food storage proposal to one separate
+ephemeral database**. It checks an authorized serializable order mutation,
+CAS conflict, durable receipt recovery after an unknown transport outcome,
+idempotent command uniqueness, rollbacks of invalid receipts, two-Space
+isolation and active-member revocation. This is a SQL boundary integration
+proof; it does **not** exercise the Apps JavaScript domain, authenticate a
+network transport or provision a commercial executor.
+
+The storage proposal uses `CHECK ((predicate) IS TRUE)` for JSON documents
+and receipts. PostgreSQL normally accepts both TRUE **and UNKNOWN** in a
+`CHECK` constraint; missing JSON keys therefore must be treated explicitly
+as failures. The combined proof rejects absent document revision and receipt
+commit token, as well as inconsistent receipts. The proposal remains in
+`proposals/` and is not applied to canonical Supabase.
+
 ## Test coverage
 
 The `Food Storage Proposal Proof` workflow runs **ephemeral PostgreSQL
