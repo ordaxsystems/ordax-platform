@@ -1,10 +1,13 @@
-name: Food Storage Proposal Proof (isolated PostgreSQL)
+name: Food Database Proposals Proof (isolated PostgreSQL)
 
 on:
   pull_request:
     paths:
       - "control-plane/supabase/proposals/food_order_core_storage_v1.sql"
       - "control-plane/supabase/tests/food_order_storage_proposal.sql"
+      - "control-plane/supabase/proposals/food_order_action_policy_v1.sql"
+      - "control-plane/supabase/tests/food_action_policy_fixture.sql"
+      - "control-plane/supabase/tests/food_action_policy_proof.sql"
       - ".github/workflows/food-storage-proposal-proof.yml"
   workflow_dispatch:
 
@@ -58,9 +61,22 @@ jobs:
           set -euo pipefail
           docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_ci \
             < control-plane/supabase/tests/food_order_storage_proposal.sql
+      - name: Prove private Food action policy against canonical role fixtures in a second isolated database
+        env:
+          PG_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec "$PG_ID" createdb -U postgres food_policy_ci
+          docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_policy_ci \
+            < control-plane/supabase/tests/food_action_policy_fixture.sql
+          docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_policy_ci \
+            < control-plane/supabase/proposals/food_order_action_policy_v1.sql
+          docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_policy_ci \
+            < control-plane/supabase/tests/food_action_policy_proof.sql
       - name: Verify Food proposal did not mutate the real migration registry
         run: |
           set -euo pipefail
           git diff --exit-code -- control-plane/supabase/migration-registry.json
           test ! -e control-plane/supabase/migrations/food_order_core_storage_v1.sql
+          test ! -e control-plane/supabase/migrations/food_order_action_policy_v1.sql
           echo "FOOD_POSTGRES_PROPOSAL=PASS ISOLATED_ONLY=YES"
