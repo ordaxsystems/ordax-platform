@@ -8,6 +8,7 @@ on:
       - "control-plane/supabase/proposals/food_order_action_policy_v1.sql"
       - "control-plane/supabase/tests/food_action_policy_fixture.sql"
       - "control-plane/supabase/tests/food_action_policy_proof.sql"
+      - "control-plane/supabase/tests/food_authorized_storage_integration_proof.sql"
       - ".github/workflows/food-storage-proposal-proof.yml"
   workflow_dispatch:
 
@@ -73,6 +74,21 @@ jobs:
             < control-plane/supabase/proposals/food_order_action_policy_v1.sql
           docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_policy_ci \
             < control-plane/supabase/tests/food_action_policy_proof.sql
+      - name: Prove Food action authorization and atomic storage together (isolated PostgreSQL)
+        env:
+          PG_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec "$PG_ID" createdb -U postgres food_integrated_ci
+          docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_integrated_ci \
+            < control-plane/supabase/tests/food_action_policy_fixture.sql
+          docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_integrated_ci \
+            < control-plane/supabase/proposals/food_order_action_policy_v1.sql
+          docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_integrated_ci \
+            < control-plane/supabase/proposals/food_order_core_storage_v1.sql
+          docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_integrated_ci \
+            < control-plane/supabase/tests/food_authorized_storage_integration_proof.sql
+          echo "FOOD_AUTHORIZED_STORAGE_INTEGRATION=PASS ISOLATED_ONLY=YES"
       - name: Verify Food proposal did not mutate the real migration registry
         run: |
           set -euo pipefail
