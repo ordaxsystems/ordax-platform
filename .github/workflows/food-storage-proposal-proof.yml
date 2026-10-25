@@ -9,6 +9,8 @@ on:
       - "control-plane/supabase/tests/food_action_policy_fixture.sql"
       - "control-plane/supabase/tests/food_action_policy_proof.sql"
       - "control-plane/supabase/tests/food_authorized_storage_integration_proof.sql"
+      - "control-plane/supabase/proposals/food_order_executor_boundary_v1.sql"
+      - "control-plane/supabase/tests/food_order_executor_boundary_proof.sql"
       - ".github/workflows/food-storage-proposal-proof.yml"
   workflow_dispatch:
 
@@ -89,10 +91,27 @@ jobs:
           docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_integrated_ci \
             < control-plane/supabase/tests/food_authorized_storage_integration_proof.sql
           echo "FOOD_AUTHORIZED_STORAGE_INTEGRATION=PASS ISOLATED_ONLY=YES"
+      - name: Prove dedicated NOLOGIN Food executor and narrow private RPC against PostgreSQL 17
+        env:
+          PG_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec "$PG_ID" createdb -U postgres food_executor_ci
+          for file in \
+            control-plane/supabase/tests/food_action_policy_fixture.sql \
+            control-plane/supabase/proposals/food_order_action_policy_v1.sql \
+            control-plane/supabase/proposals/food_order_core_storage_v1.sql \
+            control-plane/supabase/proposals/food_order_executor_boundary_v1.sql \
+            control-plane/supabase/tests/food_order_executor_boundary_proof.sql
+          do
+            docker exec -i "$PG_ID" psql -v ON_ERROR_STOP=1 -U postgres -d food_executor_ci < "$file"
+          done
+          echo "FOOD_EXECUTOR_LEAST_PRIVILEGE=PASS ISOLATED_ONLY=YES"
       - name: Verify Food proposal did not mutate the real migration registry
         run: |
           set -euo pipefail
           git diff --exit-code -- control-plane/supabase/migration-registry.json
           test ! -e control-plane/supabase/migrations/food_order_core_storage_v1.sql
           test ! -e control-plane/supabase/migrations/food_order_action_policy_v1.sql
+          test ! -e control-plane/supabase/migrations/food_order_executor_boundary_v1.sql
           echo "FOOD_POSTGRES_PROPOSAL=PASS ISOLATED_ONLY=YES"
