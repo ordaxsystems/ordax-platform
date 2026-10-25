@@ -1,11 +1,8 @@
 -- Isolated PostgreSQL 17 CI fixture. NOT a migration or production seed.
 -- Auth eligibility function mirrors the canonical existing owner function
 -- (migration 20261007212000_trusted_actor_auth_eligibility_v1.sql).
-create role anon nologin;
-create role authenticated nologin;
-create role service_role nologin;
-create role ordax_edge_executor nologin;
-create role ordax_edge_runtime nologin;
+-- Roles are cluster-scoped and already created by the one canonical
+-- PostgreSQL service setup in the same GitHub Actions workflow.
 create schema auth;
 create schema private;
 create table auth.users (
