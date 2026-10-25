@@ -29,6 +29,36 @@ revocations from `anon`, `authenticated`, `service_role` and existing
 remote-action executor roles. There is deliberately no Food RPC,
 SQL function that grants access, browser Data API endpoint or write role.
 
+## Space-owned per-action proposal (still no operational grant)
+
+`food_order_action_policy_v1.sql` prepares a **private, SECURITY INVOKER**
+resolver over existing canonical Space/role and Auth eligibility authorities,
+not a second table of grants. It accepts a server-derived subject and Space,
+but has **no EXECUTE grant to any application, Data API or remote MCP role**.
+
+| Active canonical Space role | `order.read` | `order.create` | `order.transition` |
+| --- | --- | --- | --- |
+| Owner | Allow | Allow | Allow |
+| Active `admin` | Allow | Allow | Allow |
+| Active `member` | Allow | Deny | Deny |
+| Active `viewer` | Allow | Deny | Deny |
+| Suspended/absent/ineligible user | Deny | Deny | Deny |
+
+The Space must be `active`, `professional`, `food.pizzeria`. Auth
+eligibility comes from the existing
+`private.ordax_trusted_actor_auth_eligible_v1` helper, and canonical
+Space/member rows are locked `FOR SHARE` against concurrent revocation
+within the transaction. This is the strictest temporary policy that does
+not invent new permissions; it does **not** yet model cashier/cook/staff
+job-specific rights or approvals. Production role grants and entitlement
+semantics must be signed off by the Space/Identity owner.
+
+The Food backend must authenticate the actor independently, never accept
+caller IDs as authority, and revalidate this policy inside the same
+transaction before commit. No SQL grant/role for invoking it, server
+transport, adapter `authorizeAction`, session-lifecycle hookup or deployed
+policy is part of this proposal. This SQL alone cannot enable orders.
+
 ## Rollout gates (all required before real deployment)
 
 1. Authorize execution of FOOD-001 by the owner of the OS roadmap.
