@@ -5,6 +5,8 @@
 --
 -- This is a private, inaccessible durability primitive for the existing
 -- ordax.food-pizzeria-state/6 domain. Not a second Sales book or Inventory.
+-- CHECK boolean predicates use IS TRUE because PostgreSQL treats UNKNOWN as
+-- successful CHECK; missing JSON keys must never pass the integrity boundary.
 -- Atomicity/CAS and idempotency are provided by the owner transaction adapter,
 -- and authorization is enforced inside that same backend transaction.
 begin;
@@ -26,9 +28,9 @@ create table private.ordax_food_space_state (
     references public.ordax_spaces(space_id) on delete restrict,
   revision bigint not null check (revision >= 0),
   document jsonb not null
-    check (jsonb_typeof(document) = 'object'
+    check ((jsonb_typeof(document) = 'object'
       and document->>'schema' = 'ordax.food-pizzeria-state/6'
-      and (document->>'revision')::bigint = revision),
+      and (document->>'revision')::bigint = revision) is true),
   created_at timestamptz not null default pg_catalog.clock_timestamp(),
   updated_at timestamptz not null default pg_catalog.clock_timestamp()
 );
@@ -53,7 +55,7 @@ create table private.ordax_food_command_journal (
   status text not null check (status ~ '^[a-z][a-z_-]{0,31}$'),
   revision bigint not null check (revision >= 1),
   commit_id uuid not null default pg_catalog.gen_random_uuid(),
-  receipt jsonb not null check (
+  receipt jsonb not null check ((
     jsonb_typeof(receipt) = 'object'
     and receipt->>'schema' = 'ordax.food-order-commit-receipt/1'
     and receipt->>'spaceId' = space_id::text
@@ -62,7 +64,7 @@ create table private.ordax_food_command_journal (
     and receipt->>'status' = status
     and (receipt->>'revision')::bigint = revision
     and receipt->>'commitId' = commit_id::text
-  ),
+  ) is true),
   created_at timestamptz not null default pg_catalog.clock_timestamp(),
   primary key(space_id, command_id),
   unique(space_id, commit_id)
