@@ -497,7 +497,48 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
       grant_groups: grantGroups,
     }];
   });
-  return { ok: payload.ok !== false, targets };
+  // Descriptive preflight only: the exact OAuth client has already scoped the
+  // canonical target catalog. SQL session/grant checks remain the sole authority.
+  // Never select a device for execution based on this diagnostic.
+  const complete = rawTargets.length > 0 && rawTargets.length < 100 &&
+    rawTargets.every(raw => raw && typeof raw === "object" && !Array.isArray(raw) &&
+      Array.isArray((raw as JsonObject).grant_groups) &&
+      ((raw as JsonObject).grant_groups as unknown[]).length < 128);
+  if (!complete || targets.length !== rawTargets.length) {
+    return { ok: true, targets };
+  }
+  const now = Date.now();
+  const candidates = targets.filter(target => {
+    if (typeof target.device_id !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target.device_id))
+      return false;
+    return Array.isArray(target.grant_groups) &&
+      target.grant_groups.some((group: unknown) => {
+        if (!group || typeof group !== "object" || Array.isArray(group)) return false;
+        const g = group as JsonObject;
+        return typeof g.profile_key === "string" && g.profile_key !== "mcp-discovery" &&
+          g.space_id === null && g.project_id === null &&
+          (g.valid_until === null ||
+            (typeof g.valid_until === "string" && Date.parse(g.valid_until) > now)) &&
+          Array.isArray(g.capabilities) && g.capabilities.some((cap: unknown) =>
+            cap && typeof cap === "object" && !Array.isArray(cap) &&
+            typeof (cap as JsonObject).capability === "string" &&
+            (cap as JsonObject).capability !== "product.target.read");
+      });
+  });
+  const routing = candidates.length === 1
+    ? { state: "single_action_grant_candidate",
+        candidate_device_id: candidates[0].device_id,
+        reported_online: candidates[0].online }
+    : candidates.length === 0
+      ? { state: "no_device_action_grant",
+          owner_action: "authorize_in_ordax_owner_permissions" }
+      : { state: "multiple_action_grant_candidates",
+          owner_action: "review_oauth_client_device_grants" };
+  return { ok: true, targets, client_device_routing: {
+    ...routing, basis: "current_oauth_client_target_catalog",
+    attested: false, dispatch_authorized: false,
+  } };
 }
 
 function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObject {
