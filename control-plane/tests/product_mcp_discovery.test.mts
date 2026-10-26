@@ -189,3 +189,29 @@ test("MCP request uses signed session for read-only discovery and never enqueues
     assert.equal(JSON.stringify(body).includes("private-device-token"), false);
   });
 });
+
+test("signed client-specific catalogs never borrow another OAuth client's device candidate",async()=>{
+  await withIssuer(async()=>{
+    const desktop=device,notebook="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const discovery={profile_key:"mcp-discovery",space_id:null,project_id:null,valid_until:null,
+      capabilities:[{capability:"product.target.read",access_mode:"read"}]};
+    const action={profile_key:"computer-observe",space_id:null,project_id:null,valid_until:null,
+      capabilities:[{capability:"computer.windows",access_mode:"read"}]};
+    const handlers=createCanonicalProductMcpReadHandlers(env,{
+      ensureDiscovery:async()=>({ok:true,devices_granted:0}),
+      listTargets:async(_,identity)=>({ok:true,targets:[
+        {device_id:desktop,online:true,grant_groups:[discovery,...(identity.clientId===client?[action]:[])]},
+        {device_id:notebook,online:false,grant_groups:[discovery,...(identity.clientId===otherClient?[action]:[])]},
+      ]}),
+    });
+    for(const [signedClient,expectedDevice] of [[client,desktop],[otherClient,notebook]]) {
+      const response=await handlers.targets(request(await token({client_id:signedClient}),
+        "/v3/product/targets?client_id="+(signedClient===client?otherClient:client)));
+      assert.equal(response.status,200);
+      const hint=(await response.json()).client_device_routing;
+      assert.equal(hint.state,"single_action_grant_candidate");
+      assert.equal(hint.candidate_device_id,expectedDevice);
+      assert.equal(hint.attested,false);
+    }
+  });
+});

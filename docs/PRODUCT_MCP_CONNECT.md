@@ -118,6 +118,12 @@ JWT ao JavaScript, e apresentar apenas valores reais com esse aviso de cobertura
 Nenhuma assinatura, medição de storage ou limite comercial foi ativado por
 este endpoint.
 
+### Verificação de dispositivo selecionado pelo cliente OAuth (diagnóstico, não autoridade)
+
+A resposta canônica de `ordax_targets`, quando seu catálogo de dispositivos e grupos estiver completo, agora inclui `client_device_routing`. O campo é derivado **exclusivamente da projeção já filtrada por OAuth**: `single_action_grant_candidate` identifica um único dispositivo com grant de ação do cliente atual; `no_device_action_grant` indica somente descoberta; `multiple_action_grant_candidates` exige revisão da autorização no Owner. O `candidate_device_id` é informativo, e `reported_online` representa apenas presença publicada. Os campos `attested=false` e `dispatch_authorized=false` são deliberados: somente a sessão confirmada pelo Runtime e os grants verificados novamente pelo PostgreSQL autorizam execução. Sem catálogo completo o campo é omitido, nunca inventado. Para identificar o cliente, use o `client_id` da própria `ordax_session` assinada, sem inferir identidade do argumento da ferramenta.
+
+**Remediação correta:** no Owner, revisar o cliente OAuth **efetivo** e autorizar o dispositivo pretendido por `/v3/owner/remote-authority` e `/v3/owner/remote-grant-groups`; não copiar grants do Notebook para o Desktop via SQL ou parâmetros MCP. Após consentimento, aguardar a sessão atestada do Runtime no dispositivo correto e executar somente um teste de leitura com recibo. A leitura deste novo hint jamais escreve grants nem força seleção de dispositivo. Rastreio: [ordax-platform#291](https://github.com/ordaxsystems/ordax-platform/issues/291).
+
 ## Descoberta dos dispositivos
 
 `ordax_targets` retorna somente a visão autorizada para a sessão atual, incluindo presença informada e grupos de grants publicados.
