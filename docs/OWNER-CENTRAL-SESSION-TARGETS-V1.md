@@ -34,7 +34,9 @@ tickets aguardando escolha por um Owner autenticado e cliente OAuth consentido.
 A resposta omite o hash do marcador privado da sessão. O
 `POST /v3/owner/central-session-selections` recebe **exatamente**
 `{client_id,challenge_id,device_id}`, sem campos extras ou parâmetros de
-query. O Worker injeta a identidade Owner a partir de JWT assinado;
+query. O Worker injeta a identidade Owner a partir de JWT assinado; no POST/GET
+de seleção exige ainda **sessão primária Owner** (claim assinado `client_id`
+ausente), rejeitando tokens OAuth delegados ao MCP;
 a função `ordax_owner_select_central_device_v1` trava a mesma linha com
 `FOR UPDATE`, revalida consentimento, grant de ação pelo helper SSOT, presença
 fresca e digest do Runtime, e torna o ticket `pending` por **2 minutos**.

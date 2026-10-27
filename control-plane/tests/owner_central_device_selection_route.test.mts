@@ -28,6 +28,11 @@ test("Owner selection requires independent rollout gate and signed Owner JWT",as
     }),env,{selectDevice:select})).status,404);
     assert.equal(calls,0);
     const enabled={...env,CENTRAL_OWNER_SELECTION_ENABLED:"enabled"};
+    const delegated=await handleProductOwnerGrantAdmin(req(base,jwt,"POST",{
+      client_id:client,challenge_id:challenge,device_id:device,
+    }),enabled,{selectDevice:select});
+    assert.equal(delegated.status,403);
+    assert.equal((await delegated.json()).error,"owner_primary_session_required");
     const denied=await handleProductOwnerGrantAdmin(req(base,undefined,"POST",{
       client_id:client,challenge_id:challenge,device_id:device,
     }),enabled,{selectDevice:select});
@@ -38,7 +43,7 @@ test("Owner selection requires independent rollout gate and signed Owner JWT",as
 
 test("Owner route only permits exact IDs and one explicit selected challenge",async()=>{
   await withIssuer(async()=>{
-    const jwt=await token(),enabled={...env,CENTRAL_OWNER_SELECTION_ENABLED:"enabled"};
+    const jwt=await token({client_id:null}),enabled={...env,CENTRAL_OWNER_SELECTION_ENABLED:"enabled"};
     let listCalls=0,selectionCalls=0;
     const list=async(_env:unknown,input:{ownerUserId:string,clientId:string})=>{
       listCalls++;assert.deepEqual(input,{ownerUserId:owner,clientId:client});

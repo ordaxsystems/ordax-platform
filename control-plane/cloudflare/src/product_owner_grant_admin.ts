@@ -53,11 +53,17 @@ export function parseOwnerWorkspaceResourceRevocation(
   return { clientId, resourceId };
 }
 
-async function owner(request: Request, env: Env): Promise<string | Response> {
+async function owner(
+  request: Request, env: Env, requirePrimarySession = false,
+): Promise<string | Response> {
   const identity = await authenticateProductRequest(request, env);
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
   if (identity.role !== "authenticated" || !isCanonicalUuid(identity.subjectId))
     return json({ ok: false, error: "product_owner_identity_invalid" }, 403);
+  // An OAuth MCP delegated JWT is NOT an interactive Owner decision.
+  // This new write path requires an actual primary Owner account session.
+  if (requirePrimarySession && identity.clientId !== null)
+    return json({ ok: false, error: "owner_primary_session_required" }, 403);
   return identity.subjectId;
 }
 
@@ -95,7 +101,9 @@ export async function handleProductOwnerGrantAdmin(
       && !url.pathname.startsWith(GROUPS) && !url.pathname.startsWith(WORKSPACE_RESOURCES))
     return json({ ok: false, error: "not_found" }, 404);
 
-  const ownerId = await owner(request, env);
+  const ownerId = await owner(
+    request, env, url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH,
+  );
   if (ownerId instanceof Response) return ownerId;
 
   try {
