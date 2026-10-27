@@ -23,13 +23,14 @@ test("Owner selection requires independent rollout gate and signed Owner JWT",as
   await withIssuer(async()=>{
     let calls=0;
     const select=async()=>{calls++;return {ok:true,status:"pending" as const};};
-    const jwt=await token();
+    const jwt=await token({client_id:null});
     assert.equal((await handleProductOwnerGrantAdmin(req(base,jwt,"POST",{
       client_id:client,challenge_id:challenge,device_id:device,
     }),env,{selectDevice:select})).status,404);
     assert.equal(calls,0);
     const enabled={...env,CENTRAL_OWNER_SELECTION_ENABLED:"enabled"};
-    const delegated=await handleProductOwnerGrantAdmin(req(base,jwt,"POST",{
+    const delegatedJwt=await token();
+    const delegated=await handleProductOwnerGrantAdmin(req(base,delegatedJwt,"POST",{
       client_id:client,challenge_id:challenge,device_id:device,
     }),enabled,{selectDevice:select});
     assert.equal(delegated.status,403);
