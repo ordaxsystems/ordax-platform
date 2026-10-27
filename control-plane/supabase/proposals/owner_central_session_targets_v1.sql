@@ -43,7 +43,7 @@ begin
     'runtime_ready',coalesce(
       private.ordax_product_presence_online_v1(p.online,p.last_seen_at,v_now)
       and p.agent_version is not null
-      and p.capability_digest ~ '^[0-9a-f]{64}
+      and p.capability_digest ~ '^[0-9a-f]{64}$',false)
   ) order by d.device_id),'[]'::jsonb)
   into v_count,v_targets
   from public.ordax_product_devices d
