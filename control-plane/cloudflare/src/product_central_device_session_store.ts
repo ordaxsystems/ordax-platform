@@ -53,6 +53,10 @@ const RPCS = {
     keys: ["p_owner_user_id", "p_client_id", "p_session_sha256"],
     casts: ["uuid", "text", "text"],
   },
+  ordax_owner_central_session_targets_v1: {
+    keys: ["p_owner_user_id", "p_client_id"],
+    casts: ["uuid", "text"],
+  },
 } as const;
 
 type RpcName = keyof typeof RPCS;
@@ -155,5 +159,19 @@ export async function resolveCentralDeviceSession(
     p_owner_user_id: input.ownerUserId,
     p_client_id: input.clientId,
     p_session_sha256: input.sessionSha256,
+  });
+}
+
+/** Owner read-only preflight; SQL reuses the existing eligible-grant predicate. */
+export async function inspectOwnerCentralSessionTargets(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string },
+): Promise<Readonly<{ ok: boolean; state?: string; error?: string; eligible_device_count?: number }>> {
+  if (!isCanonicalUuid(input.ownerUserId) || !validClient(input.clientId)) {
+    throw new ProductPostgresError("owner_central_targets_invalid", 400);
+  }
+  return call(env, "ordax_owner_central_session_targets_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_client_id: input.clientId,
   });
 }

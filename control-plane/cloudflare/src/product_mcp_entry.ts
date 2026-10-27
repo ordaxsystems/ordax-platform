@@ -47,6 +47,7 @@ import {
   handleProductOwnerGrantAdmin,
   PRODUCT_OWNER_REMOTE_AUTHORITY_PATH,
   PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH,
+  PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH,
 } from "./product_owner_grant_admin.ts";
 import {
   handleProductOwnerProjectScope,
@@ -69,6 +70,7 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_DEVICE_PRESENCE_PATH
     || pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH
     || pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH
+    || pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
     || pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
     || pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")
@@ -330,7 +332,8 @@ export function createCanonicalProductMcpGateway(
     if (url.pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH) {
       return handleProductOwnerProjectScope(request, env);
     }
-    if (url.pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
+    if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
+        || url.pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
         || url.pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
         || url.pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")) {
       return handleProductOwnerGrantAdmin(request, env);
