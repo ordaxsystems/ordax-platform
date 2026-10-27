@@ -98,6 +98,8 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
       "ordax_resolve_central_device_session_v1"]) {
       await db.exec(extract(attested,"public."+name));
     }
+    await db.exec(extract(read("20261022154600_central_session_runtime_heartbeat_preflight_v1.sql"),
+      "public.ordax_open_central_device_session_v1"));
     await db.exec(proposal);
 
     await db.query("insert into auth.users values($1)",[owner]);
