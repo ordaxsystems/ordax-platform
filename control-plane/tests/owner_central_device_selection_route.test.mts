@@ -6,6 +6,7 @@ import {
 import {
   openCentralSessionFromMcp,
 } from "../cloudflare/src/product_central_device_session.ts";
+import { resolveOrBootstrapAttestedSession } from "../cloudflare/src/product_mcp_entry.ts";
 import {env,owner,client,token,withIssuer} from "./product_mcp_test_fixtures.mts";
 
 const challenge="22222222-2222-4222-8222-222222222222";
@@ -100,4 +101,24 @@ test("MCP opening a waiting challenge cannot acquire Owner selection by model de
     assert.equal((await opened.json()).status,"awaiting_owner");
     assert.equal(called,1);
   });
+});
+
+test("awaiting Owner returns a bounded remediation immediately without polling/retrying",async()=>{
+  let opened=0,waited=0,resolved=0;
+  const req=new Request("https://mcp.ordax.com.br/mcp",{method:"POST"});
+  const result=await resolveOrBootstrapAttestedSession(req,env,{
+    resolve:async()=>{
+      resolved++;
+      return {ok:false as const,error:"central_session_unbound"};
+    },
+    open:async()=>{
+      opened++;
+      return Response.json({ok:true,status:"awaiting_owner",challenge_id:challenge},{status:202});
+    },
+    wait:async()=>{waited++;throw Error("must not poll while Owner choice is pending");},
+  });
+  assert.deepEqual(result,{ok:false,error:"central_session_owner_selection_required"});
+  assert.equal(opened,1);
+  assert.equal(resolved,1);
+  assert.equal(waited,0);
 });

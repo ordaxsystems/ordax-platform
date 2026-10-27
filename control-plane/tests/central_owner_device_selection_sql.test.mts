@@ -175,6 +175,37 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     ]);
     assert.equal(selections.filter(x=>x.ok).length,1,"concurrent Owner choices have one winner");
     assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where state='pending' and session_sha256=$1",[secondHash])).rows[0].total,1);
+    // Expired Owner ticket may not be rescued by knowledge of its UUID.
+    const thirdHash="c".repeat(64);
+    const waiting3=await open(thirdHash);
+    assert.equal(waiting3.status,"awaiting_owner");
+    await db.query("update private.ordax_central_device_session_challenges set expires_at=now()-interval '1 second' where challenge_id=$1",[waiting3.challenge_id]);
+    assert.equal((await choose(owner,client,waiting3.challenge_id,desktop)).error,
+      "owner_central_selection_not_pending");
+    const replacement=await open(thirdHash);
+    assert.equal(replacement.status,"awaiting_owner");
+    assert.notEqual(replacement.challenge_id,waiting3.challenge_id,
+      "expired ticket cannot be revived/reused");
+
+    const fourthHash="d".repeat(64);
+    const waiting4=await open(fourthHash);
+    assert.equal(waiting4.status,"awaiting_owner");
+    await db.exec("update auth.oauth_consents set revoked_at=now()");
+    assert.equal((await choose(owner,client,waiting4.challenge_id,desktop)).error,
+      "owner_central_client_not_consented");
+    await db.exec("update auth.oauth_consents set revoked_at=null");
+    await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",[grantDesk]);
+    assert.equal((await choose(owner,client,waiting4.challenge_id,desktop)).error,
+      "central_device_grant_revoked");
+    await db.query("update public.ordax_remote_capability_grants set state='active' where grant_id=$1",[grantDesk]);
+    await db.query("update public.ordax_device_presence set agent_version=null where device_id=$1",[desktop]);
+    assert.equal((await choose(owner,client,waiting4.challenge_id,desktop)).error,
+      "central_device_runtime_not_ready");
+    await db.query("update public.ordax_device_presence set agent_version='1.0.0' where device_id=$1",[desktop]);
+    assert.equal((await choose(owner,client,waiting4.challenge_id,desktop)).ok,true);
+    await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",[grantDesk]);
+    assert.equal((await confirm(desktop,tokenDesk,waiting4.challenge_id)).error,
+      "central_device_grant_revoked","grant still checked AFTER Owner decision");
     const sig="public.ordax_owner_select_central_device_v1(uuid,text,uuid,uuid)";
     for(const role of ["anon","authenticated","service_role"]) {
       assert.equal((await db.query("select has_function_privilege($1,$2,'EXECUTE') as allowed",[role,sig])).rows[0].allowed,false,role);
