@@ -33,6 +33,29 @@ class McpReleaseContract(unittest.TestCase):
         self.assertNotIn("r2_buckets",c)
         self.assertEqual(c["hyperdrive"][0]["binding"],"POSTGRES")
 
+    def test_mcp_owner_oauth_pin_is_bounded_and_cannot_enable_other_vars(self):
+        import re
+        value=self.config["vars"]["PRODUCT_OWNER_OAUTH_CLIENT_ID"]
+        self.assertRegex(value,r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
+        self.assertFalse(validate(self.foundation,self.config))
+        for bad in (None, "", "not-a-uuid", "a"*512):
+            c=copy.deepcopy(self.config)
+            if bad is None:
+                c["vars"].pop("PRODUCT_OWNER_OAUTH_CLIENT_ID")
+            else:
+                c["vars"]["PRODUCT_OWNER_OAUTH_CLIENT_ID"]=bad
+            with self.subTest(pin=bad):
+                with self.assertRaisesRegex(McpReleaseError,"owner_oauth_client_not_canonical"):
+                    validate(self.foundation,c)
+        for extra in ("CENTRAL_OWNER_SELECTION_ENABLED",
+                      "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED",
+                      "UNTRUSTED_SECOND_OWNER_AUTHORITY"):
+            c=copy.deepcopy(self.config)
+            c["vars"][extra]="enabled"
+            with self.subTest(extra=extra):
+                with self.assertRaisesRegex(McpReleaseError,"mcp_auth_vars_not_canonical"):
+                    validate(self.foundation,c)
+
     def test_machine_endpoint_edge_policy_is_explicit_and_hostname_scoped(self):
         edge=self.foundation["mcp_release"].get("edge_machine_endpoint")
         self.assertEqual(edge,{
