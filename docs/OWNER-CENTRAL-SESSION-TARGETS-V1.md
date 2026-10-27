@@ -11,3 +11,57 @@ O estado `owner_selection_required` é informativo: `attested=false`, `dispatch_
 ## Provas exigidas antes de ativação
 
 Owner sem JWT, cliente OAuth diferente, duplicidade de parâmetros, target sem grant, device offline, grant expirado/revogado, conjunto incompleto e concorrência têm de falhar fechados. Quando houver a fase de escolha, nenhum `device_id` vindo dos argumentos do ChatGPT poderá definir autoridade, e os grants do Notebook devem permanecer independentes. Governança de migration, CI e E2E são requisitos separados.
+
+
+## Segunda fronteira candidata — Owner decide o dispositivo da sessão (27/10/2026)
+
+**Código candidato na MESMA PR #293, não aplicado em produção.** Proposta SQL em
+`control-plane/supabase/proposals/central_owner_device_selection_v1.sql`,
+sem migration aplicada, sem grants novos e sem alterações de credenciais.
+
+A estrutura canônica `private.ordax_central_device_session_challenges` passa a
+aceitar `state=awaiting_owner` com `device_id=NULL`. A unicidade por
+`owner_user_id,client_id,session_sha256` engloba `awaiting_owner` e `pending`.
+Quando a função de grants vigente identifica mais de um alvo para o OAuth
+client assinado, o mesmo `ordax_open_central_device_session_v1` cria um
+ticket limitado a **5 minutos**; **não** escolhe o único online, não concede
+acesso e não dá ao modelo poder de escolha. Uma sessão já atestada e vigente
+permanece ligada ao seu dispositivo original.
+
+O endpoint **separadamente gated**
+`GET /v3/owner/central-session-selections?client_id=<UUID>` lista somente
+tickets aguardando escolha por um Owner autenticado e cliente OAuth consentido.
+A resposta omite o hash do marcador privado da sessão. O
+`POST /v3/owner/central-session-selections` recebe **exatamente**
+`{client_id,challenge_id,device_id}`, sem campos extras ou parâmetros de
+query. O Worker injeta a identidade Owner a partir de JWT assinado;
+a função `ordax_owner_select_central_device_v1` trava a mesma linha com
+`FOR UPDATE`, revalida consentimento, grant de ação pelo helper SSOT, presença
+fresca e digest do Runtime, e torna o ticket `pending` por **2 minutos**.
+Seleções simultâneas não podem sobrescrever o alvo vencedor.
+
+A seleção **não equivale** a atestação nem despacho. O Runtime mantém a
+rota Device original de polling/confirm e só pode confirmar com credencial do
+dispositivo selecionado. Confirmação revalida grant atual; resolução da
+sessão também o revalida. Grants A/B não são emprestados ou revogados.
+O MCP `resolveOrBootstrapAttestedSession` retorna
+`central_session_owner_selection_required` prontamente, sem ocupar 24 s
+de polling enquanto uma pessoa precisa decidir.
+
+**`CENTRAL_OWNER_SELECTION_ENABLED` permanece OFF** independentemente do
+flag read-only `CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED`. Nenhuma feature é
+habilitada pelo mero merge de source; a proposta de schema não foi aplicada.
+Antes da promoção, exigir revisão de migração contra a definição SQL ativa,
+E2E Owner e Runtime nativo com o cliente exato, tickets expirados/múltiplas
+sessões, confirmação e receipt de uma ação exclusivamente de leitura,
+verificação do UX para o Owner identificar a sessão correta, e critérios
+claros de retirada/revogação.
+
+**Provas na PR:** `control-plane/tests/central_owner_device_selection_sql.test.mts`
+executa no PGlite a abertura canônica, alteração da tabela original,
+OAuth Owner, 2 dispositivos, um ticket sem device, Owner seleciona,
+Device errado não confirma, Device exato confirma, grant revogado falha,
+corridas de escolha e tickets expirados. O teste
+`owner_central_device_selection_route.test.mts` cobre JWT, schema estrito
+e flags. A CI é fonte de verdade para o head específico; não tratar docs
+ou CI como deploy no Supabase.
