@@ -91,6 +91,11 @@ test("Owner preflight uses real canonical grant eligibility SQL (PGlite), never 
     result=await inspect();
     assert.equal(result.eligible_device_count,1);
     assert.equal(result.targets[0].device_id,desktop);
+    await db.query("delete from public.ordax_device_presence where device_id=$1",[desktop]);
+    result=await inspect();
+    assert.equal(result.targets[0].reported_online,false);
+    assert.equal(result.targets[0].runtime_ready,false,
+      "missing heartbeat is false, never a nullable permission/readiness hint");
     const sig="public.ordax_owner_central_session_targets_v1(uuid,text)";
     for(const role of ["anon","authenticated","service_role"]){
       assert.equal((await db.query("select has_function_privilege($1,$2,'EXECUTE') as allowed",
