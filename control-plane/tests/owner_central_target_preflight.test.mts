@@ -29,7 +29,7 @@ test("only a signed Owner can inspect an exact consented client; model device ca
   await withIssuer(async()=>{
     const active={...env,CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED:"enabled"};
     let calls=0;
-    const inspect=async (_env:typeof active,input:{ownerUserId:string;clientId:string})=>{
+    const inspect=async (_env:unknown,input:{ownerUserId:string;clientId:string})=>{
       calls++;
       assert.deepEqual(input,{ownerUserId:owner,clientId:client});
       assert.equal("deviceId" in input,false);
