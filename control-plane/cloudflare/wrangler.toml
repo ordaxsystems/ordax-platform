@@ -16,6 +16,8 @@ invocation_logs = true
 [vars]
 PRODUCT_AUTH_ISSUER = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1"
 PRODUCT_AUTH_AUDIENCE = "authenticated"
+# Public first-party Owner OAuth client used by native PKCE (not a secret).
+PRODUCT_OWNER_OAUTH_CLIENT_ID = "202fd3e1-b058-4531-8750-82c57e4b6ca0"
 # Public browser key from the canonical Supabase project (not a secret).
 SUPABASE_PUBLISHABLE_KEY = "sb_publishable_JHFaNBnQbkWLvdHI4zZDpQ_3RJWg6Bf"
 PRODUCT_AUTH_JWKS_URL = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1/.well-known/jwks.json"

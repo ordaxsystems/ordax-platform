@@ -9,7 +9,7 @@ type JsonObject = Record<string, unknown>;
 
 export type CentralDeviceSessionOpenResult = Readonly<{
   ok: boolean;
-  status?: "pending" | "bound";
+  status?: "pending" | "bound" | "awaiting_owner";
   device_id?: string;
   challenge_id?: string;
   request_id?: string;
@@ -52,6 +52,18 @@ const RPCS = {
   ordax_resolve_central_device_session_v1: {
     keys: ["p_owner_user_id", "p_client_id", "p_session_sha256"],
     casts: ["uuid", "text", "text"],
+  },
+  ordax_owner_central_session_targets_v1: {
+    keys: ["p_owner_user_id", "p_client_id"],
+    casts: ["uuid", "text"],
+  },
+  ordax_owner_list_central_selections_v1: {
+    keys: ["p_owner_user_id", "p_client_id"],
+    casts: ["uuid", "text"],
+  },
+  ordax_owner_select_central_device_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_challenge_id", "p_device_id"],
+    casts: ["uuid", "text", "uuid", "uuid"],
   },
 } as const;
 
@@ -155,5 +167,47 @@ export async function resolveCentralDeviceSession(
     p_owner_user_id: input.ownerUserId,
     p_client_id: input.clientId,
     p_session_sha256: input.sessionSha256,
+  });
+}
+
+/** Owner read-only preflight; SQL reuses the existing eligible-grant predicate. */
+export async function inspectOwnerCentralSessionTargets(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string },
+): Promise<Readonly<{ ok: boolean; state?: string; error?: string; eligible_device_count?: number }>> {
+  if (!isCanonicalUuid(input.ownerUserId) || !validClient(input.clientId)) {
+    throw new ProductPostgresError("owner_central_targets_invalid", 400);
+  }
+  return call(env, "ordax_owner_central_session_targets_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_client_id: input.clientId,
+  });
+}
+
+/** Signed Owner can inspect pending choices created by an existing MCP marker. */
+export async function listOwnerCentralSelections(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string },
+): Promise<Readonly<{ ok: boolean; pending_selections?: readonly unknown[]; error?: string }>> {
+  if (!isCanonicalUuid(input.ownerUserId) || !validClient(input.clientId)) {
+    throw new ProductPostgresError("owner_central_selection_invalid", 400);
+  }
+  return call(env, "ordax_owner_list_central_selections_v1", {
+    p_owner_user_id: input.ownerUserId, p_client_id: input.clientId,
+  });
+}
+
+/** Mutates only the existing waiting challenge; Device attestation stays separate. */
+export async function selectOwnerCentralDevice(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string; challengeId: string; deviceId: string },
+): Promise<CentralDeviceSessionOpenResult> {
+  if (!isCanonicalUuid(input.ownerUserId) || !validClient(input.clientId)
+      || !isCanonicalUuid(input.challengeId) || !isCanonicalUuid(input.deviceId)) {
+    throw new ProductPostgresError("owner_central_selection_invalid", 400);
+  }
+  return call(env, "ordax_owner_select_central_device_v1", {
+    p_owner_user_id: input.ownerUserId, p_client_id: input.clientId,
+    p_challenge_id: input.challengeId, p_device_id: input.deviceId,
   });
 }

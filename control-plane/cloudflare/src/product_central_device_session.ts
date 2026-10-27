@@ -71,7 +71,7 @@ export async function openCentralSessionFromMcp(
         : code === "central_session_revoked" ? 403 : 503;
       return json({ ok: false, error: code }, status);
     }
-    return json(result, result.status === "pending" ? 202 : 200);
+    return json(result, result.status === "pending" || result.status === "awaiting_owner" ? 202 : 200);
   } catch (error) {
     if (error instanceof ProductPostgresError) return json({ ok: false, error: error.code }, error.status);
     return json({ ok: false, error: "central_session_unavailable" }, 503);

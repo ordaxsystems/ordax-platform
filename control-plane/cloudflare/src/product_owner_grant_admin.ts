@@ -9,13 +9,24 @@ import {
   type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
 import { ownerMcpGrantProfile } from "./product_owner_grant_profiles.ts";
+import {
+  inspectOwnerCentralSessionTargets,
+  listOwnerCentralSelections,
+  selectOwnerCentralDevice,
+} from "./product_central_device_session_store.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { canonicalOwnerWorkspaceApproval } from "./project_workspace_issue_contract.ts";
 
-type Env = ProductAuthEnv & ProductPostgresEnv;
+type Env = ProductAuthEnv & ProductPostgresEnv & {
+  CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED?: string;
+  CENTRAL_OWNER_SELECTION_ENABLED?: string;
+  PRODUCT_OWNER_OAUTH_CLIENT_ID?: string;
+};
 type Json = Record<string, unknown>;
 const ROOT = "/v3/owner/remote-authority";
+export const PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH = "/v3/owner/central-session-targets";
+export const PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH = "/v3/owner/central-session-selections";
 const GROUPS = "/v3/owner/remote-grant-groups";
 const WORKSPACE_RESOURCES = "/v3/owner/workspace-resources/";
 const WORKSPACE_APPROVALS = WORKSPACE_RESOURCES + "approvals";
@@ -48,6 +59,16 @@ async function owner(request: Request, env: Env): Promise<string | Response> {
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
   if (identity.role !== "authenticated" || !isCanonicalUuid(identity.subjectId))
     return json({ ok: false, error: "product_owner_identity_invalid" }, 403);
+  // A delegated Product MCP JWT is NOT an Owner decision. The official
+  // Owner CLI uses its own public PKCE client, so do not reject all client_id
+  // claims: accept only a first-party account JWT or the explicitly pinned
+  // first-party Owner OAuth client configured in canonical Platform metadata.
+  if (new URL(request.url).pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH) {
+    const pinned = (env.PRODUCT_OWNER_OAUTH_CLIENT_ID ?? "").trim().toLowerCase();
+    if (identity.clientId !== null
+        && (!isCanonicalUuid(pinned) || identity.clientId.toLowerCase() !== pinned))
+      return json({ ok: false, error: "owner_primary_session_required" }, 403);
+  }
   return identity.subjectId;
 }
 
@@ -71,16 +92,78 @@ function validUntil(value: unknown): string | null | undefined {
   return new Date(timestamp).toISOString();
 }
 
-export async function handleProductOwnerGrantAdmin(request: Request, env: Env): Promise<Response> {
+export async function handleProductOwnerGrantAdmin(
+  request: Request, env: Env,
+  deps: {
+    inspectCentralTargets?: typeof inspectOwnerCentralSessionTargets;
+    listSelections?: typeof listOwnerCentralSelections;
+    selectDevice?: typeof selectOwnerCentralDevice;
+  } = {},
+): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname !== ROOT && !url.pathname.startsWith(GROUPS)
-      && !url.pathname.startsWith(WORKSPACE_RESOURCES))
+  if (url.pathname !== ROOT && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
+      && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
+      && !url.pathname.startsWith(GROUPS) && !url.pathname.startsWith(WORKSPACE_RESOURCES))
     return json({ ok: false, error: "not_found" }, 404);
 
   const ownerId = await owner(request, env);
   if (ownerId instanceof Response) return ownerId;
 
   try {
+    if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH) {
+      // Owner action is separately feature-gated from advisory target reads.
+      // The signed Owner session never conveys an implicit action grant.
+      if (env.CENTRAL_OWNER_SELECTION_ENABLED !== "enabled")
+        return json({ ok: false, error: "not_found" }, 404);
+      if (request.method === "GET") {
+        if ([...url.searchParams.keys()].some(key => key !== "client_id")
+            || url.searchParams.getAll("client_id").length !== 1)
+          return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
+        const clientId = (url.searchParams.get("client_id") ?? "").toLowerCase();
+        if (!CLIENT_ID_RE.test(clientId))
+          return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
+        const result = await (deps.listSelections ?? listOwnerCentralSelections)(env, {
+          ownerUserId: ownerId, clientId,
+        });
+        return json(result, result.ok === true ? 200 : 403);
+      }
+      if (request.method !== "POST")
+        return json({ ok: false, error: "method_not_allowed" }, 405);
+      if (url.search !== "")
+        return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
+      const mime = (request.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
+      if (mime !== "application/json")
+        return json({ ok: false, error: "content_type_invalid" }, 415);
+      const body = await readBoundedJsonObject(request, 1024);
+      if (!body || Object.keys(body).length !== 3
+          || Object.keys(body).some(key => !["client_id","challenge_id","device_id"].includes(key)))
+        return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
+      const clientId = typeof body.client_id === "string" ? body.client_id.toLowerCase() : "";
+      const challengeId = typeof body.challenge_id === "string" ? body.challenge_id.toLowerCase() : "";
+      const deviceId = typeof body.device_id === "string" ? body.device_id.toLowerCase() : "";
+      if (!CLIENT_ID_RE.test(clientId) || !isCanonicalUuid(challengeId) || !isCanonicalUuid(deviceId))
+        return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
+      const result = await (deps.selectDevice ?? selectOwnerCentralDevice)(env, {
+        ownerUserId: ownerId, clientId, challengeId, deviceId,
+      });
+      return json(result, result.ok === true ? 200 : 403);
+    }
+    if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH) {
+      // Advisory-only Owner preflight: not a device selector, grant or dispatch.
+      // Remain off until the read-only SQL authority is governed and deployed.
+      if (env.CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED !== "enabled")
+        return json({ ok: false, error: "not_found" }, 404);
+      if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405);
+      if ([...url.searchParams.keys()].some(key => key !== "client_id")
+          || url.searchParams.getAll("client_id").length !== 1)
+        return json({ ok: false, error: "owner_central_targets_invalid" }, 400);
+      const clientId = (url.searchParams.get("client_id") ?? "").toLowerCase();
+      if (!CLIENT_ID_RE.test(clientId)) return json({ ok: false, error: "owner_central_targets_invalid" }, 400);
+      const result = await (deps.inspectCentralTargets ?? inspectOwnerCentralSessionTargets)(env, {
+        ownerUserId: ownerId, clientId,
+      });
+      return json(result, result.ok === true ? 200 : 403);
+    }
     if (url.pathname.startsWith(WORKSPACE_RESOURCES)) {
       // Owner consent cannot be issued just because the READ verifier gate is
       // enabled. This second gate remains OFF pending native picker E2E.
