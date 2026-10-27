@@ -9,15 +9,23 @@ import {
   type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
 import { ownerMcpGrantProfile } from "./product_owner_grant_profiles.ts";
-import { inspectOwnerCentralSessionTargets } from "./product_central_device_session_store.ts";
+import {
+  inspectOwnerCentralSessionTargets,
+  listOwnerCentralSelections,
+  selectOwnerCentralDevice,
+} from "./product_central_device_session_store.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { canonicalOwnerWorkspaceApproval } from "./project_workspace_issue_contract.ts";
 
-type Env = ProductAuthEnv & ProductPostgresEnv & { CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED?: string };
+type Env = ProductAuthEnv & ProductPostgresEnv & {
+  CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED?: string;
+  CENTRAL_OWNER_SELECTION_ENABLED?: string;
+};
 type Json = Record<string, unknown>;
 const ROOT = "/v3/owner/remote-authority";
 export const PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH = "/v3/owner/central-session-targets";
+export const PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH = "/v3/owner/central-session-selections";
 const GROUPS = "/v3/owner/remote-grant-groups";
 const WORKSPACE_RESOURCES = "/v3/owner/workspace-resources/";
 const WORKSPACE_APPROVALS = WORKSPACE_RESOURCES + "approvals";
@@ -75,10 +83,15 @@ function validUntil(value: unknown): string | null | undefined {
 
 export async function handleProductOwnerGrantAdmin(
   request: Request, env: Env,
-  deps: { inspectCentralTargets?: typeof inspectOwnerCentralSessionTargets } = {},
+  deps: {
+    inspectCentralTargets?: typeof inspectOwnerCentralSessionTargets;
+    listSelections?: typeof listOwnerCentralSelections;
+    selectDevice?: typeof selectOwnerCentralDevice;
+  } = {},
 ): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname !== ROOT && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
+      && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
       && !url.pathname.startsWith(GROUPS) && !url.pathname.startsWith(WORKSPACE_RESOURCES))
     return json({ ok: false, error: "not_found" }, 404);
 
@@ -86,6 +99,44 @@ export async function handleProductOwnerGrantAdmin(
   if (ownerId instanceof Response) return ownerId;
 
   try {
+    if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH) {
+      // Owner action is separately feature-gated from advisory target reads.
+      // The signed Owner session never conveys an implicit action grant.
+      if (env.CENTRAL_OWNER_SELECTION_ENABLED !== "enabled")
+        return json({ ok: false, error: "not_found" }, 404);
+      if (request.method === "GET") {
+        if ([...url.searchParams.keys()].some(key => key !== "client_id")
+            || url.searchParams.getAll("client_id").length !== 1)
+          return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
+        const clientId = (url.searchParams.get("client_id") ?? "").toLowerCase();
+        if (!CLIENT_ID_RE.test(clientId))
+          return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
+        const result = await (deps.listSelections ?? listOwnerCentralSelections)(env, {
+          ownerUserId: ownerId, clientId,
+        });
+        return json(result, result.ok === true ? 200 : 403);
+      }
+      if (request.method !== "POST")
+        return json({ ok: false, error: "method_not_allowed" }, 405);
+      if (url.search !== "")
+        return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
+      const mime = (request.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
+      if (mime !== "application/json")
+        return json({ ok: false, error: "content_type_invalid" }, 415);
+      const body = await readBoundedJsonObject(request, 1024);
+      if (!body || Object.keys(body).length !== 3
+          || Object.keys(body).some(key => !["client_id","challenge_id","device_id"].includes(key)))
+        return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
+      const clientId = typeof body.client_id === "string" ? body.client_id.toLowerCase() : "";
+      const challengeId = typeof body.challenge_id === "string" ? body.challenge_id.toLowerCase() : "";
+      const deviceId = typeof body.device_id === "string" ? body.device_id.toLowerCase() : "";
+      if (!CLIENT_ID_RE.test(clientId) || !isCanonicalUuid(challengeId) || !isCanonicalUuid(deviceId))
+        return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
+      const result = await (deps.selectDevice ?? selectOwnerCentralDevice)(env, {
+        ownerUserId: ownerId, clientId, challengeId, deviceId,
+      });
+      return json(result, result.ok === true ? 200 : 403);
+    }
     if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH) {
       // Advisory-only Owner preflight: not a device selector, grant or dispatch.
       // Remain off until the read-only SQL authority is governed and deployed.

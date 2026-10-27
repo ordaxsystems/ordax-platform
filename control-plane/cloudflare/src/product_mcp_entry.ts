@@ -48,6 +48,7 @@ import {
   PRODUCT_OWNER_REMOTE_AUTHORITY_PATH,
   PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH,
   PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH,
+  PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH,
 } from "./product_owner_grant_admin.ts";
 import {
   handleProductOwnerProjectScope,
@@ -70,6 +71,7 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_DEVICE_PRESENCE_PATH
     || pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH
     || pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH
+    || pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
     || pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
     || pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
@@ -199,6 +201,7 @@ const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
   "central_session_marker_required",
   "central_device_target_missing",
   "central_device_target_ambiguous",
+  "central_session_owner_selection_required",
   "central_session_revoked",
   "central_session_target_mismatch",
 ]);
@@ -232,6 +235,10 @@ export async function resolveOrBootstrapAttestedSession(
   if (!payload || typeof payload !== "object" || (payload as Record<string, unknown>).ok !== true) {
     return result;
   }
+  // MCP may request a ticket, but only a separately signed Owner can choose
+  // the target; do not poll for 24 seconds or infer a PC from MCP arguments.
+  if ((payload as Record<string, unknown>).status === "awaiting_owner")
+    return { ok: false as const, error: "central_session_owner_selection_required" };
   const wait = deps.wait ?? waitForSessionConfirmation;
   for (let attempt = 0; attempt < SESSION_CONFIRMATION_ATTEMPTS; attempt += 1) {
     await wait(SESSION_CONFIRMATION_INTERVAL_MS);
@@ -332,7 +339,8 @@ export function createCanonicalProductMcpGateway(
     if (url.pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH) {
       return handleProductOwnerProjectScope(request, env);
     }
-    if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
+    if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
+        || url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
         || url.pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
         || url.pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
         || url.pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")) {
