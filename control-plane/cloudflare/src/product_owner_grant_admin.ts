@@ -14,7 +14,7 @@ import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { canonicalOwnerWorkspaceApproval } from "./project_workspace_issue_contract.ts";
 
-type Env = ProductAuthEnv & ProductPostgresEnv;
+type Env = ProductAuthEnv & ProductPostgresEnv & { CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED?: string };
 type Json = Record<string, unknown>;
 const ROOT = "/v3/owner/remote-authority";
 export const PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH = "/v3/owner/central-session-targets";
