@@ -73,33 +73,3 @@ revoke all on function public.ordax_owner_central_session_targets_v1(uuid,text)
 grant execute on function public.ordax_owner_central_session_targets_v1(uuid,text)
   to ordax_edge_executor;
 commit;
-,false)
-  ) order by d.device_id),'[]'::jsonb)
-  into v_count,v_targets
-  from public.ordax_product_devices d
-  left join public.ordax_device_presence p on p.device_id=d.device_id
-  where d.owner_user_id=p_owner_user_id and d.state='active'
-    and private.ordax_central_device_grant_eligible_v1(
-      p_owner_user_id,p_client_id,d.device_id);
-
-  -- A bounded response; never truncate a candidate set into a false single selection.
-  if v_count>25 then
-    return jsonb_build_object('ok',false,'error','owner_central_target_list_too_large');
-  end if;
-  return jsonb_build_object(
-    'ok',true,'client_id',p_client_id,
-    'eligible_device_count',v_count,
-    'state',case when v_count=0 then 'no_action_grant'
-      when v_count=1 then 'single_granted_target' else 'owner_selection_required' end,
-    'targets',v_targets,
-    'attested',false,'dispatch_authorized',false,
-    'owner_choice_performed',false
-  );
-end;
-$$;
-
-revoke all on function public.ordax_owner_central_session_targets_v1(uuid,text)
-  from public,anon,authenticated,service_role;
-grant execute on function public.ordax_owner_central_session_targets_v1(uuid,text)
-  to ordax_edge_executor;
-commit;
