@@ -11,6 +11,7 @@ import {env,owner,client,token,withIssuer} from "./product_mcp_test_fixtures.mts
 
 const challenge="22222222-2222-4222-8222-222222222222";
 const device="33333333-3333-4333-8333-333333333333";
+const OWNER_CLIENT="202fd3e1-b058-4531-8750-82c57e4b6ca0";
 const base="https://mcp.ordax.com.br"+PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH;
 const req=(url:string,jwt?:string,method="GET",body?:unknown)=>
   new Request(url,{method,headers:{
@@ -33,11 +34,21 @@ test("Owner selection requires independent rollout gate and signed Owner JWT",as
     }),enabled,{selectDevice:select});
     assert.equal(delegated.status,403);
     assert.equal((await delegated.json()).error,"owner_primary_session_required");
+    const nativeOwner=await token({client_id:OWNER_CLIENT});
+    const accepted=await handleProductOwnerGrantAdmin(req(base,nativeOwner,"POST",{
+      client_id:client,challenge_id:challenge,device_id:device,
+    }),{...enabled,PRODUCT_OWNER_OAUTH_CLIENT_ID:OWNER_CLIENT},{selectDevice:select});
+    assert.equal(accepted.status,200,"official first-party Owner OAuth must remain usable");
+    assert.equal(calls,1);
+    const mismatched=await handleProductOwnerGrantAdmin(req(base,nativeOwner,"POST",{
+      client_id:client,challenge_id:challenge,device_id:device,
+    }),enabled,{selectDevice:select});
+    assert.equal(mismatched.status,403,"unsigned/unconfigured owner client fails closed");
     const denied=await handleProductOwnerGrantAdmin(req(base,undefined,"POST",{
       client_id:client,challenge_id:challenge,device_id:device,
     }),enabled,{selectDevice:select});
     assert.equal(denied.status,401);
-    assert.equal(calls,0);
+    assert.equal(calls,1);
   });
 });
 

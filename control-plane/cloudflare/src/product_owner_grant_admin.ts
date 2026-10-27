@@ -21,6 +21,7 @@ import { canonicalOwnerWorkspaceApproval } from "./project_workspace_issue_contr
 type Env = ProductAuthEnv & ProductPostgresEnv & {
   CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED?: string;
   CENTRAL_OWNER_SELECTION_ENABLED?: string;
+  PRODUCT_OWNER_OAUTH_CLIENT_ID?: string;
 };
 type Json = Record<string, unknown>;
 const ROOT = "/v3/owner/remote-authority";
@@ -60,10 +61,16 @@ async function owner(
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
   if (identity.role !== "authenticated" || !isCanonicalUuid(identity.subjectId))
     return json({ ok: false, error: "product_owner_identity_invalid" }, 403);
-  // An OAuth MCP delegated JWT is NOT an interactive Owner decision.
-  // This new write path requires an actual primary Owner account session.
-  if (requirePrimarySession && identity.clientId !== null)
-    return json({ ok: false, error: "owner_primary_session_required" }, 403);
+  // A delegated Product MCP JWT is NOT an Owner decision. The official
+  // Owner CLI uses its own public PKCE client, so do not reject all client_id
+  // claims: accept only a first-party account JWT or the explicitly pinned
+  // first-party Owner OAuth client configured in canonical Platform metadata.
+  if (requirePrimarySession) {
+    const pinned = (env.PRODUCT_OWNER_OAUTH_CLIENT_ID ?? "").trim().toLowerCase();
+    if (identity.clientId !== null
+        && (!isCanonicalUuid(pinned) || identity.clientId.toLowerCase() !== pinned))
+      return json({ ok: false, error: "owner_primary_session_required" }, 403);
+  }
   return identity.subjectId;
 }
 

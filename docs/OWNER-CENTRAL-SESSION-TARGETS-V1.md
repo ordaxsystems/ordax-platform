@@ -35,8 +35,11 @@ A resposta omite o hash do marcador privado da sessão. O
 `POST /v3/owner/central-session-selections` recebe **exatamente**
 `{client_id,challenge_id,device_id}`, sem campos extras ou parâmetros de
 query. O Worker injeta a identidade Owner a partir de JWT assinado; no POST/GET
-de seleção exige ainda **sessão primária Owner** (claim assinado `client_id`
-ausente), rejeitando tokens OAuth delegados ao MCP;
+de seleção exige ainda **sessão Owner**: JWT direto da conta ou JWT OAuth PKCE
+assinado para o cliente de primeira parte autorizado em
+`PRODUCT_OWNER_OAUTH_CLIENT_ID` (configuração pública canônica no Worker).
+Clientes OAuth delegados ao ChatGPT não autorizam esta rota; um
+`client_id` inexistente ou divergente falha fechado;
 a função `ordax_owner_select_central_device_v1` trava a mesma linha com
 `FOR UPDATE`, revalida consentimento, grant de ação pelo helper SSOT, presença
 fresca e digest do Runtime, e torna o ticket `pending` por **2 minutos**.
