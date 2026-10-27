@@ -68,6 +68,11 @@ begin
     or not private.ordax_trusted_actor_auth_eligible_v1(p_owner_user_id)
  then return jsonb_build_object('ok',false,'error','central_session_invalid'); end if;
 
+ -- Owner+client queue is serialized with the Owner selector. A second
+ -- session opening while a choice is being made must not evade ambiguity.
+ perform pg_catalog.pg_advisory_xact_lock(
+   pg_catalog.hashtext('central-owner-queue:'||p_owner_user_id::text||':'||p_client_id)
+ );
  perform pg_catalog.pg_advisory_xact_lock(
    pg_catalog.hashtext(p_owner_user_id::text||':'||p_client_id||':'||p_session_sha256)
  );
@@ -301,6 +306,22 @@ begin
     where c.user_id=p_owner_user_id and c.client_id=p_client_id::uuid
       and c.revoked_at is null
   ) then return jsonb_build_object('ok',false,'error','owner_central_client_not_consented'); end if;
+
+  -- Use the same queue lock as challenge opening. When two different
+  -- provider sessions are waiting, no Owner screen currently proves which
+  -- belongs to which conversation. Never pick an arbitrary UUID.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtext('central-owner-queue:'||p_owner_user_id::text||':'||p_client_id)
+  );
+  if (
+    select pg_catalog.count(*)
+      from private.ordax_central_device_session_challenges c
+     where c.owner_user_id=p_owner_user_id and c.client_id=p_client_id
+       and c.state='awaiting_owner' and c.expires_at>v_now
+  )<>1 then
+    return jsonb_build_object('ok',false,
+      'error','owner_central_selection_ambiguous');
+  end if;
 
   -- Locks serialize two browsers choosing two different PCs for one challenge.
   select c.* into v_challenge

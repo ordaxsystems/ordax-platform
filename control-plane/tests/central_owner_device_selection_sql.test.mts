@@ -175,6 +175,24 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     ]);
     assert.equal(selections.filter(x=>x.ok).length,1,"concurrent Owner choices have one winner");
     assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where state='pending' and session_sha256=$1",[secondHash])).rows[0].total,1);
+    // Two distinct provider sessions for this OAuth client are currently
+    // indistinguishable in the Owner picker. Refuse an arbitrary ticket.
+    const ambiguousA=await open("1".repeat(64));
+    const ambiguousB=await open("2".repeat(64));
+    assert.equal(ambiguousA.status,"awaiting_owner");
+    assert.equal(ambiguousB.status,"awaiting_owner");
+    assert.equal((await list()).count,2);
+    assert.equal((await choose(owner,client,ambiguousA.challenge_id,desktop)).error,
+      "owner_central_selection_ambiguous",
+      "two waiting conversations cannot be selected without an identity proof");
+    assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where state='pending' and session_sha256 in ($1,$2)",
+      ["1".repeat(64),"2".repeat(64)])).rows[0].total,0,
+      "ambiguous Owner action must not mint a pending Device ticket");
+    await db.query("update private.ordax_central_device_session_challenges set state='expired' where challenge_id=$1",
+      [ambiguousB.challenge_id]);
+    assert.equal((await choose(owner,client,ambiguousA.challenge_id,desktop)).ok,true,
+      "one remaining unexpired Owner ticket can be selected");
+
     // Expired Owner ticket may not be rescued by knowledge of its UUID.
     const thirdHash="c".repeat(64);
     const waiting3=await open(thirdHash);
@@ -187,6 +205,8 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     assert.notEqual(replacement.challenge_id,waiting3.challenge_id,
       "expired ticket cannot be revived/reused");
 
+    await db.query("update private.ordax_central_device_session_challenges set state='expired' where challenge_id=$1",
+      [replacement.challenge_id]);
     const fourthHash="d".repeat(64);
     const waiting4=await open(fourthHash);
     assert.equal(waiting4.status,"awaiting_owner");

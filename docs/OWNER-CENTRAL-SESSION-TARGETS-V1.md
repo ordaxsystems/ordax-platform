@@ -45,6 +45,15 @@ a função `ordax_owner_select_central_device_v1` trava a mesma linha com
 fresca e digest do Runtime, e torna o ticket `pending` por **2 minutos**.
 Seleções simultâneas não podem sobrescrever o alvo vencedor.
 
+Quando houver **dois ou mais tickets de sessões distintas** aguardando
+escolha para o mesmo Owner+cliente OAuth, o seletor recusa com
+`owner_central_selection_ambiguous`: sem prova visível da conversa,
+escolher só por UUID não pode bindar a sessão errada. A abertura dos desafios
+e a escolha compartilham um lock transacional por Owner+cliente para que duas
+aberturas concorrentes não escapem da checagem. Um ticket expirado não conta
+para essa ambiguidade. Esse bloqueio não substitui uma UI de identificação
+segura da sessão, necessária antes do rollout.
+
 A seleção **não equivale** a atestação nem despacho. O Runtime mantém a
 rota Device original de polling/confirm e só pode confirmar com credencial do
 dispositivo selecionado. Confirmação revalida grant atual; resolução da
