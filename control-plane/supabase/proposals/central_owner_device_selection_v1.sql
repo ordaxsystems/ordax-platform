@@ -73,6 +73,7 @@ begin
  perform pg_catalog.pg_advisory_xact_lock(
    pg_catalog.hashtext('central-owner-queue:'||p_owner_user_id::text||':'||p_client_id)
  );
+ v_now:=pg_catalog.clock_timestamp();
  perform pg_catalog.pg_advisory_xact_lock(
    pg_catalog.hashtext(p_owner_user_id::text||':'||p_client_id||':'||p_session_sha256)
  );
@@ -313,16 +314,7 @@ begin
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtext('central-owner-queue:'||p_owner_user_id::text||':'||p_client_id)
   );
-  if (
-    select pg_catalog.count(*)
-      from private.ordax_central_device_session_challenges c
-     where c.owner_user_id=p_owner_user_id and c.client_id=p_client_id
-       and c.state='awaiting_owner' and c.expires_at>v_now
-  )<>1 then
-    return jsonb_build_object('ok',false,
-      'error','owner_central_selection_ambiguous');
-  end if;
-
+  v_now:=pg_catalog.clock_timestamp();
   -- Locks serialize two browsers choosing two different PCs for one challenge.
   select c.* into v_challenge
   from private.ordax_central_device_session_challenges c
@@ -333,6 +325,15 @@ begin
   if v_challenge.state<>'awaiting_owner' or v_challenge.device_id is not null
     or v_challenge.expires_at<=v_now
   then return jsonb_build_object('ok',false,'error','owner_central_selection_not_pending'); end if;
+  if (
+    select pg_catalog.count(*)
+      from private.ordax_central_device_session_challenges c
+     where c.owner_user_id=p_owner_user_id and c.client_id=p_client_id
+       and c.state='awaiting_owner' and c.expires_at>v_now
+  )<>1 then
+    return jsonb_build_object('ok',false,
+      'error','owner_central_selection_ambiguous');
+  end if;
 
   select b.* into v_binding from private.ordax_central_conversation_bindings b
   where b.owner_user_id=p_owner_user_id and b.client_id=p_client_id
