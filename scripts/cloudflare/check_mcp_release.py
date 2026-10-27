@@ -109,10 +109,19 @@ def validate(foundation:dict,config:dict)->bool:
     if issuer!="https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1" or release.get("oauth_issuer")!=issuer:
         raise McpReleaseError("mcp_wrong_oauth_issuer")
     vars=config.get("vars") or {}
+    # This is a public OAuth client identifier, never a credential or grant.
+    # Source of truth for the published MCP Worker is wrangler.mcp.toml.
+    owner_client=vars.get("PRODUCT_OWNER_OAUTH_CLIENT_ID")
+    if (not isinstance(owner_client,str)
+        or not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            owner_client)):
+        raise McpReleaseError("mcp_owner_oauth_client_not_canonical")
     if vars != {
         "PRODUCT_AUTH_ISSUER":issuer,
         "PRODUCT_AUTH_AUDIENCE":"authenticated",
         "PRODUCT_AUTH_JWKS_URL":issuer+"/.well-known/jwks.json",
+        "PRODUCT_OWNER_OAUTH_CLIENT_ID":owner_client,
     }:
         raise McpReleaseError("mcp_auth_vars_not_canonical")
     hyperdrive=foundation.get("live_evidence",{}).get("hyperdrive",{})
