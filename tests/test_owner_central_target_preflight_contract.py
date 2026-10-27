@@ -25,6 +25,26 @@ class OwnerCentralTargetsContract(unittest.TestCase):
         self.assertIn("owner_choice_performed',false",sql)
         self.assertIn("dispatch_authorized',false",sql)
 
+    def test_owner_pkce_pin_is_only_on_production_mcp_worker(self):
+        import re
+        import tomllib
+        mcp_config = tomllib.loads((ROOT /
+            "control-plane/cloudflare/wrangler.mcp.toml").read_text("utf-8"))
+        other_config = tomllib.loads((ROOT /
+            "control-plane/cloudflare/wrangler.toml").read_text("utf-8"))
+        self.assertEqual(mcp_config["name"], "ordax-mcp")
+        self.assertEqual(mcp_config["main"], "src/product_mcp_entry.ts")
+        pinned = mcp_config["vars"].get("PRODUCT_OWNER_OAUTH_CLIENT_ID")
+        self.assertIsInstance(pinned, str)
+        self.assertRegex(pinned, r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
+        # Do not put Owner-session authority on the unshipped legacy Worker.
+        self.assertNotIn("PRODUCT_OWNER_OAUTH_CLIENT_ID", other_config["vars"])
+        source = OWNER.read_text(encoding="utf-8")
+        self.assertIn("env.PRODUCT_OWNER_OAUTH_CLIENT_ID", source)
+        self.assertIn("identity.clientId.toLowerCase() !== pinned", source)
+        self.assertIn("owner_primary_session_required", source)
+        self.assertIn('CENTRAL_OWNER_SELECTION_ENABLED !== "enabled"', source)
+
     def test_disabled_owner_only_exact_client_route(self):
         source = OWNER.read_text(encoding="utf-8")
         entry = ENTRY.read_text(encoding="utf-8")
