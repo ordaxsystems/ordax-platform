@@ -13,6 +13,7 @@
  */
 export { ProductDeviceWake } from "./product_device_wake.ts";
 import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
+import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
 import { handleProductOwnerMcpUsageRead, PRODUCT_OWNER_MCP_USAGE_PATH } from "./product_mcp_usage_read.ts";
@@ -184,6 +185,12 @@ async function mcpToolName(request: Request): Promise<string | null> {
  * after the canonical PostgreSQL binding has been confirmed by that Runtime.
  * A missing, invalid or revoked OAuth/session identity never triggers recovery.
  */
+type OwnerWaitingResolution = Readonly<{
+  ok: false;
+  error: "central_session_owner_selection_required";
+  challenge_id?: string;
+}>;
+
 type SessionRecoveryDependencies = Readonly<{
   resolve?: typeof resolveCentralSessionFromMcp;
   open?: typeof openCentralSessionFromMcp;
@@ -215,7 +222,7 @@ export async function resolveOrBootstrapAttestedSession(
   request: Request,
   env: Env,
   deps: SessionRecoveryDependencies = {},
-): Promise<Awaited<ReturnType<typeof resolveCentralSessionFromMcp>>> {
+): Promise<Awaited<ReturnType<typeof resolveCentralSessionFromMcp>> | OwnerWaitingResolution> {
   const resolve = deps.resolve ?? resolveCentralSessionFromMcp;
   let result = await resolve(request.clone(), env);
   if (result.ok || result.error !== "central_session_unbound") return result;
@@ -237,8 +244,14 @@ export async function resolveOrBootstrapAttestedSession(
   }
   // MCP may request a ticket, but only a separately signed Owner can choose
   // the target; do not poll for 24 seconds or infer a PC from MCP arguments.
-  if ((payload as Record<string, unknown>).status === "awaiting_owner")
-    return { ok: false as const, error: "central_session_owner_selection_required" };
+  if ((payload as Record<string, unknown>).status === "awaiting_owner") {
+    const challengeId = (payload as Record<string, unknown>).challenge_id;
+    // A challenge UUID is only an Owner-visible correlation reference, never
+    // an access grant or the private ChatGPT session marker/hash.
+    return { ok: false as const, error: "central_session_owner_selection_required",
+      ...(isCanonicalUuid(challengeId) ? { challenge_id: challengeId } : {}),
+    };
+  }
   const wait = deps.wait ?? waitForSessionConfirmation;
   for (let attempt = 0; attempt < SESSION_CONFIRMATION_ATTEMPTS; attempt += 1) {
     await wait(SESSION_CONFIRMATION_INTERVAL_MS);
@@ -362,6 +375,7 @@ export function createCanonicalProductMcpGateway(
         let trusted: AttestedMcpDevice | null = null;
         let pending = false;
         let trustFailure: string | null = null;
+        let ownerChallengeId: string | null = null;
         try {
           const resolved = await resolveOrBootstrapAttestedSession(request.clone(), env, recoveryDependencies);
           if (resolved.ok) {
@@ -374,6 +388,10 @@ export function createCanonicalProductMcpGateway(
             pending = resolved.error === "central_session_pending";
             if (CENTRAL_SESSION_REMEDIATION_ERRORS.has(resolved.error)) {
               trustFailure = resolved.error;
+              if (resolved.error === "central_session_owner_selection_required"
+                  && "challenge_id" in resolved && isCanonicalUuid(resolved.challenge_id)) {
+                ownerChallengeId = resolved.challenge_id;
+              }
             }
           }
         } catch {
@@ -384,7 +402,10 @@ export function createCanonicalProductMcpGateway(
           createAction: pending
             ? async () => respond({ ok: false, error: "central_session_pending" }, 409)
             : trustFailure
-              ? async () => respond({ ok: false, error: trustFailure }, 409)
+              ? async () => respond({ ok: false, error: trustFailure,
+                  ...(trustFailure === "central_session_owner_selection_required" && ownerChallengeId
+                    ? { challenge_id: ownerChallengeId, action_dispatched: false } : {}),
+                }, 409)
               : ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
               ? createAttestedProjectActionHandler(env, trusted)
               : createAttestedDeviceActionHandler(env, trusted),
