@@ -9,7 +9,7 @@ const {PGlite}=require("@electric-sql/pglite");
 const migration=(name:string)=>fs.readFileSync(
   new URL("../supabase/migrations/"+name,import.meta.url),"utf8");
 const proposed=fs.readFileSync(new URL(
-  "../supabase/proposals/owner_central_session_targets_v1.sql",import.meta.url),"utf8");
+  "../supabase/migrations/20261028145500_owner_central_session_targets_v1.sql",import.meta.url),"utf8");
 const findFunction=(source:string,name:string)=>{
   const escaped=name.replaceAll(".","\\.");
   const found=source.match(new RegExp(

@@ -1,5 +1,5 @@
--- Candidate only: read-only Owner visibility into the existing Central grant authority.
--- This is NOT a migration and MUST NOT be deployed before review/approval.
+-- Governed additive read-only Owner visibility into existing Central grant authority.
+-- Owner read route remains default-OFF until explicit consented rollout.
 -- Runtime attestation and signed MCP session marker remain the only binding path.
 begin;
 

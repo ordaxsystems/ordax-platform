@@ -1,7 +1,7 @@
--- Candidate ONLY, not an applied migration. Owner selection is an extension of
+-- Owner selection migration: extension of
 -- the existing Central device-attested challenge; no parallel authority or grant.
--- REVIEW GATES: proposal SQL, 2-PC PGlite tests, signed Owner E2E, Runtime
--- device confirmation, security review and controlled rollout are required.
+-- REVIEW GATES: PGlite tests, signed Owner E2E, Runtime
+-- device confirmation, security review and controlled rollout are required before FLAG enablement.
 begin;
 
 do $preflight$

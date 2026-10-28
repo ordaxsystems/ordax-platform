@@ -714,6 +714,28 @@
         "path": "control-plane/supabase/migrations/20261022201500_product_mcp_usage_self_read_v1.sql",
         "blob_sha": "307421bfe91c5479ca6b3925886a89651b225ed4"
       }
+    },
+    {
+      "name": "20261028145500_owner_central_session_targets_v1",
+      "applied_version": "20261028180155",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261028145500_owner_central_session_targets_v1.sql",
+        "blob_sha": "a27deaaf10d1b7990a67b3bdddf12d977ed6ada2"
+      }
+    },
+    {
+      "name": "20261028145600_central_owner_device_selection_v1",
+      "applied_version": "20261028180213",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261028145600_central_owner_device_selection_v1.sql",
+        "blob_sha": "23fe7424a65cd957bd88187be3461f885d2775fb"
+      }
     }
   ]
 }
