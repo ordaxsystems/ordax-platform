@@ -24,6 +24,10 @@ PRODUCT_AUTH_ISSUER = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1"
 PRODUCT_AUTH_AUDIENCE = "authenticated"
 # Public first-party Owner OAuth client used by native PKCE (not a secret).
 PRODUCT_OWNER_OAUTH_CLIENT_ID = "202fd3e1-b058-4531-8750-82c57e4b6ca0"
+# Owner-signed session selection only. These do NOT grant or dispatch actions.
+# Rollback: remove both entries and redeploy this SAME Worker.
+CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED = "enabled"
+CENTRAL_OWNER_SELECTION_ENABLED = "enabled"
 PRODUCT_AUTH_JWKS_URL = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1/.well-known/jwks.json"
 
 [[hyperdrive]]
