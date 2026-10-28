@@ -7,6 +7,7 @@ import {
   openCentralSessionFromMcp,
 } from "../cloudflare/src/product_central_device_session.ts";
 import { resolveOrBootstrapAttestedSession } from "../cloudflare/src/product_mcp_entry.ts";
+import { handleOrdaxMcp } from "../cloudflare/src/mcp_http.ts";
 import {env,owner,client,token,withIssuer} from "./product_mcp_test_fixtures.mts";
 
 const challenge="22222222-2222-4222-8222-222222222222";
@@ -134,8 +135,44 @@ test("awaiting Owner returns a bounded remediation immediately without polling/r
     },
     wait:async()=>{waited++;throw Error("must not poll while Owner choice is pending");},
   });
-  assert.deepEqual(result,{ok:false,error:"central_session_owner_selection_required"});
+  assert.deepEqual(result,{ok:false,error:"central_session_owner_selection_required",
+    challenge_id:challenge});
   assert.equal(opened,1);
   assert.equal(resolved,1);
   assert.equal(waited,0);
+});
+
+
+test("MCP tool denial exposes only its exact Owner challenge reference, never session marker or authority",async()=>{
+  let calls=0;
+  const gate=(challengeId:unknown)=>handleOrdaxMcp(new Request("https://mcp.ordax.com.br/mcp",{
+    method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({jsonrpc:"2.0",id:5,method:"tools/call",params:{
+      name:"computer_access_status",arguments:{device_id:device},
+      _meta:{"openai/session":"private-provider-correlation-must-not-leak"},
+    }}),
+  }),{
+    session:async()=>Response.json({ok:true,session:{subject_id:owner,client_id:client}}),
+    targets:async()=>{throw Error("unexpected targets");},
+    getAction:async()=>{throw Error("unexpected action read");},
+    createAction:async()=>{
+      calls++;
+      return Response.json({ok:false,error:"central_session_owner_selection_required",
+        challenge_id:challengeId,action_dispatched:false},{status:409});
+    },
+  },new Set(["computer_access_status"]));
+  for(const [id,expected] of [[challenge,challenge],["not-a-challenge",null]] as const){
+    const response=await gate(id);
+    const payload=await response.json() as any;
+    const result=payload.result?.structuredContent;
+    assert.equal(result?.error,"central_session_owner_selection_required");
+    assert.equal(result?.ok,false);
+    assert.equal(result?.action_dispatched,false);
+    assert.equal(result?.attested,false);
+    assert.equal(result?.challenge_id,expected ?? undefined);
+    assert.equal(JSON.stringify(result).includes("private-provider-correlation"),false);
+    assert.equal(JSON.stringify(result).includes("session_sha256"),false);
+    assert.equal(payload.result?.isError,true);
+  }
+  assert.equal(calls,2);
 });

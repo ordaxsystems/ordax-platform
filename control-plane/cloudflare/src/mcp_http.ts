@@ -881,6 +881,18 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
           : "wait_for_device_session_confirmation",
       }, true);
     }
+    if (createdPayload.error === "central_session_owner_selection_required") {
+      // The authenticated conversation gets its *own* opaque challenge UUID.
+      // The Owner CLI must match this exact reference before consent/selection;
+      // neither the model nor this response receives device authority.
+      return textToolResult({
+        ok: false, error: "central_session_owner_selection_required",
+        ...(isCanonicalUuid(createdPayload.challenge_id)
+          ? { challenge_id: createdPayload.challenge_id } : {}),
+        required_action: "match_challenge_in_authenticated_owner_cli",
+        action_dispatched: false, attested: false,
+      }, true);
+    }
     if (spec.projectRequired && createdPayload.error === "product_project_scope_not_found") {
       // A missing Owner-managed Space/project/repository/device association
       // precedes grant evaluation. Never suggest a Windows global grant,
