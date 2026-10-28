@@ -1,10 +1,10 @@
-# Central session — Owner target inspection (proposta não implantada)
+# Central session — Owner target inspection (migrações governadas; recursos OFF)
 
 O problema de [#291](https://github.com/ordaxsystems/ordax-platform/issues/291) possui dois clientes OAuth independentes e um grant de ação no Notebook offline, enquanto o Desktop só tem discovery para o cliente conectado. Conceder mais um grant de ação sem uma seleção atestada criaria `central_device_target_ambiguous`.
 
 ## Primeira fronteira candidata (somente leitura)
 
-O endpoint `GET /v3/owner/central-session-targets?client_id=<UUID>` permanece **OFF** salvo `CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED=enabled`, e a proposta SQL em `control-plane/supabase/proposals/owner_central_session_targets_v1.sql` **não está em migrations nem aplicada**. Exige JWT Owner verificado e client OAuth consentido ainda ativo; o identificador de Owner nunca vem do pedido. Retorna exclusivamente os dispositivos elegíveis pelo mesmo `private.ordax_central_device_grant_eligible_v1` usado na sessão real, com presença/Runtime readiness como metadados de disponibilidade. Não considera estar online como permissão nem escolhe automaticamente qualquer dispositivo.
+O endpoint `GET /v3/owner/central-session-targets?client_id=<UUID>` permanece **OFF** salvo `CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED=enabled`, e a migração `control-plane/supabase/migrations/20261028145500_owner_central_session_targets_v1.sql` exige implantação governada e feature flag explícito. Exige JWT Owner verificado e client OAuth consentido ainda ativo; o identificador de Owner nunca vem do pedido. Retorna exclusivamente os dispositivos elegíveis pelo mesmo `private.ordax_central_device_grant_eligible_v1` usado na sessão real, com presença/Runtime readiness como metadados de disponibilidade. Não considera estar online como permissão nem escolhe automaticamente qualquer dispositivo.
 
 O estado `owner_selection_required` é informativo: `attested=false`, `dispatch_authorized=false`, `owner_choice_performed=false`. Essa entrega **não seleciona, concede, revoga, confirma, enfileira nem executa**; não habilitar somente por estar na source. O erro de 26/10 exige implementação distinta de seleção explícita, curta e transacional do Owner para challenge vinculado a cliente+sessão, confirmação pelo dispositivo credenciado e posterior E2E. Sem ela, o sistema **deve seguir falhando fechado**.
 
@@ -15,9 +15,7 @@ Owner sem JWT, cliente OAuth diferente, duplicidade de parâmetros, target sem g
 
 ## Segunda fronteira candidata — Owner decide o dispositivo da sessão (27/10/2026)
 
-**Código candidato na MESMA PR #293, não aplicado em produção.** Proposta SQL em
-`control-plane/supabase/proposals/central_owner_device_selection_v1.sql`,
-sem migration aplicada, sem grants novos e sem alterações de credenciais.
+**Código consolidado na PR #293; migração preparada em `control-plane/supabase/migrations/20261028145600_central_owner_device_selection_v1.sql`.** Mesmo depois de aplicar a migração, a seleção continua proibida enquanto `CENTRAL_OWNER_SELECTION_ENABLED` estiver OFF; nenhum grant novo ou alteração de credencial decorre da migração.
 
 A estrutura canônica `private.ordax_central_device_session_challenges` passa a
 aceitar `state=awaiting_owner` com `device_id=NULL`. A unicidade por
@@ -64,7 +62,7 @@ de polling enquanto uma pessoa precisa decidir.
 
 **`CENTRAL_OWNER_SELECTION_ENABLED` permanece OFF** independentemente do
 flag read-only `CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED`. Nenhuma feature é
-habilitada pelo mero merge de source; a proposta de schema não foi aplicada.
+habilitada pelo mero merge de source; a migração exige implantação governada e validação de status antes da liberação.
 Antes da promoção, exigir revisão de migração contra a definição SQL ativa,
 E2E Owner e Runtime nativo com o cliente exato, tickets expirados/múltiplas
 sessões, confirmação e receipt de uma ação exclusivamente de leitura,
