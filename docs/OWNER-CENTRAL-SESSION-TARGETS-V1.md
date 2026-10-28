@@ -1,10 +1,10 @@
-# Central session — Owner target inspection (migrações governadas; recursos OFF)
+# Central session — Owner target inspection (migrações governadas; seleção Owner autenticada)
 
 O problema de [#291](https://github.com/ordaxsystems/ordax-platform/issues/291) possui dois clientes OAuth independentes e um grant de ação no Notebook offline, enquanto o Desktop só tem discovery para o cliente conectado. Conceder mais um grant de ação sem uma seleção atestada criaria `central_device_target_ambiguous`.
 
 ## Primeira fronteira candidata (somente leitura)
 
-O endpoint `GET /v3/owner/central-session-targets?client_id=<UUID>` permanece **OFF** salvo `CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED=enabled`, e a migração `control-plane/supabase/migrations/20261028145500_owner_central_session_targets_v1.sql` foi aplicada ao Supabase canônico em 28/10/2026 (ledger `20261028180155`), mas exige feature flag explícito ainda OFF. Exige JWT Owner verificado e client OAuth consentido ainda ativo; o identificador de Owner nunca vem do pedido. Retorna exclusivamente os dispositivos elegíveis pelo mesmo `private.ordax_central_device_grant_eligible_v1` usado na sessão real, com presença/Runtime readiness como metadados de disponibilidade. Não considera estar online como permissão nem escolhe automaticamente qualquer dispositivo.
+O endpoint `GET /v3/owner/central-session-targets?client_id=<UUID>` exige `CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED=enabled`, e a migração `control-plane/supabase/migrations/20261028145500_owner_central_session_targets_v1.sql` foi aplicada ao Supabase canônico em 28/10/2026 (ledger `20261028180155`), mas é habilitada exclusivamente no candidato de validação Owner via `wrangler.mcp.toml`. Exige JWT Owner verificado e client OAuth consentido ainda ativo; o identificador de Owner nunca vem do pedido. Retorna exclusivamente os dispositivos elegíveis pelo mesmo `private.ordax_central_device_grant_eligible_v1` usado na sessão real, com presença/Runtime readiness como metadados de disponibilidade. Não considera estar online como permissão nem escolhe automaticamente qualquer dispositivo.
 
 O estado `owner_selection_required` é informativo: `attested=false`, `dispatch_authorized=false`, `owner_choice_performed=false`. Essa entrega **não seleciona, concede, revoga, confirma, enfileira nem executa**; não habilitar somente por estar na source. O erro de 26/10 exige implementação distinta de seleção explícita, curta e transacional do Owner para challenge vinculado a cliente+sessão, confirmação pelo dispositivo credenciado e posterior E2E. Sem ela, o sistema **deve seguir falhando fechado**.
 
@@ -15,7 +15,7 @@ Owner sem JWT, cliente OAuth diferente, duplicidade de parâmetros, target sem g
 
 ## Segunda fronteira candidata — Owner decide o dispositivo da sessão (27/10/2026)
 
-**Código consolidado na PR #293; migração aplicada ao Supabase canônico (`20261028180213`) a partir de `control-plane/supabase/migrations/20261028145600_central_owner_device_selection_v1.sql`.** Mesmo depois de aplicar a migração, a seleção continua proibida enquanto `CENTRAL_OWNER_SELECTION_ENABLED` estiver OFF; nenhum grant novo ou alteração de credencial decorre da migração.
+**Código consolidado na PR #293; migração aplicada ao Supabase canônico (`20261028180213`) a partir de `control-plane/supabase/migrations/20261028145600_central_owner_device_selection_v1.sql`.** Mesmo depois de aplicar a migração, a seleção só é permitida para Owner autenticado em cliente de primeira parte, com `CENTRAL_OWNER_SELECTION_ENABLED=enabled`, challenge exato da conversa e grant ativo; nenhum grant novo ou alteração de credencial decorre da migração.
 
 A estrutura canônica `private.ordax_central_device_session_challenges` passa a
 aceitar `state=awaiting_owner` com `device_id=NULL`. A unicidade por
@@ -60,9 +60,7 @@ O MCP `resolveOrBootstrapAttestedSession` retorna
 `central_session_owner_selection_required` prontamente, sem ocupar 24 s
 de polling enquanto uma pessoa precisa decidir.
 
-**`CENTRAL_OWNER_SELECTION_ENABLED` permanece OFF** independentemente do
-flag read-only `CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED`. Nenhuma feature é
-habilitada pelo mero merge de source; a migração está aplicada, mas a ativação exige validação de autorização Owner e UX antes da liberação.
+**Rollout Owner de validação:** `CENTRAL_OWNER_SELECTION_ENABLED` e `CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED` são explícitos no `wrangler.mcp.toml`, sem qualquer concessão ou despacho automático. A conversa recebe somente o UUID opaco do challenge; o CLI Owner exige correspondência exata, cliente OAuth consentido e confirmação pelo proprietário. Se o grant estiver ausente, o cliente for delegado, houver duas sessões indistinguíveis, o challenge expirar ou o Device não estiver pronto, o fluxo segue fail-closed. A seleção `pending` não é attestation e o Runtime deve confirmar com credencial Native. Para desativar sem alterar grants, remover os dois flags do `wrangler.mcp.toml` e implantar o mesmo Worker.
 Antes da promoção, exigir revisão de migração contra a definição SQL ativa,
 E2E Owner e Runtime nativo com o cliente exato, tickets expirados/múltiplas
 sessões, confirmação e receipt de uma ação exclusivamente de leitura,

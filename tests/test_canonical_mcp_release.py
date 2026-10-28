@@ -47,14 +47,22 @@ class McpReleaseContract(unittest.TestCase):
             with self.subTest(pin=bad):
                 with self.assertRaisesRegex(McpReleaseError,"owner_oauth_client_not_canonical"):
                     validate(self.foundation,c)
-        for extra in ("CENTRAL_OWNER_SELECTION_ENABLED",
-                      "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED",
-                      "UNTRUSTED_SECOND_OWNER_AUTHORITY"):
-            c=copy.deepcopy(self.config)
-            c["vars"][extra]="enabled"
-            with self.subTest(extra=extra):
-                with self.assertRaisesRegex(McpReleaseError,"mcp_auth_vars_not_canonical"):
-                    validate(self.foundation,c)
+        for gate in ("CENTRAL_OWNER_SELECTION_ENABLED",
+                     "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED"):
+            self.assertEqual(self.config["vars"][gate],"enabled")
+            for invalid in (None,"disabled","true",""):
+                c=copy.deepcopy(self.config)
+                if invalid is None:
+                    del c["vars"][gate]
+                else:
+                    c["vars"][gate]=invalid
+                with self.subTest(gate=gate,invalid=invalid):
+                    with self.assertRaisesRegex(McpReleaseError,"owner_central_rollout_flags_incomplete"):
+                        validate(self.foundation,c)
+        c=copy.deepcopy(self.config)
+        c["vars"]["UNTRUSTED_SECOND_OWNER_AUTHORITY"]="enabled"
+        with self.assertRaisesRegex(McpReleaseError,"mcp_auth_vars_not_canonical"):
+            validate(self.foundation,c)
 
     def test_machine_endpoint_edge_policy_is_explicit_and_hostname_scoped(self):
         edge=self.foundation["mcp_release"].get("edge_machine_endpoint")

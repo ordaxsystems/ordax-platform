@@ -117,11 +117,18 @@ def validate(foundation:dict,config:dict)->bool:
             r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
             owner_client)):
         raise McpReleaseError("mcp_owner_oauth_client_not_canonical")
+    # This is one tightly scoped, authenticated Owner rollout. No model-supplied
+    # target is ever accepted, and Owner choice is NOT Device attestation.
+    if vars.get("CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED") != "enabled" \
+        or vars.get("CENTRAL_OWNER_SELECTION_ENABLED") != "enabled":
+        raise McpReleaseError("owner_central_rollout_flags_incomplete")
     if vars != {
         "PRODUCT_AUTH_ISSUER":issuer,
         "PRODUCT_AUTH_AUDIENCE":"authenticated",
         "PRODUCT_AUTH_JWKS_URL":issuer+"/.well-known/jwks.json",
         "PRODUCT_OWNER_OAUTH_CLIENT_ID":owner_client,
+        "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED":"enabled",
+        "CENTRAL_OWNER_SELECTION_ENABLED":"enabled",
     }:
         raise McpReleaseError("mcp_auth_vars_not_canonical")
     hyperdrive=foundation.get("live_evidence",{}).get("hyperdrive",{})
