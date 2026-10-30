@@ -1,5 +1,5 @@
 /**
- * Attested Product-MCP -> canonical project continuity enqueue boundary.
+ * Attested Product-MCP -> canonical native terminal/process enqueue boundary.
  *
  * This is intentionally separate from computer control. The ChatGPT model may
  * name a repository, but repository/project identity is resolved again by the
@@ -23,7 +23,6 @@ import {
   canonicalGithubRepositoryFullName,
   resolveOwnerProjectScope,
 } from "./product_owner_project_scope.ts";
-import { PROJECT_CONTINUITY_ACTIONS } from "./product_action_scope.ts";
 import { productCapabilityAccessMode } from "./product_owner_grant_profiles.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
@@ -48,7 +47,14 @@ type Dependencies = Readonly<{
 }>;
 
 const QUEUE_TTL_MS = 2 * 60 * 1000;
-const PROJECT_CONTINUITY_PROFILE = "project-continuity";
+const TERMINAL_PROFILE = "project-native-terminal";
+const PROCESS_PROFILE = "project-native-process";
+const PROJECT_NATIVE_ACTIONS = new Set(["terminal.exec", "process.start", "process.status",
+  "process.list", "process.logs", "process.write_stdin", "process.stop"]);
+function profileForAction(action: string): string | null {
+  if (action === "terminal.exec") return TERMINAL_PROFILE;
+  return PROJECT_NATIVE_ACTIONS.has(action) ? PROCESS_PROFILE : null;
+}
 const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled"]);
 
 function json(value: unknown, status = 200): Response {
@@ -91,24 +97,49 @@ function boundedStringArray(value: unknown, maxItems = 100, maxItemLength = 8192
     && value.every((item) => boundedString(item, maxItemLength, true));
 }
 
-/** Strict allowlist for the only project actions published by this tranche. */
+/** Keep terminal and supervised-process arguments typed and bounded. */
+function validEnv(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value) || Object.keys(value).length > 64) return false;
+  return Object.entries(value).every(([k, v]) =>
+    k.length >= 1 && k.length <= 128 && !/[\x00=]/u.test(k)
+    && (typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+    && (typeof v !== "number" || Number.isFinite(v))
+    && String(v).length <= 8192 && !String(v).includes("\x00"));
+}
+function validArgv(value: unknown, limit: number): boolean {
+  return Array.isArray(value) && value.length >= 1 && value.length <= limit
+    && value.every((v) => boundedString(v, 8192) && !v.includes("\x00"));
+}
 export function validAttestedProjectActionArguments(action: string, value: unknown): value is Json {
-  if (!PROJECT_CONTINUITY_ACTIONS.has(action) || !isRecord(value)) return false;
-
-  if (action === "agent.project_briefing") {
-    return keysOnly(value, ["query", "recall_limit"])
-      && (value.query === undefined || boundedString(value.query, 8192, true))
-      && (value.recall_limit === undefined || boundedInteger(value.recall_limit, 1, 50));
+  if (!PROJECT_NATIVE_ACTIONS.has(action) || !isRecord(value)) return false;
+  if (action === "terminal.exec") {
+    if (!keysOnly(value, ["argv", "command", "shell", "cwd", "timeout_seconds", "env"])
+        || (value.shell !== undefined && typeof value.shell !== "boolean")
+        || (value.cwd !== undefined && !boundedString(value.cwd, 4096))
+        || (value.timeout_seconds !== undefined && !boundedInteger(value.timeout_seconds, 1, 1800))
+        || !validEnv(value.env)) return false;
+    if (value.argv !== undefined) return value.command === undefined && value.shell !== true && validArgv(value.argv, 256);
+    return value.shell === true && boundedString(value.command, 32768);
   }
-  if (action === "continuity.get") return Object.keys(value).length === 0;
-  if (action === "continuity.update") {
-    return keysOnly(value, ["summary", "next_action", "completed", "blockers", "changed_paths"])
-      && boundedString(value.summary, 32768)
-      && (value.next_action === undefined || boundedString(value.next_action, 32768, true))
-      && (value.completed === undefined || boundedStringArray(value.completed))
-      && (value.blockers === undefined || boundedStringArray(value.blockers))
-      && (value.changed_paths === undefined || boundedStringArray(value.changed_paths, 100, 4096));
+  if (action === "process.start") {
+    return keysOnly(value, ["argv", "cwd", "env", "wait_seconds"])
+      && validArgv(value.argv, 128)
+      && (value.cwd === undefined || boundedString(value.cwd, 4096))
+      && validEnv(value.env)
+      && (value.wait_seconds === undefined || (typeof value.wait_seconds === "number"
+          && Number.isFinite(value.wait_seconds) && value.wait_seconds >= 0.1 && value.wait_seconds <= 5));
   }
+  if (action === "process.list") return Object.keys(value).length === 0;
+  if (action === "process.status" || action === "process.stop")
+    return keysOnly(value, ["process_id"]) && isCanonicalUuid(value.process_id);
+  if (action === "process.logs")
+    return keysOnly(value, ["process_id", "max_bytes"]) && isCanonicalUuid(value.process_id)
+      && (value.max_bytes === undefined || boundedInteger(value.max_bytes, 1024, 262144));
+  if (action === "process.write_stdin")
+    return keysOnly(value, ["process_id", "text", "newline"]) && isCanonicalUuid(value.process_id)
+      && boundedString(value.text, 65536, true)
+      && (value.newline === undefined || typeof value.newline === "boolean");
   return false;
 }
 
@@ -138,12 +169,13 @@ function validCreateBody(body: Json, trusted: AttestedMcpDevice): body is Json &
   return body.space_id === null || isCanonicalUuid(body.space_id);
 }
 
-function grantRequired(): Response {
+function grantRequired(action: string): Response {
   return json({
     ok: false,
     error: "product_grant_not_resolved",
-    required_profile: PROJECT_CONTINUITY_PROFILE,
-    owner_action: "authorize_in_ordax_studio",
+    required_profile: profileForAction(action),
+    // Do not require Windows Studio on native OrdaX OS devices.
+    owner_action: "authorize_in_ordax_owner_permissions",
   }, 403);
 }
 
@@ -159,7 +191,7 @@ export function catalogAllowsAttestedProjectAction(
 ): boolean {
   if (!isRecord(catalog) || catalog.ok !== true || !Array.isArray(catalog.targets)
     || catalog.targets.length < 1 || catalog.targets.length > 128
-    || !isCanonicalUuid(trustedDeviceId) || !PROJECT_CONTINUITY_ACTIONS.has(action)) return false;
+    || !isCanonicalUuid(trustedDeviceId) || !PROJECT_NATIVE_ACTIONS.has(action)) return false;
 
   const accessMode = productCapabilityAccessMode(action);
   const ids = new Set<string>();
@@ -178,7 +210,7 @@ export function catalogAllowsAttestedProjectAction(
   for (const rawGroup of target.grant_groups) {
     if (!isRecord(rawGroup) || !Array.isArray(rawGroup.capabilities)
       || rawGroup.capabilities.length < 1 || rawGroup.capabilities.length > 128) return false;
-    if (rawGroup.profile_key !== PROJECT_CONTINUITY_PROFILE) continue;
+    if (rawGroup.profile_key !== profileForAction(action)) continue;
     if (!isCanonicalUuid(rawGroup.space_id) || !isCanonicalUuid(rawGroup.project_id)) return false;
     if (rawGroup.space_id.toLowerCase() !== scope.spaceId || rawGroup.project_id.toLowerCase() !== scope.projectId) continue;
     const expires = rawGroup.valid_until;
@@ -209,7 +241,7 @@ function scopeError(value: unknown): string {
   }
 }
 
-/** Build the only createAction handler exposed for direct ChatGPT Web project continuity. */
+/** Build the attested Product action handler without a second execution path. */
 export function createAttestedProjectActionHandler(
   env: Env,
   trusted: AttestedMcpDevice | null,
@@ -262,7 +294,7 @@ export function createAttestedProjectActionHandler(
         clientId: identity.clientId,
       });
       if (!catalogAllowsAttestedProjectAction(catalog, trusted.deviceId, scope, body.action)) {
-        return grantRequired();
+        return grantRequired(body.action);
       }
 
       const opId = operationId().toLowerCase();
@@ -290,7 +322,7 @@ export function createAttestedProjectActionHandler(
 
       if (result.ok === false) {
         if (result.error === "product_grant_not_resolved" || result.error === "product_owner_auth_ineligible") {
-          return grantRequired();
+          return grantRequired(body.action);
         }
         if (result.error === "idempotency_conflict") return json({ ok: false, error: "idempotency_conflict" }, 409);
         return json({ ok: false, error: "product_action_unavailable" }, 503);
@@ -309,7 +341,7 @@ export function createAttestedProjectActionHandler(
     } catch (error) {
       if (error instanceof ProductPostgresError
         && (error.code === "product_grant_not_resolved" || error.code === "product_owner_auth_ineligible")) {
-        return grantRequired();
+        return grantRequired(body.action);
       }
       return json({ ok: false, error: "product_action_unavailable" }, 503);
     }

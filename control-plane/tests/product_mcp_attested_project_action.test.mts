@@ -14,229 +14,164 @@ const REQUEST = "55555555-5555-4555-8555-555555555555";
 const EFFECT = "66666666-6666-4666-8666-666666666666";
 const OPERATION = "77777777-7777-4777-8777-777777777777";
 const CLIENT = "chatgpt-product-mcp";
-const REPOSITORY = "ordaxsystems/ordax-gpt";
+const REPOSITORY = "ordaxsystems/ordax-runtime";
 const ENV = Object.freeze({});
 const TRUSTED = Object.freeze({ ownerUserId: OWNER, clientId: CLIENT, deviceId: DEVICE });
 const SCOPE = Object.freeze({ spaceId: SPACE, projectId: PROJECT, repositoryFullName: REPOSITORY });
 
 const identity = async () => ({
-  ok: true as const,
-  ownerUserId: OWNER,
-  clientKind: "product-mcp" as const,
-  clientId: CLIENT,
-  expiresAt: 2_000_000_000,
+  ok: true as const, ownerUserId: OWNER, clientKind: "product-mcp" as const,
+  clientId: CLIENT, expiresAt: 2_000_000_000,
 });
-
 const resolveProject = async () => ({
-  ok: true,
-  space_id: SPACE,
-  project_id: PROJECT,
-  repository_id: 42,
-  repository_full_name: REPOSITORY,
+  ok: true, space_id: SPACE, project_id: PROJECT, repository_full_name: REPOSITORY,
 });
-
-function actionRequest(
-  action: string,
-  args: Record<string, unknown> = {},
-  options: { deviceId?: string; project?: string; spaceId?: string | null } = {},
-) {
+function actionRequest(action: string, args: Record<string, unknown> = {},
+  options: { deviceId?: string; project?: string; spaceId?: string | null } = {}) {
   return new Request("https://mcp.example/v3/product/actions", {
-    method: "POST",
-    headers: { authorization: "Bearer test", "content-type": "application/json" },
+    method: "POST", headers: { authorization: "Bearer test", "content-type": "application/json" },
     body: JSON.stringify({
-      device_id: options.deviceId ?? DEVICE,
-      space_id: options.spaceId ?? null,
-      action,
-      project: options.project ?? REPOSITORY,
-      arguments: args,
+      device_id: options.deviceId ?? DEVICE, space_id: options.spaceId ?? null,
+      action, project: options.project ?? REPOSITORY, arguments: args,
     }),
   });
 }
-
-function grantGroup(
-  capability: string,
-  access_mode: "read" | "write",
-  options: { projectId?: string; spaceId?: string; profile?: string; validUntil?: string | null } = {},
-) {
+function grantGroup(capability: string, access_mode: "read" | "write",
+  options: { profile?: string; projectId?: string; spaceId?: string } = {}) {
   return {
-    profile_key: options.profile ?? "project-continuity",
+    profile_key: options.profile ?? (capability === "terminal.exec" ? "project-native-terminal" : "project-native-process"),
     space_id: options.spaceId ?? SPACE,
     project_id: options.projectId ?? PROJECT,
-    valid_until: options.validUntil ?? null,
+    valid_until: null,
     capabilities: [{ capability, access_mode }],
   };
 }
-
 function catalog(...groups: ReturnType<typeof grantGroup>[]) {
   return { ok: true, targets: [{ device_id: DEVICE, grant_groups: groups }] };
 }
 
-test("project continuity exposes only bounded briefing/get/update argument shapes", () => {
-  assert.equal(validAttestedProjectActionArguments("agent.project_briefing", {}), true);
-  assert.equal(validAttestedProjectActionArguments("agent.project_briefing", { query: "continue", recall_limit: 10 }), true);
-  assert.equal(validAttestedProjectActionArguments("continuity.get", {}), true);
-  assert.equal(validAttestedProjectActionArguments("continuity.update", { summary: "checkpoint" }), true);
-  assert.equal(validAttestedProjectActionArguments("continuity.update", {
-    summary: "checkpoint",
-    next_action: "test",
-    completed: ["a"],
-    blockers: [],
-    changed_paths: ["src/a.ts"],
-  }), true);
-
-  assert.equal(validAttestedProjectActionArguments("continuity.update", {}), false);
-  assert.equal(validAttestedProjectActionArguments("continuity.get", { extra: true }), false);
-  assert.equal(validAttestedProjectActionArguments("project.text_read", {}), false);
+test("terminal and supervisor schemas are explicit, strict and bounded", () => {
+  assert.equal(validAttestedProjectActionArguments("terminal.exec", { argv: ["python", "--version"] }), true);
+  assert.equal(validAttestedProjectActionArguments("terminal.exec", { command: "echo hello", shell: true }), true);
+  assert.equal(validAttestedProjectActionArguments("terminal.exec", { command: "echo hello" }), false);
+  assert.equal(validAttestedProjectActionArguments("terminal.exec", { argv: ["python"], shell: "false" }), false);
+  assert.equal(validAttestedProjectActionArguments("terminal.exec", { argv: ["python"], shell: true }), false);
+  assert.equal(validAttestedProjectActionArguments("terminal.exec", { argv: ["python"], command: "echo" }), false);
+  assert.equal(validAttestedProjectActionArguments("terminal.exec", { argv: ["python"], env: { "BAD=KEY": "x" } }), false);
+  assert.equal(validAttestedProjectActionArguments("terminal.exec", { argv: ["python"], env: { BAD: "x\u0000y" } }), false);
+  assert.equal(validAttestedProjectActionArguments("terminal.exec", { argv: ["python"], timeout_seconds: 1801 }), false);
+  assert.equal(validAttestedProjectActionArguments("process.start", { argv: ["python", "-i"] }), true);
+  assert.equal(validAttestedProjectActionArguments("process.start", { argv: [] }), false);
+  assert.equal(validAttestedProjectActionArguments("process.start", { argv: ["python"], wait_seconds: 6 }), false);
+  assert.equal(validAttestedProjectActionArguments("process.list", {}), true);
+  assert.equal(validAttestedProjectActionArguments("process.list", { extra: "bad" }), false);
+  assert.equal(validAttestedProjectActionArguments("process.status", { process_id: REQUEST }), true);
+  assert.equal(validAttestedProjectActionArguments("process.logs", { process_id: REQUEST, max_bytes: 1024 }), true);
+  assert.equal(validAttestedProjectActionArguments("process.logs", { process_id: REQUEST, max_bytes: 300000 }), false);
+  assert.equal(validAttestedProjectActionArguments("process.write_stdin", { process_id: REQUEST, text: "hello", newline: false }), true);
+  assert.equal(validAttestedProjectActionArguments("process.stop", { process_id: REQUEST }), true);
+  assert.equal(validAttestedProjectActionArguments("continuity.update", { summary: "not exposed" }), false);
 });
 
-test("briefing enqueue binds canonical project UUID and hidden repository attestation", async () => {
-  let observed: any = null;
+test("terminal enqueue uses exactly the bound Space/project, canonical hidden scope and write grant", async () => {
+  let received: any = null;
   const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
-    authenticate: identity,
-    resolveProject,
-    listTargets: async () => catalog(grantGroup("agent.project_briefing", "read")),
+    authenticate: identity, resolveProject,
+    listTargets: async () => catalog(grantGroup("terminal.exec", "write")),
     enqueue: async (_env, input) => {
-      observed = input;
-      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
-    },
-    now: () => 1_700_000_000_000,
-    operationId: () => OPERATION,
-  });
-
-  const response = await handler(actionRequest("agent.project_briefing", { query: "resume", recall_limit: 8 }));
-  assert.equal(response.status, 202);
-  assert.equal(observed.deviceId, DEVICE);
-  assert.equal(observed.spaceId, SPACE);
-  assert.equal(observed.projectId, PROJECT);
-  assert.equal(observed.capability, "agent.project_briefing");
-  assert.equal(observed.accessMode, "read");
-  assert.equal(observed.idempotencyKey, `mcp-project-read-${OPERATION}`);
-  assert.deepEqual(observed.payload, {
-    query: "resume",
-    recall_limit: 8,
-    _ordax_project_scope: {
-      project_id: PROJECT,
-      repository_full_name: REPOSITORY,
-    },
-  });
-  assert.equal(Object.hasOwn(observed.payload, "project"), false);
-});
-
-test("continuity update is write authority and cannot borrow a read grant", async () => {
-  assert.equal(catalogAllowsAttestedProjectAction(
-    catalog(grantGroup("continuity.update", "read")),
-    DEVICE,
-    SCOPE,
-    "continuity.update",
-  ), false);
-  assert.equal(catalogAllowsAttestedProjectAction(
-    catalog(grantGroup("continuity.update", "write")),
-    DEVICE,
-    SCOPE,
-    "continuity.update",
-  ), true);
-
-  let observed: any = null;
-  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
-    authenticate: identity,
-    resolveProject,
-    listTargets: async () => catalog(grantGroup("continuity.update", "write")),
-    enqueue: async (_env, input) => {
-      observed = input;
+      received = input;
       return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
     },
     operationId: () => OPERATION,
   });
-  const response = await handler(actionRequest("continuity.update", { summary: "durable checkpoint" }));
+  const response = await handler(actionRequest("terminal.exec", { argv: ["python", "--version"], cwd: "." }));
   assert.equal(response.status, 202);
-  assert.equal(observed.accessMode, "write");
-  assert.equal(observed.idempotencyKey, `mcp-project-write-${OPERATION}`);
-});
-
-test("project grant must match the exact resolved Space and project pair", () => {
-  assert.equal(catalogAllowsAttestedProjectAction(
-    catalog(grantGroup("continuity.get", "read")), DEVICE, SCOPE, "continuity.get",
-  ), true);
-  assert.equal(catalogAllowsAttestedProjectAction(
-    catalog(grantGroup("continuity.get", "read", { projectId: "88888888-8888-4888-8888-888888888888" })),
-    DEVICE, SCOPE, "continuity.get",
-  ), false);
-  assert.equal(catalogAllowsAttestedProjectAction(
-    catalog(grantGroup("continuity.get", "read", { spaceId: "99999999-9999-4999-8999-999999999999" })),
-    DEVICE, SCOPE, "continuity.get",
-  ), false);
-  assert.equal(catalogAllowsAttestedProjectAction(
-    catalog(grantGroup("continuity.get", "read", { profile: "project-browser-automation" })),
-    DEVICE, SCOPE, "continuity.get",
-  ), false);
-});
-
-test("model-selected device, invalid repository and conflicting Space fail before enqueue", async () => {
-  let touched = false;
-  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
-    authenticate: identity,
-    resolveProject: async (...args) => { touched = true; return resolveProject(...args); },
-    listTargets: async () => { touched = true; return catalog(); },
-    enqueue: async () => { touched = true; throw new Error("must not enqueue"); },
+  assert.equal(received.clientId, CLIENT);
+  assert.equal(received.deviceId, DEVICE);
+  assert.equal(received.projectId, PROJECT);
+  assert.equal(received.spaceId, SPACE);
+  assert.equal(received.capability, "terminal.exec");
+  assert.equal(received.accessMode, "write");
+  assert.equal(received.idempotencyKey, "mcp-project-write-" + OPERATION);
+  assert.deepEqual(received.payload, {
+    argv: ["python", "--version"], cwd: ".",
+    _ordax_project_scope: { project_id: PROJECT, repository_full_name: REPOSITORY },
   });
+  assert.equal(Object.hasOwn(received.payload, "project"), false);
+});
 
-  const otherDevice = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-  let response = await handler(actionRequest("continuity.get", {}, { deviceId: otherDevice }));
+test("supervised process reads cannot borrow write-only capability or another profile", () => {
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("process.status", "read")), DEVICE, SCOPE, "process.status"), true);
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("process.status", "write")), DEVICE, SCOPE, "process.status"), false);
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("terminal.exec", "read")), DEVICE, SCOPE, "terminal.exec"), false);
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("terminal.exec", "write", { profile: "full-computer-control" })),
+    DEVICE, SCOPE, "terminal.exec"), false);
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("terminal.exec", "write", { projectId: REQUEST })),
+    DEVICE, SCOPE, "terminal.exec"), false);
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("terminal.exec", "write", { spaceId: REQUEST })),
+    DEVICE, SCOPE, "terminal.exec"), false);
+});
+
+test("model-selected device/slug and mismatch fail before execution", async () => {
+  let enqueued = 0;
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity, resolveProject,
+    listTargets: async () => catalog(grantGroup("terminal.exec", "write")),
+    enqueue: async () => { enqueued++; throw new Error("must not execute"); },
+  });
+  let response = await handler(actionRequest("terminal.exec", { argv: ["python"] }, { deviceId: REQUEST }));
   assert.equal(response.status, 400);
-  assert.equal((await response.json()).error, "product_project_action_invalid");
-  assert.equal(touched, false);
-
-  response = await handler(actionRequest("continuity.get", {}, { project: "local-slug" }));
+  response = await handler(actionRequest("terminal.exec", { argv: ["python"] }, { project: "local-project-slug" }));
   assert.equal(response.status, 400);
-  assert.equal((await response.json()).error, "product_project_action_invalid");
-  assert.equal(touched, false);
-
-  touched = false;
-  response = await handler(actionRequest("continuity.get", {}, {
-    spaceId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-  }));
+  response = await handler(actionRequest("terminal.exec", { argv: ["python"] }, { spaceId: REQUEST }));
   assert.equal(response.status, 409);
-  assert.equal((await response.json()).error, "product_project_scope_mismatch");
-  assert.equal(touched, true);
+  assert.equal(enqueued, 0);
 });
 
-test("missing or wrong project grant fails closed with explicit owner remediation", async () => {
+test("unregistered repository/Space/device binding fails before grant listing or enqueue", async () => {
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject: async () => ({ ok: false, error: "owner_project_scope_not_found" }),
+    listTargets: async () => { assert.fail("cannot request grants without an attested canonical project scope"); },
+    enqueue: async () => { assert.fail("cannot enqueue actions without a registered project"); },
+  });
+  for (const [action, args] of [
+    ["process.list", {}],
+    ["terminal.exec", { argv: ["python", "--version"] }],
+  ] as const) {
+    const response = await handler(actionRequest(action, args));
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { ok: false, error: "product_project_scope_not_found" });
+  }
+});
+
+test("missing native terminal grant returns an explicit owner profile without enqueue", async () => {
   let enqueued = false;
   const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
-    authenticate: identity,
-    resolveProject,
-    listTargets: async () => catalog(grantGroup("continuity.get", "read", { profile: "project-browser-automation" })),
-    enqueue: async () => { enqueued = true; throw new Error("must not enqueue"); },
+    authenticate: identity, resolveProject,
+    listTargets: async () => catalog(grantGroup("terminal.exec", "write", { profile: "project-native-process" })),
+    enqueue: async () => { enqueued = true; throw new Error("not allowed"); },
   });
-  const response = await handler(actionRequest("continuity.get"));
+  const response = await handler(actionRequest("terminal.exec", { argv: ["python"] }));
   assert.equal(response.status, 403);
   assert.deepEqual(await response.json(), {
-    ok: false,
-    error: "product_grant_not_resolved",
-    required_profile: "project-continuity",
-    owner_action: "authorize_in_ordax_studio",
+    ok: false, error: "product_grant_not_resolved",
+    required_profile: "project-native-terminal", owner_action: "authorize_in_ordax_owner_permissions",
   });
   assert.equal(enqueued, false);
 });
 
-test("OAuth owner mismatch and unresolved canonical project both fail closed", async () => {
-  const wrongIdentity = async () => ({
-    ok: true as const,
-    ownerUserId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-    clientKind: "product-mcp" as const,
-    clientId: CLIENT,
-    expiresAt: 2_000_000_000,
+test("OAuth owner mismatch fails closed before grant resolution", async () => {
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: async () => ({ ...await identity(), ownerUserId: REQUEST }),
   });
-  const mismatch = createAttestedProjectActionHandler(ENV, TRUSTED, { authenticate: wrongIdentity });
-  const denied = await mismatch(actionRequest("continuity.get"));
-  assert.equal(denied.status, 403);
-  assert.equal((await denied.json()).error, "trusted_operation_required");
-
-  const unresolved = createAttestedProjectActionHandler(ENV, TRUSTED, {
-    authenticate: identity,
-    resolveProject: async () => ({ ok: false, error: "owner_project_scope_not_found" }),
-  });
-  const absent = await unresolved(actionRequest("continuity.get"));
-  assert.equal(absent.status, 403);
-  assert.equal((await absent.json()).error, "product_project_scope_not_found");
+  const response = await handler(actionRequest("terminal.exec", { argv: ["python"] }));
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error, "trusted_operation_required");
 });

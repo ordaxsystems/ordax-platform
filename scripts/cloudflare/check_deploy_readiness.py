@@ -131,19 +131,15 @@ def validate(data: dict, config: dict, source: str, account_id: str | None = Non
             or evidence.get("sslmode") != "require"):
         raise DeployGateError("Hyperdrive binding/evidence mismatch")
 
+    # Retired runtime WebSocket and artifact handlers have been deleted.
+    # No unused DO or R2 authority may be advertised until a canonical
+    # implementation and fresh storage contracts have been reviewed.
     bindings = (config.get("durable_objects") or {}).get("bindings") or []
-    if not isinstance(bindings, list) or {
-        (item.get("name"), item.get("class_name")) for item in bindings
-    } != {
-        ("DEVICE_SESSIONS", "DeviceSession"),
-    }:
-        raise DeployGateError("non-canonical Durable Objects bindings")
-
+    if bindings:
+        raise DeployGateError("retired Durable Objects bindings must be absent")
     buckets = config.get("r2_buckets") or []
-    if (not isinstance(buckets, list) or len(buckets) != 1
-            or buckets[0].get("binding") != "ARTIFACTS"
-            or buckets[0].get("bucket_name") != data.get("r2_bucket")):
-        raise DeployGateError("R2 bucket binding differs from canonical authority")
+    if buckets:
+        raise DeployGateError("retired artifact R2 binding must be absent")
 
     ready = data.get("deployment_ready")
     blockers = data.get("readiness_blockers")
@@ -215,6 +211,8 @@ def main() -> int:
 
     if not ready:
         print(f"Cloudflare production deployment BLOCKED ({len(data['readiness_blockers'])} blockers)")
+        for blocker in data["readiness_blockers"]:
+            print(f"  BLOCKER: {blocker}")
         if not args.allow_blocked:
             return 3
     else:

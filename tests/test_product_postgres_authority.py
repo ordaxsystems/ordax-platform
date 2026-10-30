@@ -1,5 +1,5 @@
 from pathlib import Path
-import hashlib
+import subprocess
 import json
 import unittest
 
@@ -123,14 +123,20 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
 
     def test_worker_adapter_uses_hyperdrive_without_backend_secret(self) -> None:
         lowered = self.adapter.lower()
-        self.assertIn('import postgres from "postgres"', lowered)
+        self.assertIn('import { openpostgressession } from "./data_postgres_driver.ts"', lowered)
+        driver = (ROOT / "control-plane/cloudflare/src/data_postgres_driver.ts").read_text(encoding="utf-8").lower()
+        self.assertIn('import { client } from "pg"', driver)
         self.assertIn("env.postgres?.connectionstring", lowered)
-        self.assertIn("sql.unsafe", lowered)
+        self.assertIn("await client.connect()", lowered)
+        self.assertIn("client.query(query, values)", lowered)
+        self.assertNotIn("sql.unsafe", lowered)
         self.assertNotIn("supabase_server_key", lowered)
         self.assertNotIn("supabase_service_role_key", lowered)
         self.assertNotIn("/rest/v1/rpc/", lowered)
         self.assertNotIn("apikey:", lowered)
-        self.assertNotIn("authorization", lowered)
+        # A Product authorization RPC name is not a backend HTTP credential.
+        self.assertNotIn('"authorization"', lowered)
+        self.assertNotIn("headers.authorization", lowered)
         self.assertNotIn("bearer ", lowered)
         self.assertNotIn("d1database", lowered)
 
@@ -405,10 +411,13 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
         )
 
         for path in source_files:
-            data = path.read_bytes()
-            git_blob = hashlib.sha1(
-                f"blob {len(data)}\0".encode("utf-8") + data
-            ).hexdigest()
+            # The registry records the canonical Git blob after attributes
+            # normalize Windows CRLF; raw worktree bytes are not Git object bytes.
+            relative = path.relative_to(ROOT).as_posix()
+            git_blob = subprocess.check_output(
+                ["git", "hash-object", f"--path={relative}", relative],
+                cwd=ROOT, text=True,
+            ).strip()
             self.assertEqual(
                 git_blob,
                 entries[path.stem]["source"]["blob_sha"],
@@ -519,7 +528,8 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
         self.assertIn("p_capabilities text[]", self.grant_groups_v2)
         self.assertIn("p_access_modes text[]", self.grant_groups_v2)
         self.assertIn('casts: ["uuid", "uuid", "uuid", "uuid", "text", "text", "text", "text[]", "text[]", "timestamptz"]', self.adapter)
-        self.assertIn("return sql.array(value, 25)", self.adapter)
+        self.assertIn("return encodePostgresTextArrayLiteral(value)", self.adapter)
+        self.assertNotIn("sql.array(value, 25)", self.adapter)
         self.assertIn("canonicalRemoteGrantGroup(input)", self.adapter)
         self.assertIn("canonicalRemoteClient(input.ownerUserId", self.adapter)
         self.assertNotIn("ordax_product_grants", self.adapter)

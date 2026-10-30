@@ -46,10 +46,8 @@ class LeastPrivilegeProductionDeployTests(unittest.TestCase):
             self.wrangler["vars"]["PRODUCT_AUTH_ISSUER"],
             f"https://{self.foundation['postgres']['project_ref']}.supabase.co/auth/v1",
         )
-        self.assertEqual(
-            [(b["binding"], b["bucket_name"]) for b in self.wrangler.get("r2_buckets", [])],
-            [("ARTIFACTS", self.foundation["r2_bucket"])],
-        )
+        self.assertFalse(self.wrangler.get("r2_buckets", []))
+        self.assertFalse(self.wrangler.get("durable_objects", {}).get("bindings", []))
         self.assertEqual(
             [(b["binding"], b["id"]) for b in self.wrangler.get("hyperdrive", [])],
             [(

@@ -7,11 +7,14 @@
  */
 import {
   authenticateProductDevice,
+  commitProjectWorkspaceResource,
   bindProductActionRuntimeProvenance,
   claimProductAction,
   progressProductAction,
   recordProductPresence,
   renewProductActionLease,
+  resolveOrchestratorReadAuthorization,
+  verifyProjectWorkspaceResource,
   reportProductAction,
   startProductAction,
   ProductPostgresError,
@@ -20,6 +23,9 @@ import {
 } from "./product_postgres_store.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
+import { projectWorkspaceGrantProjection } from "./project_workspace_grant_contract.ts";
+import { canonicalDeviceWorkspaceConfirmation } from "./project_workspace_issue_contract.ts";
+import { subscribeProductDeviceWake } from "./product_device_wake.ts";
 
 type Json = Record<string, unknown>;
 type RuntimeKind = "ordax-os" | "desktop-agent" | "mobile-client" | "other";
@@ -36,6 +42,21 @@ function respond(value: unknown, status = 200): Response {
       "x-content-type-options": "nosniff",
     },
   });
+}
+
+/**
+ * PostgreSQL jsonb cannot store the U+0000 character, including when it
+ * arrives JSON-escaped. Reject the invalid canonical result before any RPC
+ * to avoid misreporting malformed output as a database outage.
+ */
+export function isProductReportJsonbSafe(value: unknown): boolean {
+  if (typeof value === "string") return !value.includes(String.fromCharCode(0));
+  if (Array.isArray(value)) return value.every(isProductReportJsonbSafe);
+  if (value && typeof value === "object") {
+    return Object.entries(value).every(([key, item]) =>
+      isProductReportJsonbSafe(key) && isProductReportJsonbSafe(item));
+  }
+  return true;
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -145,24 +166,71 @@ async function wireJob(job: ProductRemoteJob): Promise<Json> {
   };
 }
 
+// Transitional wire compatibility: installed Runtime 1.30.3 sends the bounded
+// list while current Runtime sends the precomputed digest. Both represent the
+// same canonical digest; PostgreSQL still persists *only* the hash. Remove this
+// list branch after managed Runtime upgrades are proven in production.
+const LEGACY_HEARTBEAT_MAX_CAPABILITIES = 1024;
+const LEGACY_HEARTBEAT_MAX_NAME_CODEPOINTS = 160;
+const LEGACY_HEARTBEAT_MAX_BODY_BYTES = 48 * 1024;
+
+function compareCapabilityCodepoints(left: string, right: string): number {
+  const a = Array.from(left, char => char.codePointAt(0)!);
+  const b = Array.from(right, char => char.codePointAt(0)!);
+  for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
+    if (a[index] !== b[index]) return a[index] - b[index];
+  }
+  return a.length - b.length;
+}
+
+export async function canonicalDeviceHeartbeatDigest(body: Json): Promise<string | null> {
+  const modern = Object.prototype.hasOwnProperty.call(body, "capabilities_digest");
+  const legacy = Object.prototype.hasOwnProperty.call(body, "capabilities");
+  // Never trust an ambiguous schema or an empty/missing authority field.
+  if (modern === legacy) return null;
+  if (modern) {
+    const digest = typeof body.capabilities_digest === "string"
+      ? body.capabilities_digest.trim().toLowerCase() : "";
+    return HEX64.test(digest) ? digest : null;
+  }
+  // Only installed, authenticated devices reach this code path. A legacy
+  // heartbeat grants no new action, project, Space or user authority.
+  if (Object.keys(body).some(key =>
+    key !== "status" && key !== "agent_version" && key !== "capabilities")) return null;
+  const values = body.capabilities;
+  if (!Array.isArray(values) || values.length > LEGACY_HEARTBEAT_MAX_CAPABILITIES
+      || values.some(item => typeof item !== "string" || item.length === 0
+        || Array.from(item).length > LEGACY_HEARTBEAT_MAX_NAME_CODEPOINTS)) return null;
+  const normalized = [...new Set(values as string[])].sort(compareCapabilityCodepoints);
+  // Same SSOT as ordax_connector.capabilities.capability_digest:
+  // sorted unique strings, compact UTF-8 JSON, SHA-256.
+  return sha256Hex(JSON.stringify(normalized));
+}
+
 async function heartbeat(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
-  const body = await readBoundedJsonObject(request, 128 * 1024);
+  // Canonical agents send a 64-byte digest. The higher body ceiling exists
+  // solely for the bounded legacy format, not for new device capabilities.
+  const body = await readBoundedJsonObject(request, LEGACY_HEARTBEAT_MAX_BODY_BYTES);
   if (!body) return respond({ ok: false, error: "heartbeat_invalid" }, 400);
   const status = body.status;
   const agentVersion = typeof body.agent_version === "string" ? body.agent_version.trim() : "";
-  const actions = Array.isArray(body.capabilities) ? body.capabilities : null;
+  const capabilityDigest = await canonicalDeviceHeartbeatDigest(body);
+  // Older desktop Runtime heartbeats intentionally omit provenance and remain
+  // "desktop-agent". A Native OS Runtime must declare its actual kind; this
+  // metadata is never a capability grant or an attested action session.
+  const runtimeKind = body.runtime_kind === undefined ? "desktop-agent" : body.runtime_kind;
   if ((status !== "online" && status !== "busy" && status !== "offline")
       || agentVersion.length < 1 || agentVersion.length > 80
-      || !actions || actions.length > 1024
-      || !actions.every((item) => typeof item === "string" && item.length > 0 && item.length <= 160)) {
+      || capabilityDigest === null
+      || typeof runtimeKind !== "string"
+      || !RUNTIME_KINDS.has(runtimeKind as RuntimeKind)
+      || (body.runtime_kind !== undefined && !Object.prototype.hasOwnProperty.call(body, "capabilities_digest"))) {
     return respond({ ok: false, error: "heartbeat_invalid" }, 400);
   }
-  const normalized = [...new Set(actions as string[])].sort();
-  const capabilityDigest = await sha256Hex(JSON.stringify(normalized));
   const recorded = await recordProductPresence(env, {
     deviceId,
     online: status !== "offline",
-    runtimeKind: "desktop-agent",
+    runtimeKind: runtimeKind as RuntimeKind,
     agentVersion,
     capabilityDigest,
     force: status === "offline",
@@ -235,6 +303,125 @@ async function progress(request: Request, env: ProductPostgresEnv, deviceId: str
   return respond({ ok, ...(ok ? {} : { error: "lease_not_active" }) }, ok ? 200 : 409);
 }
 
+/** Product-workspace proof travels exclusively over the existing device-
+ * authenticated transport, never through public MCP/LLM/UI inputs. Lab/actor
+ * values are lookup keys; the SQL verifier owns their authorization.
+ */
+export type DeviceWorkspaceProofQuery = Readonly<{
+  ownerUserId: string;
+  actorId: string;
+  clientId: string;
+  labProjectId: string;
+  workspaceSessionId: string;
+  deviceId: string;
+  resourceId: string;
+}>;
+
+const RESOURCE_ID = /^resource_[A-Za-z0-9_-]{8,160}$/;
+const LAB_ID = /^[A-Za-z0-9_-]{1,180}$/;
+const WORKSPACE_PROOF_KEYS = new Set([
+  "owner_user_id", "actor_id", "client_id", "lab_project_id",
+  "workspace_session_id", "resource_id",
+]);
+const VERIFIED_GRANT_KEYS = new Set([
+  "grant_id", "owner_user_id", "space_id", "project_id",
+  "lab_project_id", "actor_id", "client_id", "workspace_session_id",
+  "device_id", "resource_id", "allowed_actions", "issued_by",
+  "issued_at", "valid_until", "revoked_at", "active",
+]);
+
+export function canonicalDeviceWorkspaceProofQuery(
+  body: unknown,
+  authenticatedDeviceId: string,
+): DeviceWorkspaceProofQuery | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)
+      || !isCanonicalUuid(authenticatedDeviceId)) return null;
+  const raw = body as Json;
+  if (Object.keys(raw).length !== WORKSPACE_PROOF_KEYS.size
+      || Object.keys(raw).some(key => !WORKSPACE_PROOF_KEYS.has(key))
+      || !isCanonicalUuid(raw.owner_user_id)
+      || !isCanonicalUuid(raw.actor_id)
+      || !isCanonicalUuid(raw.client_id)
+      || typeof raw.lab_project_id !== "string" || !LAB_ID.test(raw.lab_project_id)
+      || typeof raw.workspace_session_id !== "string" || !LAB_ID.test(raw.workspace_session_id)
+      || typeof raw.resource_id !== "string" || !RESOURCE_ID.test(raw.resource_id))
+    return null;
+  return Object.freeze({
+    ownerUserId: raw.owner_user_id, actorId: raw.actor_id, clientId: raw.client_id,
+    labProjectId: raw.lab_project_id, workspaceSessionId: raw.workspace_session_id,
+    deviceId: authenticatedDeviceId, resourceId: raw.resource_id,
+  });
+}
+
+export function projectWorkspaceVerifierResponse(
+  result: unknown,
+  query: DeviceWorkspaceProofQuery,
+): Json | null {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+  const raw = result as Json;
+  if (Object.keys(raw).length !== 3 || raw.ok !== true
+      || raw.schema !== "ordax.project-workspace-resource/1"
+      || !raw.grant || typeof raw.grant !== "object" || Array.isArray(raw.grant))
+    return null;
+  const grant = raw.grant as Json;
+  if (Object.keys(grant).length !== VERIFIED_GRANT_KEYS.size
+      || Object.keys(grant).some(key => !VERIFIED_GRANT_KEYS.has(key))
+      || !isCanonicalUuid(grant.space_id) || !isCanonicalUuid(grant.project_id))
+    return null;
+  const trusted = {
+    ownerUserId: query.ownerUserId, spaceId: grant.space_id,
+    projectId: grant.project_id, labProjectId: query.labProjectId,
+    actorId: query.actorId, clientId: query.clientId,
+    workspaceSessionId: query.workspaceSessionId, deviceId: query.deviceId,
+    resourceId: query.resourceId,
+  };
+  if (!projectWorkspaceGrantProjection(grant, trusted, Date.now())) return null;
+  return { ok: true, schema: "ordax.project-workspace-resource/1", grant };
+}
+
+async function workspaceResourceProof(
+  request: Request, env: ProductPostgresEnv, deviceId: string,
+): Promise<Response> {
+  const body = await readBoundedJsonObject(request, 2048);
+  const query = canonicalDeviceWorkspaceProofQuery(body, deviceId);
+  if (!query) return respond({ ok: false, error: "workspace_proof_invalid" }, 400);
+  // The SQL function is SECURITY DEFINER, read-only, and re-evaluates live
+  // consent/grant/revocation. There is no code path for issuing a grant here.
+  const result = await verifyProjectWorkspaceResource(env, query);
+  const proof = projectWorkspaceVerifierResponse(result, query);
+  return proof ? respond(proof)
+    : respond({ ok: false, error: "workspace_authorization_required" }, 403);
+}
+
+/** The source-only Device confirmation MUST be composed by the already
+ * enrolled trusted Runtime host after its native Owner picker and exact
+ * in-process opaque resource selection. An arbitrary JSON payload/Device
+ * bearer is NOT proof of a GUI event. Both SQL gates remain independent.
+ */
+async function workspaceResourceConfirmation(
+  request: Request, env: ProductPostgresEnv, deviceId: string,
+): Promise<Response> {
+  const body = await readBoundedJsonObject(request, 2048);
+  const input = canonicalDeviceWorkspaceConfirmation(body);
+  if (!input)
+    return respond({ ok: false, error: "workspace_confirmation_invalid" }, 400);
+  const committed = await commitProjectWorkspaceResource(env, {
+    deviceId, ...input,
+  });
+  return respond({ ok: committed, committed }, committed ? 200 : 403);
+}
+
+async function orchestratorAuthorization(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
+  const body = await readBoundedJsonObject(request, 4096);
+  const allowed = new Set(["job_id", "effect_id", "attempt_id", "lease_id",
+    "execution_epoch", "agent_instance_id", "boot_id"]);
+  const ctx = body ? executionContext(body) : null;
+  if (!body || !ctx || Object.keys(body).some(key => !allowed.has(key)))
+    return respond({ ok: false, error: "orchestrator_authorization_invalid" }, 400);
+  const result = await resolveOrchestratorReadAuthorization(env, {deviceId, ...ctx});
+  return respond(result, result.ok === true ? 200 : 403);
+}
+
 async function report(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
   const body = await readBoundedJsonObject(request, 640 * 1024);
   const ctx = body ? executionContext(body) : null;
@@ -265,6 +452,9 @@ async function report(request: Request, env: ProductPostgresEnv, deviceId: strin
   } catch {
     return respond({ ok: false, error: "report_invalid" }, 400);
   }
+  if (!isProductReportJsonbSafe(result)) {
+    return respond({ ok: false, error: "report_result_invalid_unicode" }, 422);
+  }
   const committed = await reportProductAction(env, {
     deviceId, ...ctx, reportId, status, result, resultSha256, errorCode,
   });
@@ -283,15 +473,38 @@ export async function handleProductDeviceTransport(
   request: Request,
   env: ProductPostgresEnv,
 ): Promise<Response> {
+  const path = new URL(request.url).pathname;
+  // Advisory signal subscribes through the same PostgreSQL-authenticated
+  // device ingress. No second credential, grant or job queue is introduced.
+  if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/wake") {
+    if (request.method !== "GET") return respond({ ok: false, error: "method_not_allowed" }, 405);
+    const auth = await authenticateDeviceRequest(request, env);
+    if (!auth.ok) return auth.response;
+    return subscribeProductDeviceWake(env, auth.deviceId, request);
+  }
   if (request.method !== "POST") return respond({ ok: false, error: "method_not_allowed" }, 405);
   const auth = await authenticateDeviceRequest(request, env);
   if (!auth.ok) return auth.response;
-  const path = new URL(request.url).pathname;
   try {
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/heartbeat") return heartbeat(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/claim") return claim(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/start") return start(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/lease") return lease(request, env, auth.deviceId);
+    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/orchestrator-read-authorization")
+      return orchestratorAuthorization(request, env, auth.deviceId);
+    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-confirm") {
+      if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled"
+          || env.WORKSPACE_RESOURCE_ISSUANCE_ENABLED !== "enabled")
+        return respond({ ok: false, error: "not_found" }, 404);
+      return workspaceResourceConfirmation(request, env, auth.deviceId);
+    }
+    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-proof") {
+      // The SQL is still a proposal. Deploying this source cannot enable the
+      // capability; explicit migration governance and this opt-in are required.
+      if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled")
+        return respond({ ok: false, error: "not_found" }, 404);
+      return workspaceResourceProof(request, env, auth.deviceId);
+    }
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/progress") return progress(request, env, auth.deviceId);
     if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/report"
         || path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/recover-report") {

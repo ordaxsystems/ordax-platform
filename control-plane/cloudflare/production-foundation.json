@@ -107,8 +107,8 @@
     "worker_postgres_adapter": {
       "transport": "hyperdrive",
       "binding": "POSTGRES",
-      "driver": "postgres",
-      "driver_version": "3.4.5",
+      "driver": "pg",
+      "driver_version": "8.23.1",
       "legacy_rest_backend_secret": false,
       "direct_table_mutation": false
     }

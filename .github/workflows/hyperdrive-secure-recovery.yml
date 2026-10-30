@@ -1,0 +1,38 @@
+# Manual, canonical credential reconciliation. Uses the existing Hyperdrive,
+# database, restricted role and MCP; never creates an alternate authority.
+name: Hyperdrive Secure Recovery
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ordax-hyperdrive-canonical-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Synchronize canonical PostgreSQL and Hyperdrive credential
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: cloudflare-v3
+    steps:
+      - name: Checkout reviewed recovery implementation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Verify fail-closed recovery and rollback contracts
+        run: python -m unittest tests.test_hyperdrive_credential_recovery
+
+      - name: Synchronize existing restricted PostgreSQL role and Hyperdrive
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/cloudflare/recover_mcp_hyperdrive.py

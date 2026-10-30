@@ -6,11 +6,19 @@ on:
     paths:
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_central_device_session.ts"
+      - "control-plane/cloudflare/src/product_central_device_session_store.ts"
+      - "control-plane/cloudflare/src/product_owner_grant_admin.ts"
+      - "control-plane/cloudflare/src/product_device_presence.ts"
+      - "control-plane/cloudflare/src/product_device_wake.ts"
+      - "control-plane/cloudflare/src/product_mcp_usage_read.ts"
+      - "control-plane/cloudflare/src/product_mcp_discovery_store.ts"
       - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
       - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
+      - "control-plane/cloudflare/src/product_device_transport.ts"
       - "control-plane/cloudflare/src/product_central_mcp.ts"
       - "control-plane/cloudflare/src/product_central_admission.ts"
       - "control-plane/cloudflare/src/product_mcp_scoped.ts"
@@ -19,9 +27,20 @@ on:
       - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/central_owner_device_selection_sql.test.mts"
+      - "control-plane/tests/owner_central_device_selection_route.test.mts"
+      - "control-plane/tests/owner_central_target_sql.test.mts"
+      - "control-plane/tests/owner_central_target_preflight.test.mts"
+      - "control-plane/tests/product_central_device_session.test.mts"
+      - "control-plane/tests/product_central_persisted_session.test.mts"
+      - "control-plane/tests/product_mcp_usage_meter_sql.test.mts"
+      - "control-plane/tests/product_mcp_usage_self_read.test.mts"
+      - "control-plane/tests/product_postgres_readiness.test.mts"
+      - "control-plane/tests/product_mcp_discovery_store.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_owner_grant_admin.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
+      - "control-plane/tests/product_device_transport.test.mts"
       - "control-plane/tests/product_central_mcp.test.mts"
       - "control-plane/tests/product_central_admission.test.mts"
       - "control-plane/tests/product_oauth_readiness.test.mts"
@@ -31,11 +50,19 @@ on:
     paths:
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_central_device_session.ts"
+      - "control-plane/cloudflare/src/product_central_device_session_store.ts"
+      - "control-plane/cloudflare/src/product_owner_grant_admin.ts"
+      - "control-plane/cloudflare/src/product_device_presence.ts"
+      - "control-plane/cloudflare/src/product_device_wake.ts"
+      - "control-plane/cloudflare/src/product_mcp_usage_read.ts"
+      - "control-plane/cloudflare/src/product_mcp_discovery_store.ts"
       - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
       - "control-plane/cloudflare/src/product_owner_grant_profiles.ts"
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
+      - "control-plane/cloudflare/src/product_device_transport.ts"
       - "control-plane/cloudflare/src/product_central_mcp.ts"
       - "control-plane/cloudflare/src/product_central_admission.ts"
       - "control-plane/cloudflare/src/product_mcp_scoped.ts"
@@ -44,9 +71,20 @@ on:
       - "control-plane/cloudflare/src/product_oauth_readiness.ts"
       - "control-plane/cloudflare/wrangler.product-mcp-canary.toml"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/central_owner_device_selection_sql.test.mts"
+      - "control-plane/tests/owner_central_device_selection_route.test.mts"
+      - "control-plane/tests/owner_central_target_sql.test.mts"
+      - "control-plane/tests/owner_central_target_preflight.test.mts"
+      - "control-plane/tests/product_central_device_session.test.mts"
+      - "control-plane/tests/product_central_persisted_session.test.mts"
+      - "control-plane/tests/product_mcp_usage_meter_sql.test.mts"
+      - "control-plane/tests/product_mcp_usage_self_read.test.mts"
+      - "control-plane/tests/product_postgres_readiness.test.mts"
+      - "control-plane/tests/product_mcp_discovery_store.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_owner_grant_admin.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
+      - "control-plane/tests/product_device_transport.test.mts"
       - "control-plane/tests/product_central_mcp.test.mts"
       - "control-plane/tests/product_central_admission.test.mts"
       - "control-plane/tests/product_oauth_readiness.test.mts"
@@ -61,14 +99,16 @@ jobs:
     name: OAuth Postgres MCP, attested interactive candidate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
       - name: Install only pinned Worker PostgreSQL dependency
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
       - name: Protocol, grants, fail-closed and signed OAuth regressions
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_central_mcp.test.mts control-plane/tests/product_central_admission.test.mts control-plane/tests/product_relay_canonical_mcp.test.mts control-plane/labs/relay/scoped-mcp.test.mts
+        run: node --test control-plane/tests/product_mcp_discovery_store.test.mts control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_usage_meter_sql.test.mts control-plane/tests/product_mcp_usage_self_read.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_postgres_readiness.test.mts control-plane/tests/product_central_mcp.test.mts control-plane/tests/product_central_admission.test.mts control-plane/tests/product_relay_canonical_mcp.test.mts control-plane/labs/relay/scoped-mcp.test.mts control-plane/tests/central_owner_device_selection_sql.test.mts control-plane/tests/owner_central_device_selection_route.test.mts control-plane/tests/owner_central_target_sql.test.mts control-plane/tests/owner_central_target_preflight.test.mts control-plane/tests/product_central_device_session.test.mts control-plane/tests/product_central_persisted_session.test.mts
       - name: Compile candidate with Wrangler without deploying
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.product-mcp-canary.toml --outdir .canary-bundle

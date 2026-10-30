@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { openPostgresSession } from "./data_postgres_driver.ts";
 import {
   authenticateProductRequest,
   type ProductAuthEnv,
@@ -29,7 +29,7 @@ export function canonicalGithubRepositoryFullName(value: unknown): string | null
   if (normalized.length < 3 || normalized.length > 140 || !GITHUB_REPOSITORY_RE.test(normalized)) {
     return null;
   }
-  return normalized;
+  return normalized.toLowerCase();
 }
 
 function configuredConnectionString(env: ProductPostgresEnv): string | null {
@@ -56,20 +56,14 @@ export async function resolveOwnerProjectScope(
     throw new Error("owner_project_scope_invalid");
   }
 
-  const sql = postgres(connectionString, {
-    max: 1,
-    connect_timeout: 5,
-    idle_timeout: 1,
-    prepare: true,
-  });
+  const client = openPostgresSession(connectionString);
   try {
-    const rows = await sql`
-      select public.ordax_resolve_owner_project_scope_v1(
-        ${ownerUserId}::uuid,
-        ${deviceId}::uuid,
-        ${repository}::text
-      ) as result
-    `;
+    await client.connect();
+    const response = await client.query(
+      "select public.ordax_resolve_owner_project_scope_v1($1::uuid, $2::uuid, $3::text) as result",
+      [ownerUserId, deviceId, repository],
+    );
+    const rows = response.rows;
     const value = (rows[0] as { result?: unknown } | undefined)?.result;
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("product_postgres_invalid_response");
@@ -80,11 +74,47 @@ export async function resolveOwnerProjectScope(
     throw new Error("product_postgres_unavailable");
   } finally {
     try {
-      await sql.end({ timeout: 1 });
+      await client.end();
     } catch {
       // Hyperdrive owns upstream pooling; cleanup must not mask the RPC result.
     }
   }
+}
+
+// SQL is the canonical authority, but its JSON envelope is not an API schema.
+// Never forward unexpected database columns, identities or diagnostic details
+// into the Owner response. A mismatched repository also fails closed.
+const PUBLIC_SCOPE_ERRORS = new Set([
+  "owner_project_scope_invalid",
+  "owner_project_scope_not_found",
+  "owner_project_scope_ambiguous",
+  "product_owner_auth_ineligible",
+  "device_not_owned",
+]);
+export function projectScopeResponse(raw: Json, requestedRepository: string): Json {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("product_postgres_invalid_response");
+  }
+  if (raw.ok === false && typeof raw.error === "string"
+      && PUBLIC_SCOPE_ERRORS.has(raw.error)) {
+    return { ok: false, error: raw.error };
+  }
+  if (raw.ok === true) {
+    const repository = canonicalGithubRepositoryFullName(raw.repository_full_name);
+    if (isCanonicalUuid(raw.space_id)
+        && isCanonicalUuid(raw.project_id)
+        && typeof raw.repository_id === "number"
+        && Number.isSafeInteger(raw.repository_id)
+        && raw.repository_id > 0
+        && repository !== null
+        && repository.toLowerCase() === requestedRepository.toLowerCase()) {
+      return {
+        ok: true, space_id: raw.space_id, project_id: raw.project_id,
+        repository_id: raw.repository_id, repository_full_name: repository,
+      };
+    }
+  }
+  throw new Error("product_postgres_invalid_response");
 }
 
 function resultStatus(result: Json): number {
@@ -124,10 +154,15 @@ export function createOwnerProjectScopeHandler(env: Env, deps: Dependencies = {}
     }
 
     try {
-      const result = await resolve(env, identity.subjectId, deviceId, repositoryFullName);
+      const raw = await resolve(env, identity.subjectId, deviceId, repositoryFullName);
+      const result = projectScopeResponse(raw, repositoryFullName);
       return json(result, resultStatus(result));
     } catch (error) {
-      const code = error instanceof Error ? error.message : "product_postgres_unavailable";
+      // Database transport exceptions must not become an error-reflection API.
+      const reported = error instanceof Error ? error.message : "";
+      const code = reported === "owner_project_scope_invalid" || reported === "product_postgres_unconfigured"
+        || reported === "product_postgres_invalid_response"
+        ? reported : "product_postgres_unavailable";
       const status = code === "owner_project_scope_invalid" ? 400 : 503;
       return json({ ok: false, error: code }, status);
     }

@@ -23,9 +23,46 @@ class McpReleaseContract(unittest.TestCase):
         self.assertEqual(c["name"],f["mcp_release"]["worker_name"])
         self.assertEqual(c["main"],"src/product_mcp_entry.ts")
         self.assertNotIn("d1_databases",c)
-        self.assertNotIn("durable_objects",c)
+        self.assertEqual(c["durable_objects"], {"bindings": [
+            {"name":"DEVICE_WAKE","class_name":"ProductDeviceWake"},
+        ]})
+        self.assertEqual(c["migrations"], [{
+            "tag":"product-device-wake-v1",
+            "new_sqlite_classes":["ProductDeviceWake"],
+        }])
         self.assertNotIn("r2_buckets",c)
         self.assertEqual(c["hyperdrive"][0]["binding"],"POSTGRES")
+
+    def test_mcp_owner_oauth_pin_is_bounded_and_cannot_enable_other_vars(self):
+        import re
+        value=self.config["vars"]["PRODUCT_OWNER_OAUTH_CLIENT_ID"]
+        self.assertRegex(value,r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
+        self.assertFalse(validate(self.foundation,self.config))
+        for bad in (None, "", "not-a-uuid", "a"*512):
+            c=copy.deepcopy(self.config)
+            if bad is None:
+                c["vars"].pop("PRODUCT_OWNER_OAUTH_CLIENT_ID")
+            else:
+                c["vars"]["PRODUCT_OWNER_OAUTH_CLIENT_ID"]=bad
+            with self.subTest(pin=bad):
+                with self.assertRaisesRegex(McpReleaseError,"owner_oauth_client_not_canonical"):
+                    validate(self.foundation,c)
+        for gate in ("CENTRAL_OWNER_SELECTION_ENABLED",
+                     "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED"):
+            self.assertEqual(self.config["vars"][gate],"enabled")
+            for invalid in (None,"disabled","true",""):
+                c=copy.deepcopy(self.config)
+                if invalid is None:
+                    del c["vars"][gate]
+                else:
+                    c["vars"][gate]=invalid
+                with self.subTest(gate=gate,invalid=invalid):
+                    with self.assertRaisesRegex(McpReleaseError,"owner_central_rollout_flags_incomplete"):
+                        validate(self.foundation,c)
+        c=copy.deepcopy(self.config)
+        c["vars"]["UNTRUSTED_SECOND_OWNER_AUTHORITY"]="enabled"
+        with self.assertRaisesRegex(McpReleaseError,"mcp_auth_vars_not_canonical"):
+            validate(self.foundation,c)
 
     def test_machine_endpoint_edge_policy_is_explicit_and_hostname_scoped(self):
         edge=self.foundation["mcp_release"].get("edge_machine_endpoint")
@@ -158,6 +195,12 @@ class McpReleaseContract(unittest.TestCase):
             {"main":"src/index.ts"},
             {"d1_databases":[{"binding":"DB","database_id":"legacy"}]},
             {"durable_objects":{"bindings":[{"name":"DEVICE_SESSIONS"}]}},
+            {"durable_objects":{"bindings":[
+                {"name":"DEVICE_WAKE","class_name":"ProductDeviceWake"},
+                {"name":"SECOND_QUEUE","class_name":"ProductDeviceWake"},
+            ]}},
+            {"migrations":[{"tag":"product-device-wake-v2",
+                "new_sqlite_classes":["DeviceActionAuthority"]}]},
             {"r2_buckets":[{"binding":"ARTIFACTS"}]},
             {"routes":["mcp.ordax.com.br/*"]},
             {"workers_dev":False},
@@ -202,6 +245,58 @@ class McpReleaseContract(unittest.TestCase):
                 f["mcp_release"][field]=value
                 with self.assertRaises(McpReleaseError): validate(f,self.config)
                 with self.assertRaises(McpReleaseError): validate_interactive_candidate(f,self.config)
+
+    def test_chatgpt_refresh_contract_keeps_catalog_and_grants_separate(self):
+        doc = (ROOT / "docs/CHATGPT-CUSTOM-MCP-SERVER.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("https://mcp.ordax.com.br/mcp", doc)
+        self.assertIn("control-plane/cloudflare/src/mcp_http.ts", doc)
+        self.assertIn("control-plane/cloudflare/src/product_mcp_entry.ts", doc)
+        self.assertIn("Atualizar ferramentas", doc)
+        self.assertIn("terminal_exec", doc)
+        self.assertIn("process_list", doc)
+        self.assertIn("project-native-terminal", doc)
+        self.assertIn("project-native-process", doc)
+        self.assertIn("snapshot anterior", doc)
+        self.assertNotIn("18 para 23 tools", doc)
+        self.assertNotIn("reinstalar o servidor para adicionar tools", doc)
+
+    def test_public_deployment_smoke_requires_actual_hyperdrive_sql_readiness(self):
+        source = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text(
+            encoding="utf-8"
+        )
+        # The OAuth issuer may be healthy while Hyperdrive is disconnected.
+        # A public smoke that only checks OAuth could approve that outage.
+        self.assertIn("ready=get('/ready')", source)
+        self.assertIn("assert ready.get('oauth_discovery_ready') is True, ready", source)
+        self.assertIn("assert ready.get('postgres_ready') is True, ready", source)
+        self.assertIn("assert ready.get('supports_remote_actions') is True, ready", source)
+
+    def test_target_discovery_postgres_changes_trigger_every_mcp_release_gate(self):
+        # The target-discovery grant RPC is part of the canonical MCP read
+        # authority. An edit to this store must never evade canary, bundle,
+        # or the explicitly gated interactive validation deployment.
+        workflows = (
+            (".github/workflows/product-mcp-canary.yml", 2),
+            (".github/workflows/ordax-mcp-canonical.yml", 2),
+            (".github/workflows/ordax-mcp-validation-deploy.yml", 1),
+        )
+        for name, expected_path_counts in workflows:
+            with self.subTest(workflow=name):
+                source = (ROOT / name).read_text(encoding="utf-8")
+                self.assertEqual(
+                    source.count('- "control-plane/cloudflare/src/product_mcp_discovery_store.ts"'),
+                    expected_path_counts,
+                )
+                self.assertEqual(
+                    source.count('- "control-plane/tests/product_mcp_discovery_store.test.mts"'),
+                    expected_path_counts,
+                )
+                self.assertRegex(
+                    source,
+                    r"(?m)^\s*run: node --test[^\n]*control-plane/tests/product_mcp_discovery_store\.test\.mts",
+                )
 
     def test_new_source_has_one_canonical_attested_action_boundary(self):
         entry=(ROOT/"control-plane/cloudflare/src/product_mcp_entry.ts").read_text("utf-8")

@@ -8,6 +8,10 @@ on:
       - "control-plane/cloudflare/wrangler.mcp.toml"
       - "control-plane/cloudflare/production-foundation.json"
       - "control-plane/cloudflare/src/product_mcp_entry.ts"
+      - "control-plane/cloudflare/src/product_mcp_usage_read.ts"
+      - "control-plane/cloudflare/src/public_pages.ts"
+      - "control-plane/supabase/migrations/**"
+      - "control-plane/cloudflare/src/product_mcp_discovery_store.ts"
       - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
       - "control-plane/cloudflare/src/product_auth.ts"
@@ -20,6 +24,10 @@ on:
       - "control-plane/cloudflare/src/product_postgres_store.ts"
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/tests/product_mcp_entry.test.mts"
+      - "control-plane/tests/product_mcp_usage_meter_sql.test.mts"
+      - "control-plane/tests/product_mcp_usage_self_read.test.mts"
+      - "control-plane/tests/product_postgres_readiness.test.mts"
+      - "control-plane/tests/product_mcp_discovery_store.test.mts"
       - "control-plane/tests/product_mcp_trusted_client_ingress.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
@@ -76,7 +84,7 @@ jobs:
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
 
       - name: Re-run canonical interactive MCP contract before deploy
-        run: node --test control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_trusted_client_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_oauth_readiness.test.mts
+        run: node --test control-plane/tests/product_mcp_discovery_store.test.mts control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_trusted_client_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_usage_meter_sql.test.mts control-plane/tests/product_mcp_usage_self_read.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_postgres_readiness.test.mts
 
       - name: Build exact candidate and prove no legacy authority
         working-directory: control-plane/cloudflare
@@ -94,7 +102,7 @@ jobs:
           for required in [
               'trusted_operation_required','attested-device-control','computer-observe',
               'interactive-computer-control','ordax_action_status','computer.click','computer.type',
-              'ordax-mcp.ordaxsystems.workers.dev','/v3/product/session',
+              'ordax-mcp.ordaxsystems.workers.dev','/v3/product/session','/v3/device/setup',
               '/v3/product/device/central-session','/v3/device/transport','/v3/owner/remote-authority',
               '/v3/owner/remote-grant-groups',
           ]:
@@ -140,6 +148,7 @@ jobs:
           ready=get('/ready')
           assert ready.get('ok') is True, ready
           assert ready.get('oauth_discovery_ready') is True, ready
+          assert ready.get('postgres_ready') is True, ready
           assert ready.get('supports_attested_remote_reads') is True, ready
           assert ready.get('supports_remote_actions') is True, ready
           print('ORDAX_MCP_PUBLIC_ATTESTED_INTERACTIVE_SMOKE=PASS')
@@ -181,7 +190,7 @@ jobs:
 
           status="$(request_status owner_session GET /v3/product/session)"
           require_status owner_session "$status" '401 403'
-          status="$(request_status setup POST /v3/product/device/setup '{}')"
+          status="$(request_status setup POST /v3/device/setup '{}')"
           require_status setup "$status" '400 401 403'
           status="$(request_status central_session GET /v3/product/device/central-session)"
           require_status central_session "$status" '401 403'

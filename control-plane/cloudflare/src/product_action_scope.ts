@@ -22,14 +22,11 @@ export const PROJECT_BROWSER_ACTIONS = new Set<string>([
   "browser.type",
 ]);
 
-/**
- * Minimal project-continuity tranche used by the direct ChatGPT Web MCP path.
- * These capabilities never imply filesystem, terminal, browser or Git authority.
- */
 export const PROJECT_CONTINUITY_ACTIONS = new Set<string>([
-  "agent.project_briefing",
-  "continuity.get",
-  "continuity.update",
+  "agent.project_briefing", "continuity.get", "continuity.update", "handoff.create", "handoff.get",
+]);
+export const REPOSITORY_CATALOG_DEVICE_ACTIONS = new Set<string>([
+  "workspace.repository_catalog",
 ]);
 
 export const APP_INTELLIGENCE_DEVICE_ACTIONS = new Set<string>([
@@ -54,11 +51,18 @@ export const COMPUTER_DEVICE_ACTIONS = new Set<string>([
   "computer.path_move",
   "computer.path_remove",
   "computer.processes",
+  "computer.process_start",
+  "computer.process_status",
+  "computer.process_list",
+  "computer.process_logs",
+  "computer.process_write_stdin",
+  "computer.process_stop",
   "computer.screen_info",
   "computer.screenshot",
   "computer.scroll",
   "computer.search",
   "computer.terminate_process",
+  "computer.terminal_exec",
   "computer.text_patch",
   "computer.text_read",
   "computer.text_write",
@@ -67,8 +71,10 @@ export const COMPUTER_DEVICE_ACTIONS = new Set<string>([
 ]);
 
 export const DEVICE_SCOPED_ACTIONS = new Set<string>([
+  "orchestrator.app_read",
   ...COMPUTER_DEVICE_ACTIONS,
   ...APP_INTELLIGENCE_DEVICE_ACTIONS,
+  ...REPOSITORY_CATALOG_DEVICE_ACTIONS,
 ]);
 
 export function isDeviceScopedAction(action: string): boolean {
@@ -103,6 +109,7 @@ export function projectBindingMatchesScope(
 /** MCP authorization profile hints; not grant writers or an authorization authority. */
 export const INTERACTIVE_COMPUTER_CONTROL_MODE = "interactive-computer-control";
 export const FILESYSTEM_COMPUTER_CONTROL_MODE = "computer-filesystem";
+export const TEXT_EDIT_COMPUTER_CONTROL_MODE = "computer-text-edit";
 export const CLIPBOARD_COMPUTER_CONTROL_MODE = "computer-clipboard";
 export const PROCESS_COMPUTER_CONTROL_MODE = "computer-process-control";
 export const OBSERVE_COMPUTER_CONTROL_MODE = "computer-observe";
@@ -124,6 +131,15 @@ export const OWNER_DEVICE_COMPUTER_GRANT_PROFILES: Readonly<Record<string, reado
     "computer.scroll",
     "computer.type",
     "computer.windows",
+  ],
+  // Independent least-privilege grant: text read/write/patch only. No delete,
+  // move, arbitrary process, shell, browser, or unbounded filesystem access.
+  [TEXT_EDIT_COMPUTER_CONTROL_MODE]: [
+    "computer.directory_list",
+    "computer.file_stat",
+    "computer.text_read",
+    "computer.text_write",
+    "computer.text_patch",
   ],
   [FILESYSTEM_COMPUTER_CONTROL_MODE]: [
     "computer.access_status",

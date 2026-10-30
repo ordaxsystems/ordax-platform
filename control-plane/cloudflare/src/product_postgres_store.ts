@@ -1,4 +1,6 @@
-import postgres from "postgres";
+import { openPostgresSession } from "./data_postgres_driver.ts";
+import { notifyProductDeviceWake } from "./product_device_wake.ts";
+import { encodePostgresTextArrayLiteral, InvalidPostgresTextArrayError } from "./product_postgres_text_array.ts";
 import {
   canonicalRemoteClient,
   canonicalRemoteGrantGroup,
@@ -11,7 +13,35 @@ type JsonObject = Record<string, unknown>;
 
 export interface ProductPostgresEnv {
   POSTGRES?: Hyperdrive;
+  /** Advisory wake channel only; SQL retains all action/grant authority. */
+  DEVICE_WAKE?: DurableObjectNamespace;
+  /** Explicitly disabled until both the Worker and installed Runtime are validated. */
+  PRODUCT_DEVICE_WAKE_ENABLED?: string;
+  // Deliberately opt-in after SQL migration and end-to-end attestation gates.
+  // Absence/any other string keeps the workspace-proof route unavailable.
+  WORKSPACE_RESOURCE_VERIFIER_ENABLED?: string;
+  // Separate rollout gate: verifier approval must NOT enable grant issuance.
+  WORKSPACE_RESOURCE_ISSUANCE_ENABLED?: string;
+  /** Usage recording stays off until the privacy and database rollout gates pass. */
+  MCP_USAGE_METER_MODE?: string;
+  /** High-entropy Cloudflare secret; required for retry fingerprints. */
+  MCP_USAGE_FINGERPRINT_KEY?: string;
 }
+
+export type ProductMcpUsageRecording = Readonly<{
+  ownerUserId: string;
+  clientId: string;
+  toolName: string;
+  requestFingerprint: string;
+}>;
+
+export type ProductMcpUsageRecordResult = Readonly<{
+  ok: boolean;
+  recorded?: boolean;
+  usage_month?: string;
+  tool_calls?: number;
+  error?: string;
+}>;
 
 export type ProductRemoteJob = {
   request_id: string;
@@ -56,9 +86,142 @@ export class ProductPostgresError extends Error {
   }
 }
 
+type SafePostgresFailure = {
+  event: "product_postgres_failure";
+  rpc: string;
+  name: string;
+  code: string | null;
+  errno: string | number | null;
+  syscall: string | null;
+  cause_name: string | null;
+  cause_code: string | null;
+  classification: string;
+  signals: string[];
+};
+
+const POSTGRES_FAILURE_SIGNAL_MARKERS = Object.freeze([
+  ["server_connection_attempt", "server connection attempt"],
+  ["pool_acquire", "connection from the pool"],
+  ["server_closed_connection", "server return error and closed connection"],
+  ["database_connect", "failed to connect to the provided database"],
+  ["tls", "tls"],
+  ["certificate", "cert"],
+  ["timeout", "timeout"],
+  ["connection_refused", "connection_refused"],
+  ["connection_reset", "connection reset"],
+  ["authentication", "authentication"],
+  ["prepared_statement", "prepared statement"],
+  ["protocol", "protocol"],
+  ["internal_error", "internal error"],
+  ["pg_connection_terminated_unexpectedly", "connection terminated unexpectedly"],
+  ["pg_connection_terminated", "connection terminated"],
+  ["pg_client_connection_error", "client has encountered a connection error"],
+  ["pg_client_closed", "client was closed and is not queryable"],
+  ["pg_cross_request_io", "cannot perform i/o on behalf of a different request"],
+  ["pg_client_reused", "client has already been connected"],
+] as const);
+
+function postgresFailureMessage(error: unknown): string {
+  // Postgres/Hyperdrive may wrap origin failures in structured ErrorResponse
+  // fields or a single nested cause. Only inspect locally to classify known
+  // errors: never copy provider messages, details, hints or connection URLs
+  // into logs or public responses.
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const cause = record.cause && typeof record.cause === "object"
+    ? record.cause as Record<string, unknown> : {};
+  const fields = [record.message, record.detail, record.hint, cause.message, cause.detail];
+  return fields.filter((value): value is string => typeof value === "string")
+    .map(value => value.toLowerCase()).join(" ");
+}
+
+function postgresFailureSignals(error: unknown): string[] {
+  const message = postgresFailureMessage(error);
+  return POSTGRES_FAILURE_SIGNAL_MARKERS
+    .filter(([, marker]) => message.includes(marker))
+    .map(([signal]) => signal);
+}
+
+function classifyPostgresFailure(error: unknown): string {
+  const message = postgresFailureMessage(error);
+  if (message.includes("failed to acquire a connection from the pool")) return "hyperdrive_pool_acquire_failed";
+  if (message.includes("server connection attempt failed") && message.includes("connection_refused")) return "hyperdrive_origin_connection_refused";
+  if (message.includes("server connection attempt failed")) return "hyperdrive_server_connection_failed";
+  if (message.includes("server return error and closed connection")) return "hyperdrive_server_closed_connection";
+  if (message.includes("failed to connect to the provided database")) return "hyperdrive_database_connect_failed";
+  if (message.includes("internal error")) return "hyperdrive_internal_error";
+  if (message.includes("connection terminated unexpectedly")) return "pg_connection_terminated_unexpectedly";
+  if (message.includes("connection terminated")) return "pg_connection_terminated";
+  if (message.includes("client has encountered a connection error")) return "pg_client_connection_error";
+  if (message.includes("client was closed and is not queryable")) return "pg_client_closed";
+  if (message.includes("cannot perform i/o on behalf of a different request")) return "pg_cross_request_io";
+  if (message.includes("client has already been connected")) return "pg_client_reused";
+  if (message.includes("bad hostname")) return "hyperdrive_bad_hostname";
+  if (message.includes("cannot connect to the host")) return "hyperdrive_origin_unreachable";
+  if (message.includes("tls handshake failed")) return "hyperdrive_tls_handshake_failed";
+  if (message.includes("cert validation failed")) return "hyperdrive_tls_cert_validation_failed";
+  if (message.includes("password authentication failed") || message.includes("authentication failed")) return "origin_authentication_failed";
+  if (message.includes("connection refused")) return "origin_connection_refused";
+  if (message.includes("connection reset")) return "origin_connection_reset";
+  if (message.includes("timeout")) return "connection_timeout";
+  if (message.includes("prepared statement")) return "prepared_statement_failure";
+  if (message.includes("protocol")) return "protocol_failure";
+  return "unclassified";
+}
+
+function boundedDiagnostic(value: unknown, max = 80): string | null {
+  return typeof value === "string" && value.length > 0 && value.length <= max
+    ? value : null;
+}
+
+export function safePostgresFailure(error: unknown, rpc: string): SafePostgresFailure {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const cause = record.cause && typeof record.cause === "object"
+    ? record.cause as Record<string, unknown> : {};
+  return {
+    event: "product_postgres_failure",
+    rpc,
+    name: boundedDiagnostic(record.name) ?? (error instanceof Error ? error.name : "UnknownError"),
+    code: boundedDiagnostic(record.code),
+    errno: typeof record.errno === "number" ? record.errno : boundedDiagnostic(record.errno),
+    syscall: boundedDiagnostic(record.syscall),
+    cause_name: boundedDiagnostic(cause.name),
+    cause_code: boundedDiagnostic(cause.code),
+    classification: classifyPostgresFailure(error),
+    signals: postgresFailureSignals(error),
+  };
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const RPC_SPECS = {
+  // Staged read-only RPC: remains unavailable until the separately governed
+  // PostgreSQL proposal is applied. No new grant authority is created here.
+  ordax_approve_project_workspace_resource_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_lab_project_id", "p_space_id",
+      "p_project_id", "p_device_id", "p_actor_id", "p_workspace_session_id",
+      "p_resource_id", "p_intent_id"],
+    casts: ["uuid", "uuid", "text", "uuid", "uuid", "uuid", "uuid", "text", "text", "uuid"],
+  },
+  ordax_commit_project_workspace_resource_v1: {
+    keys: ["p_device_id", "p_intent_id", "p_actor_id",
+      "p_client_id", "p_workspace_session_id", "p_resource_id"],
+    casts: ["uuid", "uuid", "uuid", "uuid", "text", "text"],
+  },
+  ordax_revoke_project_workspace_resource_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_resource_id"],
+    casts: ["uuid", "uuid", "text"],
+  },
+  ordax_verify_project_workspace_resource_v1: {
+    keys: ["p_owner_user_id", "p_actor_id", "p_client_id",
+      "p_workspace_session_id", "p_lab_project_id",
+      "p_device_id", "p_resource_id"],
+    casts: ["uuid", "uuid", "uuid", "text", "text", "uuid", "text"],
+  },
+  ordax_orchestrator_read_authorization_v1: {
+    keys: ["p_device_id", "p_request_id", "p_effect_id", "p_attempt_id",
+      "p_lease_id", "p_execution_epoch", "p_agent_instance_id", "p_boot_id"],
+    casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text"],
+  },
   ordax_enqueue_product_action_v1: {
     keys: [
       "p_owner_user_id",
@@ -218,6 +381,18 @@ const RPC_SPECS = {
     ],
     casts: ["uuid", "boolean", "text", "text", "text", "boolean"],
   },
+  ordax_record_product_mcp_usage_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_tool_name", "p_request_fingerprint"],
+    casts: ["uuid", "uuid", "text", "text"],
+  },
+  ordax_get_product_mcp_usage_v1: {
+    keys: ["p_owner_user_id"],
+    casts: ["uuid"],
+  },
+  ordax_prune_product_mcp_usage_v1: {
+    keys: [],
+    casts: [],
+  },
   ordax_enroll_product_device_v1: {
     keys: [
       "p_owner_user_id",
@@ -272,6 +447,61 @@ export function productPostgresConfigured(env: ProductPostgresEnv): boolean {
   return configuredConnectionString(env) !== null;
 }
 
+/** An actual Hyperdrive connection and bounded, non-privileged SQL query.
+ * This is the existing PostgreSQL authority, not a second health backend.
+ * The returned diagnosis is public-safe; do not propagate pg exception text.
+ */
+export type ProductPostgresReadiness = Readonly<{
+  ok: boolean;
+  error: "product_postgres_unconfigured" | "product_postgres_unavailable" | null;
+  failure_stage?: "connect" | "query" | "decode";
+}>;
+type ReadinessClient = {
+  connect(): Promise<void>;
+  query(sql: string): Promise<{ rows: Array<{ alive?: unknown }> }>;
+  end(): Promise<void>;
+};
+
+export async function checkCanonicalProductPostgresReadiness(
+  env: ProductPostgresEnv,
+  createClient: (connectionString: string) => ReadinessClient =
+    connectionString => openPostgresSession(connectionString),
+): Promise<ProductPostgresReadiness> {
+  const connectionString = configuredConnectionString(env);
+  if (!connectionString) return { ok: false, error: "product_postgres_unconfigured" };
+  let client: ReadinessClient | null = null;
+  let phase: "connect" | "query" | "decode" = "connect";
+  try {
+    client = createClient(connectionString);
+    await client.connect();
+    phase = "query";
+    const result = await client.query("select 1::int as alive");
+    phase = "decode";
+    if (result.rows.length !== 1 || result.rows[0]?.alive !== 1) {
+      return { ok: false, error: "product_postgres_unavailable", failure_stage: phase };
+    }
+    return { ok: true, error: null };
+  } catch (error) {
+    // Public readiness remains generic. Operators need a bounded diagnostic
+    // for connectivity incidents without ever logging exception messages,
+    // credentials, URLs or raw PostgreSQL connection strings.
+    const safe = safePostgresFailure(error, "readiness");
+    console.error(JSON.stringify({
+      event: "product_postgres_readiness_failure",
+      phase,
+      code: /^[A-Z0-9]{5}$/.test(safe.code ?? "") ? safe.code : null,
+      cause_code: /^[A-Z0-9]{5}$/.test(safe.cause_code ?? "") ? safe.cause_code : null,
+      classification: safe.classification,
+      signals: safe.signals,
+    }));
+    return { ok: false, error: "product_postgres_unavailable", failure_stage: phase };
+  } finally {
+    if (client) {
+      try { await client.end(); } catch { /* Connection cleanup cannot mask probe outcome. */ }
+    }
+  }
+}
+
 function encodeRpcValue(value: unknown, cast: string): unknown {
   if (value === undefined) return null;
   if (cast === "jsonb" && value !== null) return JSON.stringify(value);
@@ -292,24 +522,29 @@ async function callRpc<T>(
   const args = spec.casts.map((cast, index) => `$${index + 1}::${cast}`).join(", ");
   const resultCast = "resultCast" in spec ? `::${spec.resultCast}` : "";
   const query = `select public.${rpc}(${args})${resultCast} as result`;
-  const sql = postgres(connectionString, {
-    max: 1,
-    connect_timeout: 5,
-    idle_timeout: 1,
-    prepare: true,
-  });
+  const client = openPostgresSession(connectionString);
 
+  let phase: "connect" | "query" | "decode" = "connect";
   try {
     const values = spec.keys.map((key, index) => {
       const value = encodeRpcValue(payload[key], spec.casts[index]);
       if (spec.casts[index] !== "text[]") return value;
-      if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-        throw new ProductPostgresError("product_grant_invalid", 400);
+      // Bind a canonical PostgreSQL text[] literal; the allowlisted RPC owns
+      // the explicit $n::text[] cast.
+      try {
+        return encodePostgresTextArrayLiteral(value);
+      } catch (error) {
+        if (error instanceof InvalidPostgresTextArrayError) {
+          throw new ProductPostgresError("product_grant_invalid", 400);
+        }
+        throw error;
       }
-      // Postgres.js 3.4.5 binds arrays as typed parameters, never SQL literals.
-      return sql.array(value, 25); // PostgreSQL TEXT OID
     });
-    const rows = await sql.unsafe(query, values);
+    await client.connect();
+    phase = "query";
+    const response = await client.query(query, values);
+    phase = "decode";
+    const rows = response.rows;
     const row = rows[0] as { result?: T } | undefined;
     if (!row || !Object.prototype.hasOwnProperty.call(row, "result")) {
       throw new ProductPostgresError("product_postgres_invalid_response", 502);
@@ -317,10 +552,22 @@ async function callRpc<T>(
     return row.result as T;
   } catch (error) {
     if (error instanceof ProductPostgresError) throw error;
+    // The client-facing response remains deliberately generic. Emit only an
+    // allowlisted diagnostic envelope: never SQL, values, connection strings,
+    // hostnames, credentials, messages or stacks.
+    const diagnostic = safePostgresFailure(error, rpc);
+    console.error(JSON.stringify({ ...diagnostic, phase }));
+    // SQLSTATE 22P05 means the report contains a U+0000 character that
+    // PostgreSQL JSONB cannot store. This is invalid action output, not an
+    // unavailable database: retries of identical bytes can never succeed.
+    if (rpc === "ordax_report_product_action_v1"
+        && (diagnostic.code === "22P05" || diagnostic.cause_code === "22P05")) {
+      throw new ProductPostgresError("report_result_invalid_unicode", 422);
+    }
     throw new ProductPostgresError("product_postgres_unavailable", 503);
   } finally {
     try {
-      await sql.end({ timeout: 1 });
+      await client.end();
     } catch {
       // Hyperdrive owns the upstream pool; connection cleanup must not mask
       // the result of an already-completed authority call.
@@ -349,7 +596,7 @@ export async function enqueueProductAction(
   if (!client || client.p_client_id === null) {
     throw new ProductPostgresError("product_action_client_identity_invalid", 400);
   }
-  return callRpc<ProductActionEnqueueResult>(
+  const recorded = await callRpc<ProductActionEnqueueResult>(
     env,
     "ordax_enqueue_product_action_v1",
     {
@@ -366,6 +613,13 @@ export async function enqueueProductAction(
       p_expires_at: input.expiresAt,
     },
   );
+  // Only a committed queue operation may emit a non-authoritative wake.
+  // Even a replayed accepted enqueue is safe: the device must still claim
+  // the actual lease through PostgreSQL. A missing DO never changes the RPC.
+  if (recorded.ok && recorded.request_id) {
+    await notifyProductDeviceWake(env, input.deviceId);
+  }
+  return recorded;
 }
 
 export async function claimProductAction(
@@ -411,6 +665,112 @@ export async function startProductAction(
     p_execution_epoch: input.executionEpoch,
     p_agent_instance_id: input.agentInstanceId,
     p_boot_id: input.bootId,
+  });
+}
+
+export type WorkspaceOwnerApprovalInput = Readonly<{
+  ownerUserId: string;
+  clientId: string;
+  labProjectId: string;
+  spaceId: string;
+  projectId: string;
+  deviceId: string;
+  actorId: string;
+  workspaceSessionId: string;
+  resourceId: string;
+  intentId: string;
+}>;
+export type WorkspaceDeviceConfirmationInput = Readonly<{
+  deviceId: string;
+  intentId: string;
+  actorId: string;
+  clientId: string;
+  workspaceSessionId: string;
+  resourceId: string;
+}>;
+
+/** Two independent authenticated transport boundaries, one existing ledger.
+ * Workers MUST supply Owner subject and enrolled Device ID from canonical
+ * authentication; the body merely narrows which exact row may be approved.
+ */
+export async function approveProjectWorkspaceResource(
+  env: ProductPostgresEnv, input: WorkspaceOwnerApprovalInput,
+): Promise<boolean> {
+  return callRpc<boolean>(env, "ordax_approve_project_workspace_resource_v1", {
+    p_owner_user_id: input.ownerUserId, p_client_id: input.clientId,
+    p_lab_project_id: input.labProjectId, p_space_id: input.spaceId,
+    p_project_id: input.projectId, p_device_id: input.deviceId,
+    p_actor_id: input.actorId, p_workspace_session_id: input.workspaceSessionId,
+    p_resource_id: input.resourceId, p_intent_id: input.intentId,
+  });
+}
+export async function commitProjectWorkspaceResource(
+  env: ProductPostgresEnv, input: WorkspaceDeviceConfirmationInput,
+): Promise<boolean> {
+  return callRpc<boolean>(env, "ordax_commit_project_workspace_resource_v1", {
+    p_device_id: input.deviceId, p_intent_id: input.intentId,
+    p_actor_id: input.actorId, p_client_id: input.clientId,
+    p_workspace_session_id: input.workspaceSessionId,
+    p_resource_id: input.resourceId,
+  });
+}
+
+export type WorkspaceResourceVerificationInput = Readonly<{
+  ownerUserId: string;
+  actorId: string;
+  clientId: string;
+  workspaceSessionId: string;
+  labProjectId: string;
+  deviceId: string;
+  resourceId: string;
+}>;
+
+/** Execute only the canonical PostgreSQL read-only resource verifier.
+ * Caller authentication belongs to the existing Product Device transport.
+ * No issuer, path lookup, grant cache, or shadow permissions table.
+ */
+/** Owner-only revocation of the subordinate resource row. The trusted
+ * HTTP handler must derive ownerUserId from the signed Product session.
+ * This is not a grant issuer and never modifies the canonical grant ledger.
+ */
+export async function revokeProjectWorkspaceResource(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string; resourceId: string },
+): Promise<boolean> {
+  const result = await callRpc<boolean>(
+    env, "ordax_revoke_project_workspace_resource_v1", {
+      p_owner_user_id: input.ownerUserId,
+      p_client_id: input.clientId,
+      p_resource_id: input.resourceId,
+    },
+  );
+  return result === true;
+}
+
+export async function verifyProjectWorkspaceResource(
+  env: ProductPostgresEnv,
+  input: WorkspaceResourceVerificationInput,
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_verify_project_workspace_resource_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_actor_id: input.actorId,
+    p_client_id: input.clientId,
+    p_workspace_session_id: input.workspaceSessionId,
+    p_lab_project_id: input.labProjectId,
+    p_device_id: input.deviceId,
+    p_resource_id: input.resourceId,
+  });
+}
+
+export async function resolveOrchestratorReadAuthorization(
+  env: ProductPostgresEnv,
+  input: Parameters<typeof startProductAction>[1],
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_orchestrator_read_authorization_v1", {
+    p_device_id: input.deviceId, p_request_id: input.requestId,
+    p_effect_id: input.effectId, p_attempt_id: input.attemptId,
+    p_lease_id: input.leaseId, p_execution_epoch: input.executionEpoch,
+    p_agent_instance_id: input.agentInstanceId, p_boot_id: input.bootId,
   });
 }
 
@@ -574,6 +934,46 @@ export async function recordProductPresence(
     p_capability_digest: input.capabilityDigest,
     p_force: input.force ?? false,
   });
+}
+
+export function productMcpUsageMeterEnabled(env: ProductPostgresEnv): boolean {
+  return env.MCP_USAGE_METER_MODE === "shadow"
+    && typeof env.MCP_USAGE_FINGERPRINT_KEY === "string"
+    && env.MCP_USAGE_FINGERPRINT_KEY.length >= 32;
+}
+
+export async function recordProductMcpUsage(
+  env: ProductPostgresEnv,
+  input: ProductMcpUsageRecording,
+): Promise<ProductMcpUsageRecordResult> {
+  if (!isCanonicalUuid(input.ownerUserId) || !isCanonicalUuid(input.clientId)
+      || typeof input.toolName !== "string" || !/^[a-z][a-z0-9._-]{1,95}$/.test(input.toolName)
+      || typeof input.requestFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(input.requestFingerprint)) {
+    throw new ProductPostgresError("product_mcp_usage_input_invalid", 400);
+  }
+  return callRpc<ProductMcpUsageRecordResult>(env, "ordax_record_product_mcp_usage_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_client_id: input.clientId,
+    p_tool_name: input.toolName,
+    p_request_fingerprint: input.requestFingerprint,
+  });
+}
+
+/** Observational account read; never supplies entitlement or billing authority. */
+export async function readProductMcpUsage(
+  env: ProductPostgresEnv,
+  ownerUserId: string,
+): Promise<JsonObject> {
+  if (!isCanonicalUuid(ownerUserId)) {
+    throw new ProductPostgresError("product_mcp_usage_owner_invalid", 400);
+  }
+  return callRpc<JsonObject>(env, "ordax_get_product_mcp_usage_v1", {
+    p_owner_user_id: ownerUserId,
+  });
+}
+
+export async function pruneProductMcpUsage(env: ProductPostgresEnv): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_prune_product_mcp_usage_v1", {});
 }
 
 export async function enrollProductDevice(

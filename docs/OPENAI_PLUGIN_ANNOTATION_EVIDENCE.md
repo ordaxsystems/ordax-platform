@@ -41,6 +41,13 @@ This document is reviewer-facing evidence for the OpenAI plugin submission. The 
 | `git_diff` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
 | `git_command` | false | true | true | Can execute commands or Git operations that may modify project state and may contact open-ended external destinations; explicit grants and host confirmation are required. |
 | `terminal_exec` | false | true | true | Can execute commands or Git operations that may modify project state and may contact open-ended external destinations; explicit grants and host confirmation are required. |
+| `computer_terminal_exec` | false | true | true | Executes arbitrary commands on an Owner-authorized device without a project; requires an explicit device-native-terminal or full-computer-control grant plus local Full Access policy, with bounded output, timeout and audit. |
+| `computer_process_status` | true | false | false | Reads sanitized state only for supervised processes in the Owner-granted device namespace. |
+| `computer_process_list` | true | false | false | Lists supervised processes on the authorized device; cannot inspect project or arbitrary host process state. |
+| `computer_process_logs` | true | false | false | Reads bounded output from one ORDAX-owned device process. |
+| `computer_process_start` | false | true | true | Starts a supervised process under an explicit device-native-process or full-computer-control grant and local Full Access; may affect local and external systems. |
+| `computer_process_write_stdin` | false | true | true | Writes bounded input to one validated ORDAX-owned device process; can cause side effects. |
+| `computer_process_stop` | false | true | false | Stops only a validated ORDAX-owned device process, not arbitrary OS processes. |
 | `process_status` | true | false | false | Reads bounded sanitized state for one ORDAX-owned persistent process without exposing ownership tokens or local control paths. |
 | `process_list` | true | false | false | Lists sanitized ORDAX-owned persistent process state for the granted project without changing process state. |
 | `process_logs` | true | false | false | Reads a bounded tail from an ORDAX-owned process log and does not modify the process. |
@@ -93,6 +100,8 @@ This document is reviewer-facing evidence for the OpenAI plugin submission. The 
 | `blender_create_primitive` | false | false | false | Creates additive state or starts/adopts a local capability without deleting or overwriting existing user data by default. |
 | `blender_apply_material` | false | true | false | Can overwrite, patch, move, remove, save, or otherwise modify existing project/Blender state, so it is treated as potentially destructive. |
 | `blender_save` | false | true | false | Can overwrite, patch, move, remove, save, or otherwise modify existing project/Blender state, so it is treated as potentially destructive. |
+
+| `orchestrator_lab_status` | true | false | false | Reads status from the verified Orchestrator Lab private service under a dedicated device read grant; sends no provider messages and accepts no commands or arbitrary paths. |
 
 ## Classification policy
 
