@@ -342,6 +342,23 @@
       }
     },
     {
+      "name": "20261007201000_artifact_authority_v1",
+      "applied_version": "20261007235954",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261007201000_artifact_authority_v1.sql",
+        "blob_sha": "3bd6df1fe236df8860e48383a33fd9482ed0d35c"
+      },
+      "recovered_from": {
+        "kind": "closed_pr_68_verified_against_ledger",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "da4775e95bf5e9261f60d600ddb532bd"
+      }
+    },
+    {
       "name": "20261007201500_profile_pack_assignment_authority_v1",
       "applied_version": "20261008005633",
       "state": "applied",
@@ -540,6 +557,176 @@
       }
     },
     {
+      "name": "account_registration_legal_receipt_v1",
+      "applied_version": "20261008065750",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261008065750_account_registration_legal_receipt_v1.sql",
+        "blob_sha": "01df99bb026ecb93317d4ee8da121ea6a1b9f8f7"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "8b8fccd56e4f808856311723062e8be0"
+      }
+    },
+    {
+      "name": "account_registration_policy_projection_v1",
+      "applied_version": "20261008065754",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261008065754_account_registration_policy_projection_v1.sql",
+        "blob_sha": "5658a6115f1bf0cde30b0fbcc718eb12acb6e6de"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "8c2411aeda911473fd93a31764781eeb"
+      }
+    },
+    {
+      "name": "account_registration_legal_fk_indexes_v1",
+      "applied_version": "20261008065758",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261008065758_account_registration_legal_fk_indexes_v1.sql",
+        "blob_sha": "3d87407041811d817781833c1c725033c9f60241"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "41027681ca92ba5b457f075db41c6b98"
+      }
+    },
+    {
+      "name": "public_login_legal_receipt_guard_v1",
+      "applied_version": "20261008065929",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261008065929_public_login_legal_receipt_guard_v1.sql",
+        "blob_sha": "db990138773b900a27e8d79c505fb0cb552c0eb5"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "8799b239ceb1d58c49b4929757d33909"
+      }
+    },
+    {
+      "name": "account_legal_policy_activation_v1",
+      "applied_version": "20261008065933",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261008065933_account_legal_policy_activation_v1.sql",
+        "blob_sha": "148990865635f42aeaac8448061245252b757114"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "e6566ac0ee9fcfa7fd6cc8f9ad477c34"
+      }
+    },
+    {
+      "name": "account_registration_intent_email_validation_v2",
+      "applied_version": "20261008070410",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261008070410_account_registration_intent_email_validation_v2.sql",
+        "blob_sha": "0517a895dfbfb1de780ec7f009e2054fc5692a3a"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "129cb15cf02bd9ec70dd524801836632"
+      }
+    },
+    {
+      "name": "public_auth_rate_limit_v1",
+      "applied_version": "20261008071405",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261008071405_public_auth_rate_limit_v1.sql",
+        "blob_sha": "25002e16109aad2093e3ebf0393b0f011295edad"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "9e83acb0091b0001b7ec27e3bfbee6ab"
+      }
+    },
+    {
+      "name": "account_legacy_legal_quarantine_v1",
+      "applied_version": "20261008071410",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261008071410_account_legacy_legal_quarantine_v1.sql",
+        "blob_sha": "2c6b02ea198c5580b13490ac7bf780cfd43dc543"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "4f9b14091348ae98d2813095e0540c94"
+      }
+    },
+    {
+      "name": "account_sync_export_destination_atomic_v1",
+      "applied_version": "20261008080635",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261008080635_account_sync_export_destination_atomic_v1.sql",
+        "blob_sha": "3ff94a0b2af486c43c67fed2e811620dc62ba958"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "ad77a03bb18ea1f765e3a48e8bbbd6ff"
+      }
+    },
+    {
+      "name": "sync_request_subject_bridge_v1",
+      "applied_version": "20261008081516",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261008081516_sync_request_subject_bridge_v1.sql",
+        "blob_sha": "fc31d6c5ec08b0d766dea4775531820954771320"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "51e69e7b21374468aece28cae91f87ff"
+      }
+    },
+    {
       "name": "20261015133000_central_device_attested_session_v1",
       "applied_version": "20261015062329",
       "state": "applied",
@@ -559,7 +746,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261015193000_product_mcp_target_discovery_grant_v1.sql",
         "blob_sha": "db74174fbf8f1b76f36bc260b59654ed58c67acc"
-      }
+      },
+      "ledger_name": "product_mcp_target_discovery_grant_v1"
     },
     {
       "name": "20261015194500_product_mcp_target_discovery_auto_v1",
@@ -570,6 +758,92 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261015194500_product_mcp_target_discovery_auto_v1.sql",
         "blob_sha": "5148c11540a2512548326b8f38ed12a6607a61dd"
+      },
+      "ledger_name": "product_mcp_target_discovery_auto_v1"
+    },
+    {
+      "name": "20261015153000_space_semantics_v1",
+      "applied_version": "20261015203102",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261015203102_20261015153000_space_semantics_v1.sql",
+        "blob_sha": "9b842f2a92801e7363748f78d1eff44aaa2cc210"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "6e679664a7234ff6b1dc902573393edc"
+      }
+    },
+    {
+      "name": "20261015195800_space_semantics_write_guard_v1",
+      "applied_version": "20261015231940",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261015231940_20261015195800_space_semantics_write_guard_v1.sql",
+        "blob_sha": "9ecd3be032774044ab5664b956ca66c39a4966d2"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "8d129ad2f0b62837e326a4a4f9b8818c"
+      }
+    },
+    {
+      "name": "space_creation_authority_v1",
+      "applied_version": "20261016015610",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261016015610_space_creation_authority_v1.sql",
+        "blob_sha": "991d99e1aab9df0d3d35854a53117e3f85261359"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "76de62674de156ac7ba7c0d7ab082ddb"
+      }
+    },
+    {
+      "name": "space_active_quota_guard_v1",
+      "applied_version": "20261016035015",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261016035015_space_active_quota_guard_v1.sql",
+        "blob_sha": "563ac83161d3c3b6ce6f6e59b4a4dea42adde511"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "6b6bb8c5e37fdcd64c9f41055d13b573"
+      }
+    },
+    {
+      "name": "remove_legacy_space_actor_authority_v1",
+      "applied_version": "20261016035553",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261016035553_remove_legacy_space_actor_authority_v1.sql",
+        "blob_sha": "5c6c1c44a109fadf40f6b62dfd25d592cb6d1c72"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "67f7dc8200828d030f822e19fb58a1a5"
       }
     },
     {
@@ -581,7 +855,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261016041134_repair_trusted_actor_auth_eligibility_v1.sql",
         "blob_sha": "89cce5e2d456d147d5d89c7ecf4c145ce2b7db1a"
-      }
+      },
+      "ledger_name": "repair_trusted_actor_auth_eligibility_v1"
     },
     {
       "name": "20261016053000_product_action_edge_verified_result_digest_v1",
@@ -592,7 +867,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261016053000_product_action_edge_verified_result_digest_v1.sql",
         "blob_sha": "ce5e974c204149a9cd787d0656a618a5fc1a5682"
-      }
+      },
+      "ledger_name": "product_action_edge_verified_result_digest_v1"
     },
     {
       "name": "20261016063000_owner_mcp_grant_authority_v1",
@@ -603,6 +879,24 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261016063000_owner_mcp_grant_authority_v1.sql",
         "blob_sha": "7e46b641180b5b3c1fc5a40d14ae825856c1431b"
+      },
+      "ledger_name": "owner_mcp_grant_authority_v1"
+    },
+    {
+      "name": "product_artifact_authority_v1",
+      "applied_version": "20261016064536",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/applied-ledger/20261016064536_product_artifact_authority_v1.sql",
+        "blob_sha": "f514db00a3764c85b4e14a9f703d396652756178"
+      },
+      "recovered_from": {
+        "kind": "supabase_applied_ledger_statement",
+        "relation": "supabase_migrations.schema_migrations",
+        "observed_at": "2026-10-30",
+        "statement_md5": "e91acb9c8d4a9f436415303ed6ce11ba"
       }
     },
     {
@@ -614,7 +908,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261016113000_product_action_runtime_provenance_v1.sql",
         "blob_sha": "fa95c0e6adbda148055d0af47fa7d53ee9994041"
-      }
+      },
+      "ledger_name": "product_action_runtime_provenance_v1"
     },
     {
       "name": "20261016141000_owner_project_scope_resolver_v1",
@@ -625,7 +920,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261016141000_owner_project_scope_resolver_v1.sql",
         "blob_sha": "22eb9d1b4bde21588eca5bf568069d110dacbe42"
-      }
+      },
+      "ledger_name": "owner_project_scope_resolver_v1"
     },
     {
       "name": "20261020091500_product_action_queued_expiration_v1",
@@ -636,7 +932,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261020091500_product_action_queued_expiration_v1.sql",
         "blob_sha": "ae484182aed779b173092fb1ab7caf3ca70a10d0"
-      }
+      },
+      "ledger_name": "product_action_queued_expiration_v1"
     },
     {
       "name": "20261020154500_product_orphaned_running_lease_recovery_v1",
@@ -647,7 +944,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261020154500_product_orphaned_running_lease_recovery_v1.sql",
         "blob_sha": "a9e29c1dda620e275c623b2d1a7cc409ece4672b"
-      }
+      },
+      "ledger_name": "product_orphaned_running_lease_recovery_v1"
     },
     {
       "name": "20261021032000_central_session_operational_device_selection_v1",
@@ -669,7 +967,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261021183531_orchestrator_read_authorization_v1.sql",
         "blob_sha": "3a9102639fe12ac008f4717a4c4af6fde41c1be4"
-      }
+      },
+      "ledger_name": "orchestrator_read_authorization_v1"
     },
     {
       "name": "20261022014630_product_presence_freshness_v1",
@@ -680,7 +979,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261022014630_product_presence_freshness_v1.sql",
         "blob_sha": "b31806ed347d38bf74084313ee2608a1812c00ac"
-      }
+      },
+      "ledger_name": "product_presence_freshness_v1"
     },
     {
       "name": "20261022071118_ordax_product_mcp_usage_meter_v1",
@@ -691,7 +991,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261022071118_ordax_product_mcp_usage_meter_v1.sql",
         "blob_sha": "982642e1969cc3b17a4597e305c0f41173719d4b"
-      }
+      },
+      "ledger_name": "ordax_product_mcp_usage_meter_v1"
     },
     {
       "name": "20261022154600_central_session_runtime_heartbeat_preflight_v1",
@@ -702,7 +1003,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261022154600_central_session_runtime_heartbeat_preflight_v1.sql",
         "blob_sha": "aeb4f5397a53536ed07da7ee61f46c5c2a59f357"
-      }
+      },
+      "ledger_name": "central_session_runtime_heartbeat_preflight_v1"
     },
     {
       "name": "20261022201500_product_mcp_usage_self_read_v1",
@@ -713,7 +1015,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261022201500_product_mcp_usage_self_read_v1.sql",
         "blob_sha": "307421bfe91c5479ca6b3925886a89651b225ed4"
-      }
+      },
+      "ledger_name": "product_mcp_usage_self_read_v1"
     },
     {
       "name": "20261028145500_owner_central_session_targets_v1",
@@ -724,7 +1027,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261028145500_owner_central_session_targets_v1.sql",
         "blob_sha": "a27deaaf10d1b7990a67b3bdddf12d977ed6ada2"
-      }
+      },
+      "ledger_name": "owner_central_session_targets_v1"
     },
     {
       "name": "20261028145600_central_owner_device_selection_v1",
@@ -735,7 +1039,8 @@
         "repository": "ordaxsystems/ordax-platform",
         "path": "control-plane/supabase/migrations/20261028145600_central_owner_device_selection_v1.sql",
         "blob_sha": "23fe7424a65cd957bd88187be3461f885d2775fb"
-      }
+      },
+      "ledger_name": "central_owner_device_selection_v1"
     }
   ]
 }
