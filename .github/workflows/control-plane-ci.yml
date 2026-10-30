@@ -84,6 +84,7 @@ jobs:
         run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false --prefix control-plane/cloudflare
       - name: Run Control Plane contract tests
         run: |
+          python -m unittest tests.test_central_mcp_candidate_ci_contract
           node --test control-plane/tests/*.test.mts
           node --test control-plane/labs/relay/relay.test.mjs
           node --test control-plane/labs/relay/scoped-mcp.test.mts
