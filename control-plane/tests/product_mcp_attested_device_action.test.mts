@@ -403,6 +403,42 @@ test("full-computer-control is an explicit alternative authority for published a
   ), true);
 });
 
+test("explicit Space never borrows a global device grant (#118)", async () => {
+  const unauthorizedSpace = "782c01a5-0ee3-4589-9f9b-11555191f35a";
+  let catalogReads = 0;
+  let enqueues = 0;
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => {
+      catalogReads++;
+      return catalog(grantGroup("computer-observe", "computer.screen_info", "read"));
+    },
+    enqueue: async () => {
+      enqueues++;
+      throw new Error("explicit ungranted Space must never dispatch");
+    },
+  });
+  const base = await actionRequest("computer.screen_info").json() as Record<string, unknown>;
+  for (const mutation of [
+    { space_id: unauthorizedSpace },  // Canonical UUID previously accepted with only global grants.
+    { space_id: "not-a-uuid" },
+    { project: "ordaxsystems/ordax-platform" },
+    { space_id: undefined }, // Missing scope must not be treated as an implicit global grant.
+  ]) {
+    const body = { ...base, ...mutation };
+    if (mutation.space_id === undefined && Object.hasOwn(mutation, "space_id")) delete body.space_id;
+    const response = await handler(new Request("https://mcp.example/v3/product/actions", {
+      method: "POST",
+      headers: { authorization: "Bearer test", "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }));
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { ok: false, error: "product_device_action_invalid" });
+  }
+  assert.equal(catalogReads, 0);
+  assert.equal(enqueues, 0);
+});
+
 test("model-selected device never overrides the attested Product device", async () => {
   let touched = false;
   const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
