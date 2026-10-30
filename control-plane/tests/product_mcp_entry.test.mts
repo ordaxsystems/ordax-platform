@@ -138,6 +138,8 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal(response.status, 200);
   assert.deepEqual(json.result.tools.map((t: any) => t.name), [
     "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
+    "repository_catalog", "handoff_get", "handoff_create",
+    "project_briefing", "continuity_state", "continuity_update",
     "computer_terminal_exec", "terminal_exec",
     "computer_process_status", "computer_process_list", "computer_process_logs",
     "computer_process_start", "computer_process_write_stdin", "computer_process_stop",
@@ -153,6 +155,17 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_directory_create", "computer_path_move", "computer_path_remove",
   ]);
   const byName = new Map(json.result.tools.map((tool: any) => [tool.name, tool]));
+  for (const name of ["repository_catalog", "handoff_get", "handoff_create",
+    "project_briefing", "continuity_state", "continuity_update"]) {
+    assert.equal((byName.get(name) as any).inputSchema.required.includes("device_id"), true, name);
+  }
+  for (const name of ["handoff_get", "handoff_create", "project_briefing",
+    "continuity_state", "continuity_update"]) {
+    assert.equal((byName.get(name) as any).inputSchema.required.includes("repository_full_name"), true, name);
+    assert.equal((byName.get(name) as any).inputSchema.required.includes("project"), false, name);
+  }
+  assert.equal((byName.get("continuity_update") as any).annotations.readOnlyHint, false);
+  assert.equal((byName.get("handoff_create") as any).annotations.readOnlyHint, false);
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_screenshot") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_clipboard_read") as any).annotations.readOnlyHint, true);

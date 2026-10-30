@@ -36,6 +36,8 @@ import {
   type AttestedMcpDevice,
 } from "./product_mcp_attested_device_action.ts";
 import { createAttestedProjectActionHandler } from "./product_mcp_attested_project_action.ts";
+import { createAttestedProjectContinuityHandler } from "./product_mcp_attested_project_continuity.ts";
+import { createAttestedRepositoryCatalogHandler } from "./product_mcp_attested_repository_catalog.ts";
 import {
   handleProductDeviceSetup,
   PRODUCT_DEVICE_SETUP_PATH,
@@ -147,10 +149,18 @@ export const ATTESTED_PROJECT_NATIVE_TOOLS: ReadonlySet<string> = new Set([
   "terminal_exec", "process_start", "process_status", "process_list",
   "process_logs", "process_write_stdin", "process_stop",
 ]);
+const ATTESTED_REPOSITORY_CATALOG_TOOLS: ReadonlySet<string> = new Set(["repository_catalog"]);
+const ATTESTED_PROJECT_CONTINUITY_TOOLS: ReadonlySet<string> = new Set([
+  "project_briefing", "continuity_state", "continuity_update", "handoff_create", "handoff_get",
+]);
+const ATTESTED_SPECIAL_TOOLS: ReadonlySet<string> = new Set([
+  ...ATTESTED_REPOSITORY_CATALOG_TOOLS, ...ATTESTED_PROJECT_CONTINUITY_TOOLS,
+]);
 export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...PRODUCT_MCP_CORE_READ_TOOLS,
   ...ATTESTED_DEVICE_ACTION_TOOLS,
   ...ATTESTED_PROJECT_NATIVE_TOOLS,
+  ...ATTESTED_SPECIAL_TOOLS,
 ]);
 // Compatibility export for callers/tests that previously consumed the read-only name.
 export const PRODUCT_MCP_DIRECT_READ_TOOLS = PRODUCT_MCP_DIRECT_TOOLS;
@@ -371,7 +381,8 @@ export function createCanonicalProductMcpGateway(
 
       let handlers = deniedHandlers;
       if (toolName && allowedTools.has(toolName)
-        && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName) || ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName))) {
+        && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName) || ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
+          || ATTESTED_SPECIAL_TOOLS.has(toolName))) {
         let trusted: AttestedMcpDevice | null = null;
         let pending = false;
         let trustFailure: string | null = null;
@@ -408,7 +419,11 @@ export function createCanonicalProductMcpGateway(
                 }, 409)
               : ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
               ? createAttestedProjectActionHandler(env, trusted)
-              : createAttestedDeviceActionHandler(env, trusted),
+              : ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)
+                ? createAttestedProjectContinuityHandler(env, trusted)
+                : ATTESTED_REPOSITORY_CATALOG_TOOLS.has(toolName)
+                  ? createAttestedRepositoryCatalogHandler(env, trusted)
+                  : createAttestedDeviceActionHandler(env, trusted),
         };
       }
       return handleOrdaxMcp(request, handlers, allowedTools);

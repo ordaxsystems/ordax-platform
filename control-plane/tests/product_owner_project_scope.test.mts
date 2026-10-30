@@ -32,7 +32,7 @@ function request(repository = "ordaxsystems/ordax-runtime", deviceId = DEVICE) {
 
 test("GitHub repository identity is owner/repository only, never a URL or local slug", () => {
   assert.equal(canonicalGithubRepositoryFullName("ordaxsystems/ordax-runtime"), "ordaxsystems/ordax-runtime");
-  assert.equal(canonicalGithubRepositoryFullName("  OrdaXSystems/ordax-runtime  "), "OrdaXSystems/ordax-runtime");
+  assert.equal(canonicalGithubRepositoryFullName("  OrdaXSystems/ordax-runtime  "), "ordaxsystems/ordax-runtime");
   for (const invalid of [
     "ordax-runtime",
     "https://github.com/ordaxsystems/ordax-runtime",
@@ -144,7 +144,7 @@ test("Owner scope response retains only vetted canonical IDs, never SQL extras",
   };
   assert.deepEqual(projectScopeResponse(raw, "ordaxsystems/ordax-runtime"), {
     ok: true, space_id: SPACE, project_id: PROJECT, repository_id: 12345,
-    repository_full_name: "OrdaXSystems/ordax-runtime",
+    repository_full_name: "ordaxsystems/ordax-runtime",
   });
   assert.deepEqual(
     projectScopeResponse({ok:false,error:"device_not_owned",root:"DO_NOT_LEAK"},

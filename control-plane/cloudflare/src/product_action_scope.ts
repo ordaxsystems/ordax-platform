@@ -22,6 +22,13 @@ export const PROJECT_BROWSER_ACTIONS = new Set<string>([
   "browser.type",
 ]);
 
+export const PROJECT_CONTINUITY_ACTIONS = new Set<string>([
+  "agent.project_briefing", "continuity.get", "continuity.update", "handoff.create", "handoff.get",
+]);
+export const REPOSITORY_CATALOG_DEVICE_ACTIONS = new Set<string>([
+  "workspace.repository_catalog",
+]);
+
 export const APP_INTELLIGENCE_DEVICE_ACTIONS = new Set<string>([
   "intelligence.app_catalog",
   "intelligence.app_detail",
@@ -67,6 +74,7 @@ export const DEVICE_SCOPED_ACTIONS = new Set<string>([
   "orchestrator.app_read",
   ...COMPUTER_DEVICE_ACTIONS,
   ...APP_INTELLIGENCE_DEVICE_ACTIONS,
+  ...REPOSITORY_CATALOG_DEVICE_ACTIONS,
 ]);
 
 export function isDeviceScopedAction(action: string): boolean {

@@ -3,6 +3,8 @@ import {
   COMPUTER_DEVICE_ACTIONS,
   OWNER_DEVICE_COMPUTER_GRANT_PROFILES,
   PROJECT_BROWSER_ACTIONS,
+  PROJECT_CONTINUITY_ACTIONS,
+  REPOSITORY_CATALOG_DEVICE_ACTIONS,
 } from "./product_action_scope.ts";
 
 export type OwnerGrantProfile = Readonly<{
@@ -18,6 +20,7 @@ const WRITE_ACTIONS = new Set<string>([
   "browser.click", "browser.navigate", "browser.start", "browser.stop", "browser.type",
   "computer.terminal_exec", "terminal.exec", "process.start", "process.write_stdin", "process.stop",
   "computer.process_start", "computer.process_write_stdin", "computer.process_stop",
+  "continuity.update", "handoff.create",
 ]);
 
 export function productCapabilityAccessMode(capability: string): "read" | "write" {
@@ -42,6 +45,8 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
   "full-computer-control": fullComputer,
   ...computerProfiles,
   "app-intelligence-read": profile("device", APP_INTELLIGENCE_DEVICE_ACTIONS),
+  "repository-catalog-read": profile("device", REPOSITORY_CATALOG_DEVICE_ACTIONS),
+  "project-continuity": profile("project", PROJECT_CONTINUITY_ACTIONS),
   "orchestrator-app-read": profile("device", ["orchestrator.app_read"]),
   // Project snapshots are a separate least-privilege Product grant. Runtime
   // still requires a live resource binding before it can read any local root.

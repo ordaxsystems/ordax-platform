@@ -29,7 +29,7 @@ export function canonicalGithubRepositoryFullName(value: unknown): string | null
   if (normalized.length < 3 || normalized.length > 140 || !GITHUB_REPOSITORY_RE.test(normalized)) {
     return null;
   }
-  return normalized;
+  return normalized.toLowerCase();
 }
 
 function configuredConnectionString(env: ProductPostgresEnv): string | null {
