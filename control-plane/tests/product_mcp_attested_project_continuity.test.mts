@@ -223,3 +223,61 @@ test("missing continuity grant returns explicit owner remediation", async () => 
   });
   assert.equal(enqueued, false);
 });
+
+test("repository resolver may not retarget continuity even with matching owner, Space and project", async () => {
+  let grantLookups = 0;
+  let enqueues = 0;
+  const handler = createAttestedProjectContinuityHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject: async () => ({
+      ok: true,
+      space_id: SPACE,
+      project_id: PROJECT,
+      repository_full_name: "ordaxsystems/another-private-project",
+    }),
+    listTargets: async () => { grantLookups++; return catalog(grantGroup("continuity.get", "read")); },
+    enqueue: async () => { enqueues++; throw new Error("must not enqueue"); },
+  });
+  const result = await handler(actionRequest("continuity.get", {
+    repository_full_name: REPOSITORY,
+  }));
+  assert.equal(result.status, 409);
+  assert.equal((await result.json()).error, "product_project_scope_mismatch");
+  assert.equal(grantLookups, 0);
+  assert.equal(enqueues, 0);
+});
+
+test("continuity denies foreign OAuth owner and caller-supplied Space before project resolution", async () => {
+  let resolved = 0;
+  const foreignOwner = createAttestedProjectContinuityHandler(ENV, TRUSTED, {
+    authenticate: async () => ({
+      ok: true as const,
+      ownerUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      clientKind: "product-mcp" as const,
+      clientId: CLIENT,
+      expiresAt: 2_000_000_000,
+    }),
+    resolveProject: async () => { resolved++; return resolvedProject(); },
+  });
+  const ownerDenied = await foreignOwner(actionRequest("continuity.get", {
+    repository_full_name: REPOSITORY,
+  }));
+  assert.equal(ownerDenied.status, 403);
+  assert.equal((await ownerDenied.json()).error, "trusted_operation_required");
+
+  const spaceHandler = createAttestedProjectContinuityHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject: async () => { resolved++; return resolvedProject(); },
+  });
+  const spaceDenied = await spaceHandler(new Request("https://mcp.example/v3/product/actions", {
+    method: "POST",
+    headers: { authorization: "Bearer test", "content-type": "application/json" },
+    body: JSON.stringify({
+      device_id: DEVICE, space_id: SPACE, project: null,
+      action: "continuity.get", arguments: { repository_full_name: REPOSITORY },
+    }),
+  }));
+  assert.equal(spaceDenied.status, 400);
+  assert.equal((await spaceDenied.json()).error, "product_project_continuity_action_invalid");
+  assert.equal(resolved, 0);
+});

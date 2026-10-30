@@ -275,6 +275,12 @@ export function createAttestedProjectContinuityHandler(
       }
       const resolved = parseResolvedProject(resolvedRaw);
       if (!resolved) return json({ ok: false, error: "product_project_scope_invalid_response" }, 503);
+      // An apparently valid scope cannot authorize a different repository:
+      // the owner/device resolver result must repeat the exact canonical
+      // repository the caller requested. Never reach grant lookup on mismatch.
+      if (resolved.repositoryFullName !== repositoryFullName) {
+        return json({ ok: false, error: "product_project_scope_mismatch" }, 409);
+      }
 
       const catalog = await listTargets(env, {
         ownerUserId: identity.ownerUserId,
