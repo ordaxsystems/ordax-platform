@@ -78,7 +78,7 @@ export function publicProductPage(pathname: string): Response | null {
   if (pathname === "/privacy") {
     return html("Privacy Policy", `
 <h1>Privacy Policy</h1>
-<p>Effective: 1 October 2026.</p>
+<p>Effective: 22 October 2026.</p>
 <p>ORDAX is a capability platform that connects an authorized client to devices and scopes the user explicitly connects.</p>
 <h2>Data processed</h2>
 <ul>
@@ -86,6 +86,7 @@ export function publicProductPage(pathname: string): Response | null {
 <li><strong>Device and authorization data:</strong> device identifiers and names, project or Space scopes, grants, allowed actions and connection state needed to route authorized requests.</li>
 <li><strong>Requested capability data:</strong> file contents, Git information, Computer Control results, adapter metadata, command results or artifacts only when an authorized tool is invoked for that data.</li>
 <li><strong>Operational and audit data:</strong> action names, scope, request/status identifiers, authorization decisions, execution status and timestamps needed for security, reliability and abuse investigation.</li>
+<li><strong>MCP usage measurement:</strong> when enabled, the count of successful authenticated tool calls by account, OAuth client, tool and UTC calendar month. A short-lived HMAC-SHA-256 request fingerprint, keyed by a deployment secret, suppresses duplicate transport retries. Tool arguments, prompts and conversation history are not stored by this meter. The meter is currently disabled by default and does not apply subscription quotas or charges.</li>
 </ul>
 <h2>How data is used</h2>
 <p>Data is used to authenticate connections, enforce grants, route tool calls to the selected device, return requested results, maintain reliability and provide security/audit controls. ORDAX does not request the full conversation history of an external AI client.</p>
@@ -98,6 +99,7 @@ export function publicProductPage(pathname: string): Response | null {
 <li><strong>OAuth credentials:</strong> ORDAX verifies bearer tokens for requests but does not persist the user's OAuth access token in the Control Plane. Authentication records held by the identity provider follow the account lifecycle and the provider's applicable policy.</li>
 <li><strong>Temporary Product artifacts:</strong> signed download links expire after 1 hour. Artifact bytes and their Product metadata are retained for no more than 7 days, then the daily retention process deletes both the Cloudflare R2 object and its D1 record.</li>
 <li><strong>Product action and audit history:</strong> completed action records, request metadata and audit entries are retained for no more than 30 days for reliability, security and abuse investigation.</li>
+<li><strong>MCP usage measurement:</strong> request fingerprints are eligible for deletion after 24 hours and the daily cleanup normally removes them within about 48 hours. Monthly aggregate counts retain only the current and previous UTC calendar month. Cleanup outages may delay deletion.</li>
 <li><strong>Device pairings:</strong> pairing secrets expire and expired pairing records are deleted by the next daily retention cycle.</li>
 <li><strong>Device links and grants:</strong> active links and grants remain while the user keeps them active. Revoked or expired authorization metadata is retained for no more than 30 days after it becomes inactive, once no retained action history depends on it.</li>
 </ul>

@@ -16,7 +16,7 @@ A nomenclatura de produto é **Servidor MCP personalizado do OrdaX** ou, de form
 
 A configuração e o fluxo de atualização estão em [CHATGPT-CUSTOM-MCP-SERVER.md](CHATGPT-CUSTOM-MCP-SERVER.md).
 
-## Estado atual — 16/10/2026
+## Estado observado — 18/10/2026
 
 A fonte de verdade `control-plane/cloudflare/production-foundation.json#mcp_release` registra:
 
@@ -28,7 +28,7 @@ A fonte de verdade `control-plane/cloudflare/production-foundation.json#mcp_rele
 - domínio canônico `mcp.ordax.com.br`;
 - OAuth canônico já com evidência de consentimento do cliente ChatGPT.
 
-O MCP autenticado observado no ChatGPT reporta **18 tools**. A superfície já inclui sessão, perfil, targets, status, observação do desktop e Computer Control tipado. Portanto, os documentos não devem mais afirmar que o MCP atual é “read-only canary”.
+O MCP publicado e autenticado, observado no ChatGPT em 18/10/2026, reporta **30 tools**. O candidato da PR #212 propõe **37 tools** após upgrade compatível do Runtime e autorização explícita. A superfície já inclui sessão, perfil, targets, status, observação do desktop e Computer Control tipado. Portanto, os documentos não devem mais afirmar que o MCP atual é “read-only canary”.
 
 Isso ainda **não equivale a release irrestrita de controle remoto**. O SSOT mantém os seguintes blockers de readiness para a promoção final:
 
@@ -40,7 +40,7 @@ Em outras palavras: as tools podem estar publicadas no catálogo enquanto um tar
 
 ## Superfície publicada
 
-As 18 tools atuais são:
+As 30 tools atualmente observadas no MCP de produção são:
 
 ### Identidade e descoberta
 
@@ -58,6 +58,18 @@ As 18 tools atuais são:
 - `computer_access_status`
 - `computer_processes`
 
+### Sistema de arquivos, leitura e edição tipadas
+
+- `computer_file_stat`
+- `computer_directory_list`
+- `computer_text_read`
+- `computer_search`
+- `computer_text_write`
+- `computer_text_patch`
+- `computer_directory_create`
+- `computer_path_move`
+- `computer_path_remove`
+
 ### Interação tipada
 
 - `computer_focus_window`
@@ -68,6 +80,21 @@ As 18 tools atuais são:
 - `computer_scroll`
 - `computer_type`
 - `computer_hotkey`
+- `computer_clipboard_read`
+- `computer_clipboard_write`
+- `computer_terminate_process`
+
+**Candidato de integração (ainda não promovido):** `terminal_exec`, `process_status`, `process_list`, `process_logs`, `process_start`, `process_write_stdin` e `process_stop` são ações de projeto, não herdam `full-computer-control`; exigem a prova canônica do Git origin, a associação Space/projeto, o perfil Owner `project-native-terminal` ou `project-native-process` e Runtime com suporte à atestação. Essa fronteira reutiliza o executor `terminal.exec`/supervisor `process.*` existente. O candidato não cria outro daemon, MCP ou banco de grants. Um terminal não deve ser simulado por `computer_type`.
+
+**Ordem de liberação:** (1) Runtime com contrato de projeto comprovado; (2) autorização Owner explícita via Studio **apenas no Windows** e, no OrdaX OS, via gerenciador de permissões **do próprio sistema**; (3) canary E2E autenticado executando argv inofensivo; (4) verificação de receipts e revogação; (5) promoção da Platform e atualização de ferramentas no ChatGPT. O merge isolado da Platform não comprova disponibilidade de execução.
+
+### Autoridade e superfícies por sistema
+
+- **OrdaX OS:** o sistema operacional é dono da política e dos serviços locais de permissões. O aplicativo Studio consome contratos públicos e não concede privilégios por conta própria, nem é dependência de boot, de uso da IA ou do MCP. A interface de consentimento Owner faz parte do sistema, não do Studio.
+- **Windows com OrdaX Runtime:** o Studio fornece uma interface de autorização para o proprietário do PC, utilizando os endpoints Owner e a autoridade PostgreSQL já existentes; não é um segundo serviço de autorização nem um substituto da política Windows/Runtime.
+- **Ambos:** grants remotos pertencem à autoridade Product/Platform e são associados a conta, cliente MCP, dispositivo, Space/projeto e capacidade. A política local do host é outra condição necessária. `full_access` local não cria automaticamente um grant de terminal remoto. O MCP nunca autoriza a si próprio.
+- A resposta do MCP **não deve exigir Studio no OrdaX OS** nem assumir a presença de um aplicativo first-party para conceder permissão. Dicas de autorização devem apontar o responsável correto pelo ambiente. O texto de hints do catálogo é apenas orientação, não um mecanismo de concessão.
+
 
 A publicação de uma tool só torna seu contrato descobrível pelo cliente. A execução continua condicionada a OAuth, target, grant, sessão atestada, Runtime online, política local e validação dos argumentos.
 
@@ -124,7 +151,7 @@ Regras que permanecem obrigatórias:
 - nenhuma sessão compartilhada entre usuários/clientes;
 - grants por capability e, quando aplicável, por Space/projeto;
 - política local do Runtime como uma segunda fronteira de autorização;
-- ações de computador limitadas e tipadas, sem usar shell genérico como substituto;
+- ações gráficas de computador limitadas e tipadas; terminal nativo somente com grant de projeto específico, sem transformar `computer.type` em shell;
 - auditoria e status/receipt para ações remotas;
 - nenhuma promoção final sem E2E atestado.
 
@@ -132,7 +159,7 @@ Regras que permanecem obrigatórias:
 
 ## Evidência e SSOT
 
-A fonte de verdade de release é `control-plane/cloudflare/production-foundation.json#mcp_release`. Em 16/10/2026 ela registra `supports_remote_actions=true`, candidato interativo atestado e blockers explícitos para a promoção final.
+A fonte de verdade de release é `control-plane/cloudflare/production-foundation.json#mcp_release`. No baseline registrado em 16/10/2026 ela registra `supports_remote_actions=true`, candidato interativo atestado e blockers explícitos para a promoção final.
 
 A verificação funcional do cliente deve sempre distinguir:
 

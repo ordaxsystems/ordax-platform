@@ -63,38 +63,27 @@ OAuth só deve exigir nova autorização quando a própria sessão, consentiment
 - mudanças incompatíveis precisam de migração explícita e gate de compatibilidade;
 - o botão **Atualizar ferramentas** atualiza a descoberta do cliente; ele não concede capabilities ao dispositivo.
 
-## Superfície MCP publicada em 16/10/2026
+## Superfície publicada e snapshot do ChatGPT (19/10/2026 UTC)
 
-A conexão autenticada atual reporta **18 tools**. A existência de uma tool no catálogo significa que o ChatGPT conhece seu contrato; **não significa que ela esteja autorizada em todos os computadores**.
+O Worker OrdaX MCP publicou **37 ferramentas** na revisão `2026-10-18.3` (30 de sessão/computador + sete de terminal/processos de projeto). **Esse é um retrato datado**, não outro catálogo para manutenção. As fontes executáveis de verdade permanecem `control-plane/cloudflare/src/mcp_http.ts` (contratos `tools/list`) e `control-plane/cloudflare/src/product_mcp_entry.ts` (allowlist do endpoint); os testes canônicos validam a lista exata.
 
-### Identidade, descoberta e continuidade
+As sete tools adicionais são `terminal_exec`, `process_start`, `process_status`, `process_list`, `process_logs`, `process_write_stdin` e `process_stop`. Não confundir **`computer_processes`**, leitura de processos do Windows com grant `computer-observe`, com as ações nativas **`process_*`**, vinculadas a projeto e autorizadas separadamente. Ferramentas publicadas **não** são prova de grant nem de suporte do Runtime instalado.
 
-- `ordax_session` — verifica a sessão OrdaX autenticada;
-- `ordax_profile` — retorna a identidade opaca estável do perfil;
-- `ordax_targets` — lista dispositivos autorizados, presença, Spaces e grants;
-- `ordax_action_status` — consulta o estado/resultado de uma ação já aceita.
+### Quando o ChatGPT ainda oferece menos ferramentas que o Worker
 
-### Observação do computador
+Um app conectado ao ChatGPT pode manter um **snapshot anterior de schemas de ferramentas** depois de um deploy do servidor. No incidente #216, o app OrdaX ligado ao Apps SDK (`asdk_app_6ad0f82f1ac081919f27bad656566da2`) ainda oferecia **30 ferramentas** nesta conversa, embora `ordax_session` já informasse 37 no servidor. Contar ferramentas pelo retorno de `ordax_session` não comprova que o cliente as carregou.
 
-- `computer_windows` — janelas visíveis;
-- `computer_active_window` — janela em primeiro plano;
-- `computer_screenshot` — captura da área de trabalho ou janela ativa;
-- `computer_screen_info` — monitores, desktop virtual e cursor;
-- `computer_access_status` — política local de acesso e roots permitidos;
-- `computer_processes` — metadados limitados de processos.
+Procedimento oficial para **o mesmo app**:
 
-### Interação tipada com o computador
+1. Confirmar o Worker no endpoint canônico e os gates de `tools/list` e `/ready`. Não trocar a URL nem registrar um segundo MCP.
+2. Abrir **ChatGPT → Configurações → Plugins → OrdaX MCP → Atualizar/Refresh** (a localização/texto exato podem variar conforme a interface). A atualização de ferramentas deve ser feita na **conexão do app**, não no plugin legado de outro ID.
+3. Revisar as sete novas ações e o escopo solicitado; não aprovar grants de execução implicitamente. Abrir uma nova conversa e selecionar o **mesmo app**; verificar os nomes das sete ações no catálogo efetivamente disponibilizado ao cliente.
+4. Se não existir opção de atualização no app conectado, usar o fluxo oficial de gestão/república do **próprio app Apps SDK**, preservando o registro original e a identidade OAuth. A alteração de metadados de um pacote app-backed não modifica seu registro de ferramentas; não criar cópias ou trocar o endpoint.
+5. Validar separadamente o estado do target por `ordax_targets` e os grants canônicos `project-native-terminal` e `project-native-process` associados ao projeto/Space. Na ausência dos grants, as tools **devem negar** execução. Com grants e Runtime compatível, testar autorização, ação e recibo.
 
-- `computer_focus_window` — traz uma janela visível para primeiro plano;
-- `computer_click` — clique limitado e validado;
-- `computer_mouse_move` — movimento validado do ponteiro;
-- `computer_drag` — gesto de arrastar limitado;
-- `computer_launch_app` — inicia executável validado, sem expansão de shell;
-- `computer_scroll` — rolagem limitada;
-- `computer_type` — digitação Unicode limitada;
-- `computer_hotkey` — atalho de teclado validado e limitado.
+Não ligar `capabilities.tools.listChanged=true` como tentativa de forçar refresh sem implementar e testar também as notificações do protocolo. Atualização do catálogo, autoridade de grants e presença do dispositivo são três condições diferentes.
 
-Todas as ações de mutação permanecem submetidas ao grant aplicável, à política local do Runtime e aos limites do sistema operacional. A superfície atual não deve ser descrita como “somente leitura”; ao mesmo tempo, **publicada** não é sinônimo de **concedida**.
+A descrição do app em uma publicação mais antiga pode citar "somente leitura" ou quantidades históricas de ferramentas; isso não define os privilégios atuais. **O registro do app é editado no seu próprio fluxo do Apps SDK**. O pacote de ligação app-backed permite atualização de skills, mas não aceita mudar apresentação/identidade como substituição da publicação do app.
 
 ## Camadas de autorização
 
@@ -108,7 +97,14 @@ Para uma ação local acontecer, as seguintes condições são independentes e p
 6. validação dos argumentos e limites da tool;
 7. auditoria/receipt/status da ação.
 
-Por isso, um computador pode aparecer em `ordax_targets` e ainda rejeitar clique, screenshot, digitação ou abertura de aplicativo. Isso é comportamento esperado e fail-closed.
+Por isso, um computador pode aparecer em `ordax_targets` e ainda rejeitar clique, screenshot, digitação, leitura de arquivo ou clipboard. Isso é comportamento esperado e fail-closed.
+
+### Gate adicional para processos e terminal por projeto
+
+Antes de consultar `project-native-process` ou `project-native-terminal`, a Platform **resolve um vínculo exato**, administrado pelo Owner, entre um Space ativo, um Projeto ativo, uma seleção GitHub verdadeira (`repository_id` e `repository_full_name`), o dispositivo habilitado como executor daquele Space e o dispositivo vinculado ao projeto. Zero vínculos válidos gera `product_project_scope_not_found`; múltiplos geram `product_project_scope_ambiguous`. São **erros de cadastro/identidade**, anteriores à autorização. Um grant global de observação ou `full_access` Windows não corrige a ausência de projeto e não deve ser promovido como solução.
+
+Se `process_list` ou `terminal_exec` retornar `product_project_scope_not_found`, concluir o **cadastro/vínculo do projeto e dispositivo pela autoridade Owner do OrdaX** antes de pedir grants. Não preencher tabelas ou inventar UUIDs via MCP, SQL administrativo, Surface ou Studio; o fluxo de cadastro precisa existir e confirmar essas escolhas. Só depois solicitar `project-native-process` ou `project-native-terminal` sob o **mesmo** Space, Projeto, cliente OAuth e dispositivo. A implantação desse fluxo é acompanhada na issue `ordax-platform#220`. O Studio no Windows é consumidor dos controles de permissão, não a autoridade do SO OrdaX.
+
 
 ## O que ainda falta para o básico completo
 
@@ -118,9 +114,10 @@ O próximo marco não é aumentar indiscriminadamente o número de tools, e sim 
 | --- | --- | --- |
 | OAuth, sessão, targets, presença | disponível | manter isolamento, revogação e E2E |
 | Computer Control | superfície publicada | concluir grants reais e E2E por target |
-| Arquivos/projetos | fundação existente, não faz parte das 18 tools atuais | listar roots/projetos, ler, buscar, criar e editar de forma grant-scoped |
+| Arquivos no computador | leitura e mutações já presentes no catálogo do servidor | concluir E2E por target, grant explícito e concorrência segura sem ampliar roots |
+| Projetos/workspace | fundação existente, ainda fora da superfície direta | listar roots/projetos e operações project-scoped sem confundir autoridade de device com project |
 | Git | ainda não faz parte da superfície atual | status, diff, branch, commit, pull/push e PR tipados |
-| Processos de desenvolvimento | parcial | iniciar/parar processo autorizado, logs, portas, health e preview |
+| Processos de desenvolvimento | sete ferramentas de projeto publicadas no Worker; cliente ainda depende de Refresh | validar grant próprio, Runtime instalado, iniciar/parar processo, logs e recibos E2E |
 | Browser de testes | ainda não faz parte da superfície atual | navegar, clicar, preencher, inspecionar e validar UI sem depender de shell genérico |
 | OrdaX Studio | integração a consolidar | projeto ativo, workspace, preview e continuidade estruturada |
 | Blender | adapter especializado a promover | operações de cena/validação por tools próprias |
@@ -128,7 +125,7 @@ O próximo marco não é aumentar indiscriminadamente o número de tools, e sim 
 | Grants/Owner UI | em evolução | perfis de capability claros, revisão, revogação e expiração |
 | Auditoria/E2E | em evolução | ChatGPT -> MCP -> gateway -> Runtime -> resultado, com identidade e provenance verificáveis |
 
-Terminal genérico não deve substituir APIs tipadas. Quando terminal for necessário, ele deve ser uma capability própria, limitada e auditável.
+Terminal genérico não deve substituir APIs tipadas. Quando terminal for necessário, ele deve ser uma capability própria, limitada e auditável. Como `terminal.exec` é project-scoped, ele não deve ser promovido pela allowlist de device: precisa de binding e autorização de projeto explícitos.
 
 ## Gate para chamar a primeira versão de “básico completo”
 

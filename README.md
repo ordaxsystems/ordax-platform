@@ -42,7 +42,7 @@ Platform owns remote protocol, OAuth verification, grant resolution, queueing/st
 
 The MCP tool catalog and the target's authorization are deliberately separate. A tool can be discoverable by ChatGPT while a specific device still lacks the grant needed to execute it. OAuth identity, target discovery, capability grant, local Runtime policy, reachability and action result must each be validated independently.
 
-As of 2026-10-16 the authenticated ChatGPT MCP surface reports 18 tools: session/profile/targets/action status plus typed Windows observation and Computer Control. The release SSOT has `supports_remote_actions=true`, while final promotion remains fail-closed behind explicit grant and attested E2E gates.
+The current Product MCP code exposes **44 tools**: account/session/discovery/status, device-scoped Computer Control (including seven native device terminal/process tools), and seven distinct project-scoped terminal/process tools. This describes the server-side catalog, **not** the tools loaded by a previously connected ChatGPT conversation or the grants of a device. On 2026-10-19 the server advertised 44 while this conversation exposed 37; the missing seven were native **device** tools (issue #216). Never infer execution authority from tool availability or total count. The release SSOT has `supports_remote_actions=true`, while execution remains fail-closed behind OAuth identity, grants, device attestation and local Runtime policy. See [Product MCP connection and terminology](docs/PRODUCT_MCP_CONNECT.md).
 
 ## Updating the ChatGPT MCP server
 

@@ -41,6 +41,9 @@ class CloudflareDirectDeployGateTests(unittest.TestCase):
     def test_ready_foundation_requires_no_d1_binding(self):
         self.foundation["deployment_ready"] = True
         self.foundation["readiness_blockers"] = []
+        # The canonical configuration has no D1. Reintroducing the old
+        # binding must still cause the release gate to fail closed.
+        self.wrangler["d1_databases"] = [{"binding": "DB", "database_name": "retired"}]
         with self.assertRaisesRegex(gate.DeployGateError, "D1 binding"):
             self.validate()
 
@@ -113,9 +116,8 @@ class CloudflareDirectDeployGateTests(unittest.TestCase):
             blocker for blocker in self.foundation["readiness_blockers"]
             if blocker != "worker_d1_cutover_incomplete"
         ]
-        with self.assertRaisesRegex(gate.DeployGateError, "D1 cutover blocker"):
-            self.validate()
-        self.wrangler.pop("d1_databases", None)
+        # A deleted D1 authority is not itself a reason to block development;
+        # any reintroduced D1 reference without a blocker is forbidden.
         with self.assertRaisesRegex(gate.DeployGateError, "D1 cutover blocker"):
             self.validate("const db = env['DB']")
         self.assertFalse(self.validate("export default {}"))
@@ -175,13 +177,15 @@ class CloudflareDirectDeployGateTests(unittest.TestCase):
         with self.assertRaisesRegex(gate.DeployGateError, "public browser key"):
             self.validate()
 
-    def test_do_and_r2_bindings_are_enforced(self):
-        self.wrangler["r2_buckets"][0]["bucket_name"] = "incorrect"
-        with self.assertRaisesRegex(gate.DeployGateError, "R2 bucket"):
+    def test_retired_do_and_r2_bindings_are_forbidden(self):
+        self.assertNotIn("r2_buckets", self.wrangler)
+        self.assertNotIn("durable_objects", self.wrangler)
+        self.wrangler["r2_buckets"] = [{"binding": "ARTIFACTS", "bucket_name": self.foundation["r2_bucket"]}]
+        with self.assertRaisesRegex(gate.DeployGateError, "retired artifact R2"):
             self.validate()
-        self.wrangler["r2_buckets"][0]["bucket_name"] = self.foundation["r2_bucket"]
-        self.wrangler["durable_objects"]["bindings"][0]["class_name"] = "Changed"
-        with self.assertRaisesRegex(gate.DeployGateError, "Durable Objects"):
+        self.wrangler.pop("r2_buckets")
+        self.wrangler["durable_objects"] = {"bindings": [{"name": "DEVICE_SESSIONS", "class_name": "DeviceSession"}]}
+        with self.assertRaisesRegex(gate.DeployGateError, "retired Durable Objects"):
             self.validate()
 
     def test_direct_guard_rejects_actual_not_ready_foundation(self):

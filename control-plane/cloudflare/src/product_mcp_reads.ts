@@ -3,18 +3,22 @@ import { sanitizeTargets, isProductActionStatus, type OrdaxMcpHandlers } from ".
 import {
   listCanonicalProductTargets,
   getProductAction,
+  productMcpUsageMeterEnabled,
+  recordProductMcpUsage,
   ProductPostgresError,
   type ProductPostgresEnv,
+  type ProductMcpUsageRecording,
 } from "./product_postgres_store.ts";
 import { ensureProductMcpTargetDiscovery } from "./product_mcp_discovery_store.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 
 type ReadEnv = ProductAuthEnv & ProductPostgresEnv;
-type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction">;
+type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction" | "recordUsage" | "usageFingerprintKey">;
 type ReadDependencies = {
   listTargets?: typeof listCanonicalProductTargets;
   getAction?: typeof getProductAction;
   ensureDiscovery?: typeof ensureProductMcpTargetDiscovery;
+  recordUsage?: (env: ReadEnv, input: ProductMcpUsageRecording) => ReturnType<typeof recordProductMcpUsage>;
 };
 
 const RUNTIME_KINDS = new Set(["ordax-os", "desktop-agent", "mobile-client", "other"]);
@@ -96,6 +100,7 @@ export function createCanonicalProductMcpReadHandlers(
   const readTargets = dependencies.listTargets ?? listCanonicalProductTargets;
   const readAction = dependencies.getAction ?? getProductAction;
   const ensureDiscovery = dependencies.ensureDiscovery ?? ensureProductMcpTargetDiscovery;
+  const recordUsage = dependencies.recordUsage ?? recordProductMcpUsage;
   return {
     async session(request) {
       const identity = await authenticateProductMcpClientRequest(request, env);
@@ -175,5 +180,12 @@ export function createCanonicalProductMcpReadHandlers(
         return unavailable(error, "product_action_status_unavailable");
       }
     },
+    ...(productMcpUsageMeterEnabled(env) ? {
+      usageFingerprintKey: env.MCP_USAGE_FINGERPRINT_KEY,
+      async recordUsage(input: ProductMcpUsageRecording) {
+        const result = await recordUsage(env, input);
+        if (result.ok !== true) throw new ProductPostgresError("product_mcp_usage_not_recorded", 503);
+      },
+    } : {}),
   };
 }

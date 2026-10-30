@@ -58,6 +58,28 @@ test("signed OAuth client opens challenge without trusting model device_id",asyn
   });
 });
 
+test("offline session availability is a conflict with canonical device state, not an argument error", async () => {
+  await withIssuer(async () => {
+    const response = await openCentralSessionFromMcp(mcpRequest(await token()), env, {
+      open: async () => ({ ok: false, error: "central_device_offline" }),
+    });
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { ok: false, error: "central_device_offline" });
+  });
+});
+
+test("discovery-only online device reports missing action Runtime rather than opening a Central challenge", async () => {
+  await withIssuer(async () => {
+    const response = await openCentralSessionFromMcp(mcpRequest(await token()), env, {
+      open: async () => ({ ok: false, error: "central_device_runtime_not_ready" }),
+    });
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), {
+      ok: false, error: "central_device_runtime_not_ready",
+    });
+  });
+});
+
 test("missing provider marker fails closed before Postgres open",async()=>{
   await withIssuer(async()=>{
     const jwt=await token();
@@ -135,3 +157,4 @@ test("device endpoint rejects malformed identity and extra confirmation fields",
     });
   assert.equal(extra.status,400);
 });
+

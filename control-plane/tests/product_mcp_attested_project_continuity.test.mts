@@ -219,7 +219,7 @@ test("missing continuity grant returns explicit owner remediation", async () => 
     ok: false,
     error: "product_grant_not_resolved",
     required_profile: "project-continuity",
-    owner_action: "authorize_in_ordax_studio",
+    owner_action: "authorize_in_ordax_owner_permissions",
   });
   assert.equal(enqueued, false);
 });

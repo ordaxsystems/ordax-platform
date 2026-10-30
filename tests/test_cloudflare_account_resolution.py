@@ -39,11 +39,7 @@ LEGACY_D1_MIGRATION_ALLOWLIST = {
     "0007_product_device_pairing.sql",
     "0008_product_device_owner.sql",
 }
-LEGACY_OPERATOR_HANDLER_ALLOWLIST = {
-    "provisionDevice",
-    "enqueueJob",
-    "getJob",
-}
+LEGACY_OPERATOR_HANDLER_ALLOWLIST = set()
 
 
 class CloudflareAccountResolutionContractTests(unittest.TestCase):
@@ -175,106 +171,45 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
 
     def test_main_worker_json_ingress_uses_shared_byte_bounded_reader(self):
         source = WORKER_SOURCE.read_text(encoding="utf-8")
-        bounded = (CLOUDFLARE_SRC / "request_json.ts").read_text(encoding="utf-8")
-        self.assertIn('import { readBoundedJsonObject } from "./request_json";', source)
-        self.assertIn("return readBoundedJsonObject(request, maxBytes);", source)
-        self.assertNotIn("await request.text()", source)
-        self.assertIn("bytes += value.byteLength", bounded)
-        self.assertIn("if (bytes > maxBytes) return null", bounded)
-        self.assertIn("await reader.cancel()", bounded)
+        self.assertIn("readBoundedJsonObject(request, limit)", source)
+        self.assertIn("parseSmallJson(request, 16 * 1024)", source)
+        self.assertNotIn("request.json()", source)
 
     def test_d1_cutover_map_classifies_every_legacy_table_once(self):
         cutover = json.loads(D1_CUTOVER_MAP.read_text(encoding="utf-8"))
         sources = d1_worker_sources()
-        referenced_tables = {
-            match.lower()
-            for source in sources.values()
+        referenced_tables = {name.lower() for source in sources.values()
             if "D1Database" in source or d1_access_count(source) > 0
-            for match in D1_TABLE_RE.findall(source)
-        }
-        mapped_tables = [
-            table
-            for domain in cutover["domains"]
-            for table in domain["legacy_tables"]
-        ]
-        self.assertEqual(len(mapped_tables), len(set(mapped_tables)))
-        self.assertEqual(set(mapped_tables), referenced_tables)
-        # Tables retired from ALL Worker source remain traceable as historical
-        # migration evidence, but MUST NOT count as active authority.
-        retired = [
-            name for domain in cutover["domains"]
-            for name in domain.get("retired_tables", [])
-        ]
-        self.assertEqual(set(retired), {"ordax_product_audit", "ordax_product_device_pairings", "ordax_product_grants", "ordax_product_action_requests", "ordax_product_device_links"})
+            for name in D1_TABLE_RE.findall(source)}
+        self.assertFalse(referenced_tables, "no active D1 authority is permitted")
+        active = [table for domain in cutover["domains"] for table in domain["legacy_tables"]]
+        retired = [table for domain in cutover["domains"] for table in domain.get("retired_tables", [])]
+        self.assertFalse(active)
         self.assertEqual(len(retired), len(set(retired)))
-        self.assertFalse(set(retired) & referenced_tables)
-        self.assertFalse(set(retired) & set(mapped_tables))
+        self.assertIn("ordax_jobs", retired)
+        self.assertIn("ordax_artifacts", retired)
+        self.assertIn("ordax_devices", retired)
         self.assertFalse(cutover["policy"]["allow_callsite_growth"])
-        self.assertFalse(cutover["policy"]["allow_schema_copy_1_to_1"])
         self.assertFalse(cutover["policy"]["allow_dual_write"])
-        self.assertFalse(cutover["policy"]["durable_objects_as_business_persistence"])
 
     def test_product_cutover_stays_blocked_until_client_identity_is_enforced(self):
         cutover = json.loads(D1_CUTOVER_MAP.read_text(encoding="utf-8"))
-        domain = next(
-            item for item in cutover["domains"]
-            if item["id"] == "product_remote_authority"
-        )
+        domain = next(item for item in cutover["domains"] if item["id"] == "product_remote_authority")
         self.assertEqual(domain["authority_state"], "partial")
-        self.assertEqual(
-            set(domain["cutover_blockers"]),
-            {
-                "validated_client_identity_not_propagated_to_product_rpc",
-                "product_mcp_consumers_and_route_contracts_not_cut_over",
-            },
-        )
-
-        # #79 installed an exact client-scoped RPC, but the route still lacks
-        # a verified client identity and remains on the legacy D1 handler.
-        migration = (
-            ROOT / "control-plane/supabase/migrations/"
-            "20261007203000_product_client_grant_isolation_v1.sql"
-        ).read_text(encoding="utf-8")
-        self.assertIn("and g.client_id = p_client_id", migration)
-        self.assertIn("and v_existing.client_id = p_client_id", migration)
-        self.assertIn("drop function public.ordax_enqueue_product_action_v1(", migration)
-        adapter = (
-            ROOT / "control-plane/cloudflare/src/product_postgres_store.ts"
-        ).read_text(encoding="utf-8")
-        self.assertIn("if (!client || client.p_client_id === null)", adapter)
-        worker = WORKER_SOURCE.read_text(encoding="utf-8")
-        # The legacy D1 product action writer has been DELETED rather than
-        # masked by a model-facing route or silently moved to another file.
-        self.assertNotIn("async function createProductAction(", worker)
-        self.assertNotIn("handleOrdaxMcp(request", worker)
-        self.assertIn('error: "legacy_mcp_retired"', worker)
-        self.assertIn('error: "legacy_product_action_retired"', worker)
+        self.assertIn("validated_client_identity_not_propagated_to_product_rpc", domain["cutover_blockers"])
+        self.assertIn("product_mcp_consumers_and_route_contracts_not_cut_over", domain["cutover_blockers"])
+        source = WORKER_SOURCE.read_text(encoding="utf-8")
+        self.assertIn('error:"legacy_mcp_retired"', source)
+        self.assertIn("createCanonicalProductMcpReadHandlers(env)", source)
+        self.assertNotIn("env.DB", source)
 
     def test_d1_callsite_count_can_only_shrink(self):
         cutover = json.loads(D1_CUTOVER_MAP.read_text(encoding="utf-8"))
-        ceilings = cutover["legacy_source_callsite_ceilings"]
+        self.assertEqual(cutover["version"], 3)
+        self.assertEqual(cutover["legacy_source_callsite_ceilings"], {"index.ts": 0})
         sources = d1_worker_sources()
-        self.assertEqual(cutover["version"], 2)
-        self.assertTrue(ceilings)
-        self.assertEqual(
-            len(ceilings), len(set(ceilings)),
-            "duplicate source names are invalid",
-        )
-        current_total = 0
-        for name, ceiling in ceilings.items():
-            self.assertRegex(name, r"^[a-z][a-z0-9_]*\.ts$")
-            self.assertIs(type(ceiling), int)
-            self.assertGreaterEqual(ceiling, 0)
-            self.assertIn(name, sources, f"tracked source removed without SSOT cleanup: {name}")
-            current = d1_access_count(sources[name])
-            self.assertLessEqual(
-                current, ceiling, f"D1 references grew in {name}: {current} > {ceiling}"
-            )
-            current_total += current
-        self.assertLessEqual(current_total, sum(ceilings.values()))
-        if current_total:
-            foundation = json.loads(FOUNDATION.read_text(encoding="utf-8"))
-            self.assertIn("worker_d1_cutover_incomplete", foundation["readiness_blockers"])
+        self.assertEqual(sum(d1_access_count(v) for v in sources.values()), 0)
+        self.assertEqual(d1_source_names(sources), set())
 
     def test_computed_d1_access_and_new_source_are_detected(self):
         self.assertEqual(d1_access_count("env.DB; this.env.DB; env['DB']; env[\"DB\"]"), 4)
@@ -303,116 +238,38 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
 
     def test_device_websocket_handshake_fails_before_acceptance(self):
         source = WORKER_SOURCE.read_text(encoding="utf-8")
-        helper = source.split(
-            "function parseRuntimeIdentityHeaders(", 1
-        )[1].split("async function wakeDeviceSession(", 1)[0]
-        self.assertIn('request.headers.get("X-Ordax-Agent-Instance")', helper)
-        self.assertIn('request.headers.get("X-Ordax-Boot-Id")', helper)
-        self.assertIn("UUID_RE.test(agentInstanceId)", helper)
-        self.assertIn("UUID_RE.test(bootId)", helper)
-
-        outer = source.split(
-            'if (request.method === "GET" && url.pathname === "/v3/device/ws")',
-            1,
-        )[1].split(
-            'if (request.method === "POST" && url.pathname === "/v3/device/setup")',
-            1,
-        )[0]
-        self.assertLess(
-            outer.index("parseRuntimeIdentityHeaders(request)"),
-            outer.index("env.DEVICE_SESSIONS.idFromName(deviceId)"),
-        )
-        self.assertIn('error: "runtime_identity_invalid"', outer)
-        self.assertIn("authenticateDevice(env, deviceId, token)", outer)
-
-        session = source.split('if (url.pathname === "/ws")', 1)[1].split(
-            'if (url.pathname === "/wake"', 1
-        )[0]
-        self.assertIn('request.method !== "GET"', session)
-        self.assertLess(
-            session.index("parseRuntimeIdentityHeaders(request)"),
-            session.index("new WebSocketPair()"),
-        )
-        self.assertIn(
-            "WHERE id = ?2 AND revoked_at IS NULL", session,
-        )
-        self.assertIn("presence.meta.changes", session)
-        self.assertIn('error: "device_revoked_or_missing"', session)
-        self.assertLess(
-            session.index("presence.meta.changes"),
-            session.index("new WebSocketPair()"),
-        )
-        self.assertLess(
-            session.index("new WebSocketPair()"),
-            session.index("this.ctx.acceptWebSocket(server)"),
-        )
-        self.assertNotIn("server.close(1008, \"invalid runtime identity\")", session)
+        self.assertIn('path === "/v3/device/ws"', source)
+        self.assertNotIn("new WebSocketPair", source)
+        self.assertNotIn("server.accept()", source)
+        self.assertNotIn("env.DEVICE_SESSIONS.get(", source)
 
     def test_heartbeat_rejects_revoked_or_deleted_device(self):
         source = WORKER_SOURCE.read_text(encoding="utf-8")
-        session = source.split("async webSocketMessage(", 1)[1]
-        heartbeat = session.split('if (type === "heartbeat")', 1)[1].split(
-            'const jobId = ', 1
-        )[0]
-        self.assertIn("revoked_at IS NULL", heartbeat)
-        self.assertIn("presence.meta.changes", heartbeat)
-        self.assertIn('error: "device_revoked_or_missing"', heartbeat)
-        self.assertIn("ws.close(1008", heartbeat)
-        self.assertLess(
-            heartbeat.index("presence.meta.changes"),
-            heartbeat.index("this.ack(ws, requestId, true"),
-        )
-        self.assertLess(
-            heartbeat.index("ws.close(1008"),
-            heartbeat.index("this.ack(ws, requestId, true"),
-        )
+        transport = (CLOUDFLARE_SRC / "product_device_transport.ts").read_text(encoding="utf-8")
+        self.assertNotIn("async webSocketMessage(", source)
+        self.assertIn("authenticateDeviceRequest(request, env)", transport)
+        self.assertIn("authenticateProductDevice", transport)
+        self.assertIn("recordProductPresence(env,", transport)
 
     def test_artifact_token_is_not_issued_when_write_loses_a_race(self):
         source = WORKER_SOURCE.read_text(encoding="utf-8")
-        replay = source.split("async function existingArtifactGrant(", 1)[1].split(
-            "async function artifactJobAuthorized(", 1
-        )[0]
-        self.assertIn("const tokenUpdate = await env.DB.prepare(", replay)
-        self.assertIn("(tokenUpdate.meta.changes ?? 0) !== 1", replay)
-        self.assertIn('error: "artifact_replay_conflict"', replay)
-        self.assertLess(
-            replay.index("tokenUpdate.meta.changes"),
-            replay.index("signed_url:"),
-        )
-
-        multipart = source.split("async function completeMultipartArtifact(", 1)[1].split(
-            "async function abortMultipartArtifact(", 1
-        )[0]
-        self.assertIn("ON CONFLICT(id) DO NOTHING", multipart)
-        self.assertIn("const publishInsert = await env.DB.prepare(", multipart)
-        self.assertIn("(publishInsert.meta.changes ?? 0) !== 1", multipart)
-        self.assertIn('error: "artifact_publish_conflict"', multipart)
-        self.assertLess(
-            multipart.index("publishInsert.meta.changes"),
-            multipart.index("signed_url:"),
-        )
+        self.assertNotIn("existingArtifactGrant", source)
+        self.assertNotIn("read_token_sha256", source)
+        self.assertNotIn("ARTIFACTS.put(", source)
+        self.assertIn('path.startsWith("/v3/artifacts/")', source)
+        self.assertIn("legacy_endpoint_retired", source)
 
     def test_unsafe_legacy_device_deletion_is_retired_before_first_deploy(self):
         source = WORKER_SOURCE.read_text(encoding="utf-8")
         foundation = json.loads(FOUNDATION.read_text(encoding="utf-8"))
         cutover = json.loads(D1_CUTOVER_MAP.read_text(encoding="utf-8"))
         self.assertNotIn("async function deleteDevice(", source)
-        self.assertNotIn("return deleteDevice(", source)
-        self.assertNotIn("artifacts_deleted:", source)
-        self.assertNotIn("multipart_uploads_aborted:", source)
         self.assertNotIn("deleteDevice", LEGACY_OPERATOR_HANDLER_ALLOWLIST)
-        self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 35)
-        self.assertEqual(sum(cutover["legacy_source_callsite_ceilings"].values()), 35)
-        self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 35)
+        self.assertEqual(cutover["legacy_source_callsite_ceilings"]["index.ts"], 0)
+        self.assertEqual(sum(d1_access_count(x) for x in d1_worker_sources().values()), 0)
         self.assertFalse(foundation["deployment_ready"])
-        self.assertIn(
-            "engineering_device_deletion_lifecycle_not_ready",
-            foundation["readiness_blockers"],
-        )
-        route = source.split(
-            'if (request.method === "POST" && url.pathname === "/v3/devices")', 1
-        )[1].split('if (request.method === "GET" && url.pathname === "/oauth/consent")', 1)[0]
-        self.assertNotIn('request.method === "DELETE"', route)
+        self.assertIn("engineering_device_deletion_lifecycle_not_ready", foundation["readiness_blockers"])
+        self.assertIn('path === "/v3/devices"', source)
 
     def test_unsafe_legacy_retention_is_retired_before_first_deployment(self):
         cutover = json.loads(D1_CUTOVER_MAP.read_text(encoding="utf-8"))
@@ -506,8 +363,10 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         self.assertNotIn("SUPABASE_SERVER_KEY", adapter)
         self.assertNotIn("/rest/v1/rpc/", adapter)
         self.assertIn('env.POSTGRES?.connectionString', adapter)
-        self.assertIn('import postgres from "postgres"', adapter)
-        self.assertEqual(package["dependencies"]["postgres"], "3.4.5")
+        self.assertIn('import { openPostgresSession } from "./data_postgres_driver.ts"', adapter)
+        driver = (CLOUDFLARE_SRC / "data_postgres_driver.ts").read_text(encoding="utf-8")
+        self.assertIn('import { Client } from "pg"', driver)
+        self.assertEqual(package["dependencies"]["pg"], "8.23.1")
         self.assertNotIn("worker_hyperdrive_adapter_not_implemented", blockers)
 
         with WRANGLER.open("rb") as handle:

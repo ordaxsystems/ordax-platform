@@ -12,6 +12,16 @@ export interface OrdaxMcpHandlers {
   targets: Handler;
   createAction: Handler;
   getAction: StatusHandler;
+  /** Deployment-only HMAC secret. Never returned from a tool or logged. */
+  usageFingerprintKey?: string;
+  /** Optional shadow-only accounting hook. It receives verified session
+   * identity and a digest, never tool arguments or conversation content. */
+  recordUsage?: (usage: Readonly<{
+    ownerUserId: string;
+    clientId: string;
+    toolName: string;
+    requestFingerprint: string;
+  }>) => Promise<void>;
 }
 
 interface ToolSpec {
@@ -28,9 +38,10 @@ const OAUTH_SCOPES = ["openid", "email", "offline_access"];
 const NUMBER = { type: "number" };
 const BOOLEAN = { type: "boolean" };
 const DEVICE = { type: "string", description: "ORDAX device UUID returned by ordax_targets." };
-const PROJECT = { type: "string", description: "Registered ORDAX project slug." };
+const PROJECT = { type: "string", description: "Local Runtime project slug; not a Space UUID, canonical cloud Project ID, or GitHub repository identity." };
+const REPOSITORY_PROJECT = { type: "string", pattern: "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$", description: "Verified GitHub owner/repository connected to one canonical ORDAX Project; not a local path, slug, Space or authorization grant." };
 const REPOSITORY = { type: "string", description: "Canonical GitHub owner/repository returned by repository_catalog." };
-const SPACE = { type: "string", description: "Optional Product Space id used by the grant." };
+const SPACE = { type: "string", description: "Optional canonical OrdaX Space UUID for scope disambiguation. Omission never bypasses account, device, project, grant or Runtime policy." };
 const WAIT = { type: "integer", minimum: 0, maximum: 20000, default: 8000, description: "How long the gateway waits for completion before returning a request_id." };
 const STRING_ARRAY = { type: "array", items: STRING, minItems: 1, maxItems: 256 };
 const ENV_OBJECT = { type: "object", maxProperties: 64, additionalProperties: { anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }] } };
@@ -53,11 +64,9 @@ const REPLACEMENTS = {
   },
 };
 
-const MCP_TOOL_SURFACE_REVISION = "2026-10-17.1";
-
 const TOOLS: ToolSpec[] = [
   { name: "ordax_session", description: "Inspect whether the current ORDAX Product connection is authenticated." },
-  { name: "ordax_profile", description: "Return the stable opaque profile id represented by the authenticated ORDAX credentials." },
+  { name: "ordax_profile", description: "Return the authenticated OrdaX account subject id for connector identity display. Compatibility tool: not an OS Profile, Profile Pack, Space or preferences." },
   { name: "ordax_targets", description: "List authorized ORDAX devices, reported presence, Spaces and grants. Offline devices require their Runtime to reconnect for local work; unknown presence is not proof of connectivity. This does not discover cloud executors or synchronize repository files." },
   { name: "ordax_action_status", description: "Read the status/result of a previously queued ORDAX action.", properties: { request_id: STRING }, required: ["request_id"] },
   { name: "app_intelligence_catalog", description: "Read the compact version-bound App Intelligence catalog from the connected ORDAX device. Use this only to discover which app semantics are available; it grants no execution authority.", action: "intelligence.app_catalog", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
@@ -90,13 +99,20 @@ const TOOLS: ToolSpec[] = [
   { name: "git_status", description: "Read bounded Git status for a granted project.", action: "git.status", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "git_diff", description: "Read a bounded Git diff for a granted project.", action: "git.diff", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, paths: { type: "array", items: STRING, maxItems: 50 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "git_command", description: "Run an approved Git subcommand against a granted project. Repository hooks may execute, but credential/config inspection is blocked and authenticated remote URLs are redacted.", action: "git.command", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, args: { type: "array", items: STRING, minItems: 1, maxItems: 128 }, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "args"] },
-  { name: "terminal_exec", description: "Execute a foreground command with the local OS user's permissions. Requires an explicit terminal.exec grant.", action: "terminal.exec", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, env: ENV_OBJECT, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "process_status", description: "Inspect one ORDAX-owned persistent process.", action: "process.status", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "process_id"] },
-  { name: "process_list", description: "List ORDAX-owned persistent processes for a granted project.", action: "process.list", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "process_logs", description: "Read a bounded log tail from an ORDAX-owned persistent process.", action: "process.logs", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, process_id: STRING, max_bytes: { type: "integer", minimum: 1024, maximum: 262144 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "process_id"] },
-  { name: "process_start", description: "Start a persistent argv-based process supervised by ORDAX inside a granted project. Requires an explicit process.start grant.", action: "process.start", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, argv: PROCESS_ARGV, cwd: STRING, env: PROCESS_ENV_OBJECT, wait_seconds: { type: "number", minimum: 0.1, maximum: 5 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "argv"] },
-  { name: "process_write_stdin", description: "Send bounded stdin to an ORDAX-owned persistent process. Requires an explicit process.write_stdin grant.", action: "process.write_stdin", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, process_id: STRING, text: PROCESS_STDIN_TEXT, newline: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "process_id", "text"] },
-  { name: "process_stop", description: "Stop an ORDAX-owned persistent process. Requires an explicit process.stop grant.", action: "process.stop", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "process_id"] },
+  { name: "computer_terminal_exec", description: "Execute a bounded native terminal command on the authorized computer without requiring a project. Requires explicit Owner device-native-terminal or full-computer-control grant.", action: "computer.terminal_exec", properties: { device_id: DEVICE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, env: ENV_OBJECT, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "terminal_exec", description: "Execute a foreground command with the local OS user's permissions. Requires an explicit terminal.exec grant.", action: "terminal.exec", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, env: ENV_OBJECT, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
+  { name: "computer_process_status", description: "Inspect an ORDAX-owned device process.", action: "computer.process_status", properties: { device_id: DEVICE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id"] },
+  { name: "computer_process_list", description: "List supervised device processes.", action: "computer.process_list", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "computer_process_logs", description: "Read bounded logs from an ORDAX-owned device process.", action: "computer.process_logs", properties: { device_id: DEVICE, process_id: STRING, max_bytes: { type: "integer", minimum: 1024, maximum: 262144 }, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id"] },
+  { name: "computer_process_start", description: "Start a supervised process on the authorized device under an explicit Owner grant.", action: "computer.process_start", properties: { device_id: DEVICE, argv: PROCESS_ARGV, cwd: STRING, env: PROCESS_ENV_OBJECT, wait_seconds: { type: "number", minimum: 0.1, maximum: 5 }, wait_for_completion_ms: WAIT }, required: ["device_id", "argv"] },
+  { name: "computer_process_write_stdin", description: "Write bounded stdin to an ORDAX-owned device process.", action: "computer.process_write_stdin", properties: { device_id: DEVICE, process_id: STRING, text: PROCESS_STDIN_TEXT, newline: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id", "text"] },
+  { name: "computer_process_stop", description: "Stop a supervised process owned by ORDAX on the authorized device.", action: "computer.process_stop", properties: { device_id: DEVICE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id"] },
+  { name: "process_status", description: "Inspect one ORDAX-owned persistent process.", action: "process.status", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "process_id"] },
+  { name: "process_list", description: "List ORDAX-owned persistent processes for a granted project.", action: "process.list", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
+  { name: "process_logs", description: "Read a bounded log tail from an ORDAX-owned persistent process.", action: "process.logs", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, process_id: STRING, max_bytes: { type: "integer", minimum: 1024, maximum: 262144 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "process_id"] },
+  { name: "process_start", description: "Start a persistent argv-based process supervised by ORDAX inside a granted project. Requires an explicit process.start grant.", action: "process.start", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, argv: PROCESS_ARGV, cwd: STRING, env: PROCESS_ENV_OBJECT, wait_seconds: { type: "number", minimum: 0.1, maximum: 5 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "argv"] },
+  { name: "process_write_stdin", description: "Send bounded stdin to an ORDAX-owned persistent process. Requires an explicit process.write_stdin grant.", action: "process.write_stdin", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, process_id: STRING, text: PROCESS_STDIN_TEXT, newline: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "process_id", "text"] },
+  { name: "process_stop", description: "Stop an ORDAX-owned persistent process. Requires an explicit process.stop grant.", action: "process.stop", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "process_id"] },
   { name: "browser_status", description: "Read status for one ORDAX-managed Chromium session.", action: "browser.status", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, session_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "session_id"] },
   { name: "browser_list", description: "List ORDAX-managed Chromium sessions for a granted project.", action: "browser.list", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "browser_snapshot", description: "Read a bounded DOM/text snapshot from an ORDAX-managed Chromium session.", action: "browser.snapshot", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, session_id: STRING, max_elements: { type: "integer", minimum: 20, maximum: 500 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "session_id"] },
@@ -121,6 +137,7 @@ const TOOLS: ToolSpec[] = [
   { name: "computer_type", description: "Type bounded Unicode text into the interactive Windows desktop. Requires an explicit grant.", action: "computer.type", properties: { device_id: DEVICE, space_id: SPACE, text: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "text"] },
   { name: "computer_hotkey", description: "Send a bounded validated hotkey chord to the interactive Windows desktop. Requires an explicit grant.", action: "computer.hotkey", properties: { device_id: DEVICE, space_id: SPACE, keys: { type: "array", items: STRING, minItems: 1, maxItems: 6 }, wait_for_completion_ms: WAIT }, required: ["device_id", "keys"] },
   { name: "computer_access_status", description: "Read the local ORDAX computer-access policy and allowed filesystem roots.", action: "computer.access_status", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "orchestrator_lab_status", description: "Read verified OrdaX Orchestrator Lab status directly through its private service. Requires the dedicated orchestrator-app-read grant and a verified Lab installation. Does not send provider messages.", action: "orchestrator.app_read", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_file_stat", description: "Inspect a file or directory allowed by the local computer-access policy.", action: "computer.file_stat", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "computer_directory_list", description: "List a directory tree allowed by the local computer-access policy.", action: "computer.directory_list", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, max_depth: { type: "integer", minimum: 1, maximum: 12 }, max_entries: { type: "integer", minimum: 1, maximum: 5000 }, include_hidden: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "computer_text_read", description: "Read bounded UTF-8 text from an allowed computer path.", action: "computer.text_read", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, start_line: { type: "integer", minimum: 1 }, end_line: { type: "integer", minimum: 1 }, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
@@ -130,8 +147,8 @@ const TOOLS: ToolSpec[] = [
   { name: "computer_text_write", description: "Create or replace text at an allowed computer path with SHA-256 concurrency protection.", action: "computer.text_write", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, content: STRING, expected_sha256: STRING, create: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "path", "content"] },
   { name: "computer_text_patch", description: "Patch allowed computer text using exact replacements and a SHA-256 precondition.", action: "computer.text_patch", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, expected_sha256: STRING, replacements: REPLACEMENTS, wait_for_completion_ms: WAIT }, required: ["device_id", "path", "expected_sha256", "replacements"] },
   { name: "computer_directory_create", description: "Create a directory within the local computer-access policy.", action: "computer.directory_create", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, parents: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
-  { name: "computer_path_move", description: "Move or rename an allowed computer path.", action: "computer.path_move", properties: { device_id: DEVICE, space_id: SPACE, source: STRING, destination: STRING, overwrite: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "source", "destination"] },
-  { name: "computer_path_remove", description: "Remove an allowed computer path. Recursive directory removal requires recursive=true.", action: "computer.path_remove", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, recursive: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
+  { name: "computer_path_move", description: "Move or rename an allowed computer path.", action: "computer.path_move", properties: { device_id: DEVICE, space_id: SPACE, source: STRING, destination: STRING, overwrite: BOOLEAN, expected_sha256: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "source", "destination"] },
+  { name: "computer_path_remove", description: "Remove an allowed computer path. Recursive directory removal requires recursive=true.", action: "computer.path_remove", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, recursive: BOOLEAN, expected_sha256: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "artifacts_list", description: "List bounded artifact metadata for a granted project.", action: "artifacts.list", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, max_items: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "artifact_preview", description: "Read a bounded preview of a granted project artifact.", action: "artifact.preview", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, artifact_name: STRING, project_artifact_path: STRING, thumbnail: BOOLEAN, max_bytes: { type: "integer", minimum: 1, maximum: 262144 }, max_width: { type: "integer", minimum: 1, maximum: 4096 }, max_height: { type: "integer", minimum: 1, maximum: 4096 }, quality: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "blender_status", description: "Read sanitized live Blender status for a project.", action: "blender.live_status", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
@@ -146,6 +163,7 @@ const TOOLS: ToolSpec[] = [
 ];
 
 const READ_ONLY_TOOLS = new Set([
+  "orchestrator_lab_status",
   "ordax_session",
   "ordax_profile",
   "ordax_targets",
@@ -189,6 +207,9 @@ const READ_ONLY_TOOLS = new Set([
   "computer_text_read",
   "computer_search",
   "computer_processes",
+  "computer_process_status",
+  "computer_process_list",
+  "computer_process_logs",
   "process_status",
   "process_list",
   "process_logs",
@@ -204,6 +225,10 @@ const DESTRUCTIVE_TOOLS = new Set([
   "workspace_path_move",
   "git_command",
   "terminal_exec",
+  "computer_terminal_exec",
+  "computer_process_start",
+  "computer_process_write_stdin",
+  "computer_process_stop",
   "process_start",
   "process_write_stdin",
   "process_stop",
@@ -244,6 +269,9 @@ const NON_DESTRUCTIVE_WRITE_TOOLS = new Set([
 const OPEN_WORLD_TOOLS = new Set([
   "git_command",
   "terminal_exec",
+  "computer_terminal_exec",
+  "computer_process_start",
+  "computer_process_write_stdin",
   "process_start",
   "process_write_stdin",
   "browser_snapshot",
@@ -296,6 +324,13 @@ const TOOL_TITLES: Record<string, string> = {
   git_diff: "Read Git diff",
   git_command: "Run Git command",
   terminal_exec: "Run project command",
+  computer_terminal_exec: "Execute device command",
+  computer_process_status: "Inspect device process",
+  computer_process_list: "List device processes",
+  computer_process_logs: "Read device process logs",
+  computer_process_start: "Start device process",
+  computer_process_write_stdin: "Send device process input",
+  computer_process_stop: "Stop device process",
   process_status: "Inspect persistent process",
   process_list: "List persistent processes",
   process_logs: "Read persistent process logs",
@@ -463,7 +498,48 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
       grant_groups: grantGroups,
     }];
   });
-  return { ok: payload.ok !== false, targets };
+  // Descriptive preflight only: the exact OAuth client has already scoped the
+  // canonical target catalog. SQL session/grant checks remain the sole authority.
+  // Never select a device for execution based on this diagnostic.
+  const complete = rawTargets.length > 0 && rawTargets.length < 100 &&
+    rawTargets.every(raw => raw && typeof raw === "object" && !Array.isArray(raw) &&
+      Array.isArray((raw as JsonObject).grant_groups) &&
+      ((raw as JsonObject).grant_groups as unknown[]).length < 128);
+  if (!complete || targets.length !== rawTargets.length) {
+    return { ok: true, targets };
+  }
+  const now = Date.now();
+  const candidates = targets.filter(target => {
+    if (typeof target.device_id !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target.device_id))
+      return false;
+    return Array.isArray(target.grant_groups) &&
+      target.grant_groups.some((group: unknown) => {
+        if (!group || typeof group !== "object" || Array.isArray(group)) return false;
+        const g = group as JsonObject;
+        return typeof g.profile_key === "string" && g.profile_key !== "mcp-discovery" &&
+          g.space_id === null && g.project_id === null &&
+          (g.valid_until === null ||
+            (typeof g.valid_until === "string" && Date.parse(g.valid_until) > now)) &&
+          Array.isArray(g.capabilities) && g.capabilities.some((cap: unknown) =>
+            cap && typeof cap === "object" && !Array.isArray(cap) &&
+            typeof (cap as JsonObject).capability === "string" &&
+            (cap as JsonObject).capability !== "product.target.read");
+      });
+  });
+  const routing = candidates.length === 1
+    ? { state: "single_action_grant_candidate",
+        candidate_device_id: candidates[0].device_id,
+        reported_online: candidates[0].online }
+    : candidates.length === 0
+      ? { state: "no_device_action_grant",
+          owner_action: "authorize_in_ordax_owner_permissions" }
+      : { state: "multiple_action_grant_candidates",
+          owner_action: "review_oauth_client_device_grants" };
+  return { ok: true, targets, client_device_routing: {
+    ...routing, basis: "current_oauth_client_target_catalog",
+    attested: false, dispatch_authorized: false,
+  } };
 }
 
 function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObject {
@@ -562,7 +638,7 @@ function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
         ? {
             type: "object",
             properties: {
-              id: { type: "string", minLength: 1, pattern: "\\S" },
+              id: { type: "string", minLength: 1, pattern: "\\S", description: "Opaque authenticated account subject ID; not a Profile Pack or Space ID." },
             },
             required: ["id"],
             additionalProperties: false,
@@ -575,6 +651,23 @@ function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
   });
 }
 
+/**
+ * Deterministic MCP catalog identity, computed from the canonical public tool
+ * definitions (including security annotations, input schemas and descriptions).
+ * Never require a manual version bump when MCP tools are added or changed.
+ */
+export async function mcpCatalogRevision(definitions: readonly JsonObject[]): Promise<string> {
+  const encoded = new TextEncoder().encode(JSON.stringify(definitions));
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `catalog-v1-${hex}`;
+}
+
+let surfaceRevisionPromise: Promise<string> | undefined;
+function currentMcpToolSurfaceRevision(): Promise<string> {
+  return surfaceRevisionPromise ??= mcpCatalogRevision(toolDefinitions());
+}
+
 function specFor(name: string): ToolSpec | undefined {
   return TOOLS.find((tool) => tool.name === name);
 }
@@ -584,9 +677,12 @@ type OwnerGrantHint = {
   surface: string;
 };
 
-const COMPUTER_GRANT_SURFACE = "ORDAX Studio > Acesso ao computador";
-const BROWSER_GRANT_SURFACE = "ORDAX Studio > Navegador gerenciado";
-const APP_INTELLIGENCE_GRANT_SURFACE = "ORDAX Studio > Inteligência de aplicativos";
+// MCP remediation uses the canonical Owner grant authority on every OS.
+// Owner clients may be Runtime, OS Settings or other first-party surfaces.
+const COMPUTER_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-groups (dispositivo)";
+const BROWSER_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-groups (navegador)";
+const APP_INTELLIGENCE_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-groups (aplicativos)";
+const PROJECT_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-groups (projeto vinculado)";
 
 const OWNER_GRANT_HINT_BY_ACTION = new Map<string, OwnerGrantHint>([
   ...[
@@ -607,6 +703,11 @@ const OWNER_GRANT_HINT_BY_ACTION = new Map<string, OwnerGrantHint>([
     "browser.stop",
     "browser.type",
   ].map((action) => [action, { profile: "project-browser-automation", surface: BROWSER_GRANT_SURFACE }] as const),
+  ["terminal.exec"].map((action) =>
+    [action, { profile: "project-native-terminal", surface: PROJECT_GRANT_SURFACE }] as const),
+  ["process.start", "process.status", "process.list", "process.logs",
+    "process.write_stdin", "process.stop"].map((action) =>
+    [action, { profile: "project-native-process", surface: PROJECT_GRANT_SURFACE }] as const),
 ]);
 
 function authorizationHintForAction(action: string): JsonObject | null {
@@ -626,20 +727,62 @@ function authorizationHintForAction(action: string): JsonObject | null {
   };
 }
 
+function actionMonitoringUnavailable(requestId: string, upstreamStatus?: number): JsonObject {
+  // Enqueue already succeeded. Losing the status query is NOT evidence that
+  // the device failed or stopped: callers must retain the original action ID
+  // rather than executing a potentially non-idempotent command a second time.
+  return {
+    ok: true,
+    pending: true,
+    request_id: requestId,
+    monitoring_error: "action_status_unavailable",
+    ...(upstreamStatus === undefined ? {} : { upstream_status: upstreamStatus }),
+    message: "Action was accepted, but its current state cannot be verified. Do not resubmit; check ordax_action_status with this request_id.",
+  };
+}
+
+function pendingActionMessage(status: unknown): string {
+  if (status === "queued") return "Action is queued and has not started; check ordax_action_status with this request_id.";
+  if (status === "leased") return "Action has been leased to the device; check ordax_action_status with this request_id.";
+  if (status === "running") return "Action is executing on the device; check ordax_action_status with this request_id.";
+  return "Action has not reached a verified terminal state; check ordax_action_status with this request_id.";
+}
+
 async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers): Promise<JsonObject> {
   const deadline = Date.now() + timeoutMs;
+  let pollRound = 0;
   while (true) {
     const statusRequest = cloneWithAuth(source, new URL(`/v3/product/actions/${requestId}`, source.url).toString(), "GET");
     let statusResponse: Response;
     try { statusResponse = await handlers.getAction(statusRequest, requestId); }
-    catch { return { ok: false, pending: false, request_id: requestId, error: "action_status_unavailable" }; }
-    const payload = await bodyJson(statusResponse);
-    if (!statusResponse.ok) return { ok: false, pending: false, request_id: requestId,
-      upstream_status: statusResponse.status, error: "action_status_unavailable" };
-    const projected = sanitizeActionPayload(payload, requestId);
-    if (projected.ok !== true || projected.pending === false) return projected;
-    if (Date.now() >= deadline) return sanitizeActionPayload({ ok: true, pending: true, request_id: requestId, message: "Action is still running; call ordax_action_status with this request_id." }, requestId);
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    catch { return actionMonitoringUnavailable(requestId); }
+    if (!statusResponse.ok) {
+      const status = statusResponse.status;
+      // A temporary outage/rate limit while reading does not undo the
+      // durable, previously accepted enqueue. Fail closed for auth denials.
+      if (status === 408 || status === 429 || status >= 500) {
+        return actionMonitoringUnavailable(requestId, status);
+      }
+      return { ok: false, pending: false, request_id: requestId,
+        upstream_status: status, error: "action_status_unavailable" };
+    }
+    const projected = sanitizeActionPayload(await bodyJson(statusResponse), requestId);
+    if (projected.ok !== true) return actionMonitoringUnavailable(requestId);
+    if (projected.pending === false) return projected;
+    if (Date.now() >= deadline) {
+      // Preserve the last attested state (queued/leased/running) rather than
+      // misreporting every pending action as "running" or discarding it.
+      const raw = projected.action;
+      const stage = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as JsonObject).status : null;
+      return { ...projected, message: pendingActionMessage(stage) };
+    }
+    // Polling every 250ms can issue ~80 authenticated PostgreSQL reads in a
+    // 20-second tool wait. Back off to 1.5s while preserving initial latency;
+    // never sleep past the caller's requested deadline.
+    const remainingMs = Math.max(0, deadline - Date.now());
+    const delayMs = Math.min(remainingMs, 250 * (2 ** Math.min(pollRound, 3)), 1500);
+    pollRound++;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 }
 
@@ -653,14 +796,14 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
         ? {
             ok: true,
             authenticated: true,
-            mcp_tool_surface_revision: MCP_TOOL_SURFACE_REVISION,
+            mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
             mcp_tool_count: advertisedToolCount,
           }
         : {
             ok: false,
             authenticated: false,
             error: "authentication_required",
-            mcp_tool_surface_revision: MCP_TOOL_SURFACE_REVISION,
+            mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
             mcp_tool_count: advertisedToolCount,
           },
       !authenticated,
@@ -681,7 +824,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   if (name === "ordax_targets") {
     const response = await handlers.targets(cloneWithAuth(source, new URL("/v3/product/targets", source.url).toString(), "GET"));
     const payload = await bodyJson(response);
-    const projected = response.ok ? sanitizeTargets(payload) : { ok: false, error: "targets_unavailable" };
+    const projected = response.ok ? sanitizeTargets(payload) : { ok: false, error: publicErrorCode(payload.error, "targets_unavailable") };
     return textToolResult(projected, projected.ok !== true);
   }
   if (name === "ordax_action_status") {
@@ -724,9 +867,55 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   const created = await handlers.createAction(createRequest);
   const createdPayload = await bodyJson(created);
   if (!created.ok) {
+    if (createdPayload.error === "central_device_offline"
+      || createdPayload.error === "central_device_runtime_not_ready"
+      || createdPayload.error === "central_session_pending") {
+      const offline = createdPayload.error === "central_device_offline";
+      const runtimeMissing = createdPayload.error === "central_device_runtime_not_ready";
+      return textToolResult({
+        ok: false,
+        error: createdPayload.error,
+        retryable: true,
+        action_dispatched: false,
+        required_action: offline ? "reconnect_authorized_device_runtime"
+          : runtimeMissing ? "start_or_restore_authorized_product_action_runtime"
+          : "wait_for_device_session_confirmation",
+      }, true);
+    }
+    if (createdPayload.error === "central_session_owner_selection_required") {
+      // The authenticated conversation gets its *own* opaque challenge UUID.
+      // The Owner CLI must match this exact reference before consent/selection;
+      // neither the model nor this response receives device authority.
+      return textToolResult({
+        ok: false, error: "central_session_owner_selection_required",
+        ...(isCanonicalUuid(createdPayload.challenge_id)
+          ? { challenge_id: createdPayload.challenge_id } : {}),
+        required_action: "match_challenge_in_authenticated_owner_cli",
+        action_dispatched: false, attested: false,
+      }, true);
+    }
+    if (spec.projectRequired && createdPayload.error === "product_project_scope_not_found") {
+      // A missing Owner-managed Space/project/repository/device association
+      // precedes grant evaluation. Never suggest a Windows global grant,
+      // fabricate a project ID, or surface private repository metadata.
+      return textToolResult({
+        ok: false,
+        error: "product_project_scope_not_found",
+        setup_required: "space_project_repository_device_binding",
+        owner_action: "register_project_and_device_in_ordax_owner",
+      }, true);
+    }
     if (createdPayload.error === "product_grant_not_resolved") {
       const hint = authorizationHintForAction(spec.action);
       return textToolResult({ ok: false, error: "product_grant_not_resolved", ...hint }, true);
+    }
+    if (createdPayload.error === "product_attested_device_mismatch") {
+      return textToolResult({
+        ok: false,
+        error: "product_attested_device_mismatch",
+        required_action: "establish_attested_session_for_requested_device",
+        grant_evaluated: false,
+      }, true);
     }
     return textToolResult({ ok: false, error: publicErrorCode(createdPayload.error, "product_action_unavailable") }, true);
   }
@@ -738,6 +927,44 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   const action = finalPayload.action;
   const failed = finalPayload.ok === false || Boolean(action && typeof action === "object" && !Array.isArray(action) && String((action as JsonObject).status ?? "") !== "succeeded" && !finalPayload.pending);
   return textToolResult(finalPayload, failed);
+}
+
+async function recordSuccessfulToolCall(
+  handlers: OrdaxMcpHandlers,
+  sessionPayload: JsonObject,
+  requestId: unknown,
+  toolName: string,
+  args: JsonObject,
+): Promise<void> {
+  if (!handlers.recordUsage || !handlers.usageFingerprintKey || handlers.usageFingerprintKey.length < 32
+      || !(typeof requestId === "string" || typeof requestId === "number")) return;
+  const session = sessionPayload.session;
+  if (!session || typeof session !== "object" || Array.isArray(session)) return;
+  const ownerUserId = (session as JsonObject).subject_id;
+  const clientId = (session as JsonObject).client_id;
+  if (!isCanonicalUuid(ownerUserId) || !isCanonicalUuid(clientId)) return;
+
+  try {
+    // MCP request ids are correlation ids, not action authority. Key the
+    // request id, tool name and arguments to suppress transport retries; only
+    // the keyed digest is persisted, never the arguments or conversation text.
+    const fingerprintInput = JSON.stringify({ id: requestId, tool: toolName, arguments: args });
+    if (typeof fingerprintInput !== "string") return;
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(handlers.usageFingerprintKey),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const digest = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(fingerprintInput));
+    const requestFingerprint = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+    await handlers.recordUsage({ ownerUserId, clientId, toolName, requestFingerprint });
+  } catch {
+    // Metering is observational and cannot turn a completed device action into
+    // a user-visible failure or cause a client to retry a successful action.
+    console.error(JSON.stringify({ event: "product_mcp_usage_meter_write_failed" }));
+  }
 }
 
 export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandlers, allowedTools?: ReadonlySet<string>): Promise<Response> {
@@ -783,10 +1010,13 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
     const args = rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
     if (!specFor(name) || (allowedTools && !allowedTools.has(name))) return rpcError(id, -32601, "Tool not found", { tool: name });
     try {
-      return rpcResult(id, await callTool(request, name, args, handlers, toolDefinitions(allowedTools).length));
+      const result = await callTool(request, name, args, handlers, toolDefinitions(allowedTools).length);
+      if (result.isError !== true) await recordSuccessfulToolCall(handlers, sessionPayload, id, name, args);
+      return rpcResult(id, result);
     } catch {
       return rpcResult(id, textToolResult({ ok: false, error: "ordax_mcp_internal_error" }, true));
     }
   }
   return rpcError(id, -32601, "Method not found");
 }
+

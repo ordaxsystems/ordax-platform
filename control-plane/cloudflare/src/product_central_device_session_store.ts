@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { openPostgresSession } from "./data_postgres_driver.ts";
 import {
   ProductPostgresError,
   type ProductPostgresEnv,
@@ -9,7 +9,7 @@ type JsonObject = Record<string, unknown>;
 
 export type CentralDeviceSessionOpenResult = Readonly<{
   ok: boolean;
-  status?: "pending" | "bound";
+  status?: "pending" | "bound" | "awaiting_owner";
   device_id?: string;
   challenge_id?: string;
   request_id?: string;
@@ -53,6 +53,18 @@ const RPCS = {
     keys: ["p_owner_user_id", "p_client_id", "p_session_sha256"],
     casts: ["uuid", "text", "text"],
   },
+  ordax_owner_central_session_targets_v1: {
+    keys: ["p_owner_user_id", "p_client_id"],
+    casts: ["uuid", "text"],
+  },
+  ordax_owner_list_central_selections_v1: {
+    keys: ["p_owner_user_id", "p_client_id"],
+    casts: ["uuid", "text"],
+  },
+  ordax_owner_select_central_device_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_challenge_id", "p_device_id"],
+    casts: ["uuid", "text", "uuid", "uuid"],
+  },
 } as const;
 
 type RpcName = keyof typeof RPCS;
@@ -71,17 +83,14 @@ function connectionString(env: ProductPostgresEnv): string {
 
 async function call<T>(env: ProductPostgresEnv, rpc: RpcName, values: JsonObject): Promise<T> {
   const spec = RPCS[rpc];
-  const sql = postgres(connectionString(env), {
-    max: 1,
-    connect_timeout: 5,
-    idle_timeout: 1,
-    prepare: true,
-  });
+  const client = openPostgresSession(connectionString(env));
   const args = spec.casts.map((cast, index) => `$${index + 1}::${cast}`).join(", ");
   const query = `select public.${rpc}(${args}) as result`;
   try {
     const bound = spec.keys.map(key => values[key]);
-    const rows = await sql.unsafe(query, bound);
+    await client.connect();
+    const response = await client.query(query, bound);
+    const rows = response.rows;
     const row = rows[0] as { result?: T } | undefined;
     if (!row || !Object.prototype.hasOwnProperty.call(row, "result")) {
       throw new ProductPostgresError("product_postgres_invalid_response", 502);
@@ -91,7 +100,7 @@ async function call<T>(env: ProductPostgresEnv, rpc: RpcName, values: JsonObject
     if (error instanceof ProductPostgresError) throw error;
     throw new ProductPostgresError("product_postgres_unavailable", 503);
   } finally {
-    try { await sql.end({ timeout: 1 }); } catch { /* Hyperdrive owns upstream pooling. */ }
+    try { await client.end(); } catch { /* Hyperdrive owns upstream pooling. */ }
   }
 }
 
@@ -158,5 +167,47 @@ export async function resolveCentralDeviceSession(
     p_owner_user_id: input.ownerUserId,
     p_client_id: input.clientId,
     p_session_sha256: input.sessionSha256,
+  });
+}
+
+/** Owner read-only preflight; SQL reuses the existing eligible-grant predicate. */
+export async function inspectOwnerCentralSessionTargets(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string },
+): Promise<Readonly<{ ok: boolean; state?: string; error?: string; eligible_device_count?: number }>> {
+  if (!isCanonicalUuid(input.ownerUserId) || !validClient(input.clientId)) {
+    throw new ProductPostgresError("owner_central_targets_invalid", 400);
+  }
+  return call(env, "ordax_owner_central_session_targets_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_client_id: input.clientId,
+  });
+}
+
+/** Signed Owner can inspect pending choices created by an existing MCP marker. */
+export async function listOwnerCentralSelections(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string },
+): Promise<Readonly<{ ok: boolean; pending_selections?: readonly unknown[]; error?: string }>> {
+  if (!isCanonicalUuid(input.ownerUserId) || !validClient(input.clientId)) {
+    throw new ProductPostgresError("owner_central_selection_invalid", 400);
+  }
+  return call(env, "ordax_owner_list_central_selections_v1", {
+    p_owner_user_id: input.ownerUserId, p_client_id: input.clientId,
+  });
+}
+
+/** Mutates only the existing waiting challenge; Device attestation stays separate. */
+export async function selectOwnerCentralDevice(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string; challengeId: string; deviceId: string },
+): Promise<CentralDeviceSessionOpenResult> {
+  if (!isCanonicalUuid(input.ownerUserId) || !validClient(input.clientId)
+      || !isCanonicalUuid(input.challengeId) || !isCanonicalUuid(input.deviceId)) {
+    throw new ProductPostgresError("owner_central_selection_invalid", 400);
+  }
+  return call(env, "ordax_owner_select_central_device_v1", {
+    p_owner_user_id: input.ownerUserId, p_client_id: input.clientId,
+    p_challenge_id: input.challengeId, p_device_id: input.deviceId,
   });
 }

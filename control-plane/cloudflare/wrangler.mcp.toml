@@ -7,10 +7,13 @@
 # and permits only explicitly allowlisted authenticated Product handlers.
 name = "ordax-mcp"
 main = "src/product_mcp_entry.ts"
-compatibility_date = "2026-09-27"
+compatibility_date = "2026-10-17"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
+
+[triggers]
+crons = ["0 0 * * *"]
 
 [observability]
 enabled = true
@@ -19,8 +22,24 @@ redact_query_string = true
 [vars]
 PRODUCT_AUTH_ISSUER = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1"
 PRODUCT_AUTH_AUDIENCE = "authenticated"
+# Public first-party Owner OAuth client used by native PKCE (not a secret).
+PRODUCT_OWNER_OAUTH_CLIENT_ID = "202fd3e1-b058-4531-8750-82c57e4b6ca0"
+# Owner-signed session selection only. These do NOT grant or dispatch actions.
+# Rollback: remove both entries and redeploy this SAME Worker.
+CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED = "enabled"
+CENTRAL_OWNER_SELECTION_ENABLED = "enabled"
 PRODUCT_AUTH_JWKS_URL = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1/.well-known/jwks.json"
 
 [[hyperdrive]]
 binding = "POSTGRES"
 id = "4b601ec5815f43259bd8040053825d2a"
+
+# Advisory per-device wake. PostgreSQL remains the only persistent queue,
+# lease and authorization authority; hibernated connections store no jobs.
+[[durable_objects.bindings]]
+name = "DEVICE_WAKE"
+class_name = "ProductDeviceWake"
+
+[[migrations]]
+tag = "product-device-wake-v1"
+new_sqlite_classes = ["ProductDeviceWake"]

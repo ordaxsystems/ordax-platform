@@ -83,3 +83,60 @@ test("unauthenticated discovery remains unavailable", async () => {
   const result = await listTargets([{ device_id: "private-device" }], false);
   assert.equal(result.status, 401); assert.ok(!JSON.stringify(result.body).includes("private-device"));
 });
+
+test("client-scoped target routing reports only non-discovery device grants, never dispatches",async()=>{
+  const desktop="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const notebook="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const discover={profile_key:"mcp-discovery",space_id:null,project_id:null,
+    valid_until:null,capabilities:[{capability:"product.target.read",access_mode:"read"}]};
+  const action={profile_key:"full-computer-control",space_id:null,project_id:null,
+    valid_until:null,capabilities:[{capability:"computer.windows",access_mode:"read"}]};
+  const {body}=await listTargets([
+    {device_id:desktop,online:true,grant_groups:[discover]},
+    {device_id:notebook,online:false,grant_groups:[discover,action]}
+  ]);
+  const result=body.result.structuredContent;
+  assert.equal(result.client_device_routing.state,"single_action_grant_candidate");
+  assert.equal(result.client_device_routing.candidate_device_id,notebook);
+  assert.equal(result.client_device_routing.reported_online,false);
+  assert.equal(result.client_device_routing.attested,false);
+  assert.equal(result.client_device_routing.dispatch_authorized,false);
+  assert.ok(!JSON.stringify(result).includes("authorized_device_id"));
+});
+
+test("routing never promotes discovery, expired, project or incomplete grants",async()=>{
+  const desktop="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const discovery={profile_key:"mcp-discovery",space_id:null,project_id:null,valid_until:null,
+    capabilities:[{capability:"product.target.read",access_mode:"read"}]};
+  const denied=[
+    discovery,
+    {profile_key:"project-native-process",space_id:"space",project_id:"project",valid_until:null,
+      capabilities:[{capability:"process.start",access_mode:"write"}]},
+    {profile_key:"computer-observe",space_id:null,project_id:null,
+      valid_until:"2020-01-01T00:00:00Z",capabilities:[{capability:"computer.windows",access_mode:"read"}]},
+  ];
+  const onlyDiscovery=(await listTargets([{device_id:desktop,online:true,grant_groups:denied}]))
+    .body.result.structuredContent;
+  assert.deepEqual(onlyDiscovery.client_device_routing,{
+    state:"no_device_action_grant",owner_action:"authorize_in_ordax_owner_permissions",
+    basis:"current_oauth_client_target_catalog",attested:false,dispatch_authorized:false
+  });
+  const partial=(await listTargets([{device_id:desktop,grant_groups:Array(128).fill(discovery)}]))
+    .body.result.structuredContent;
+  assert.equal("client_device_routing" in partial,false);
+  const legacy=(await listTargets([{device_id:desktop,grants:[]}])).body.result.structuredContent;
+  assert.equal("client_device_routing" in legacy,false);
+});
+
+test("multiple action targets remain ambiguous, never automatically selected",async()=>{
+  const action={profile_key:"computer-observe",space_id:null,project_id:null,
+    valid_until:null,capabilities:[{capability:"computer.windows",access_mode:"read"}]};
+  const targets=["dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"].map(device_id=>({
+    device_id,online:true,grant_groups:[action]
+  }));
+  const result=(await listTargets(targets)).body.result.structuredContent;
+  assert.equal(result.client_device_routing.state,"multiple_action_grant_candidates");
+  assert.equal(result.client_device_routing.owner_action,"review_oauth_client_device_grants");
+  assert.equal("candidate_device_id" in result.client_device_routing,false);
+});

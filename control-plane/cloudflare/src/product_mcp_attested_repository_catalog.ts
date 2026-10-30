@@ -72,7 +72,7 @@ function grantRequired(): Response {
     ok: false,
     error: "product_grant_not_resolved",
     required_profile: PROFILE,
-    owner_action: "authorize_in_ordax_studio",
+    owner_action: "authorize_in_ordax_owner_permissions",
   }, 403);
 }
 

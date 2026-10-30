@@ -84,9 +84,19 @@ def validate(foundation:dict,config:dict)->bool:
     if "device_machine_ingress" in release:
         raise McpReleaseError("mcp_obsolete_device_machine_ingress_present")
     if any(key in config for key in (
-        "d1_databases","kv_namespaces","durable_objects","r2_buckets",
+        "d1_databases","kv_namespaces","r2_buckets",
         "services","routes","unsafe")):
         raise McpReleaseError("mcp_must_not_bind_other_authorities_or_routes")
+    # One audited, nonauthoritative wake channel. DOs are otherwise forbidden:
+    # no durable identity, SQL/grants, job storage, MCP tool or backup queue.
+    # The only Product authority remains the existing POSTGRES Hyperdrive.
+    if config.get("durable_objects") != {"bindings":[{
+        "name":"DEVICE_WAKE","class_name":"ProductDeviceWake",
+    }]} or config.get("migrations") != [{
+        "tag":"product-device-wake-v1",
+        "new_sqlite_classes":["ProductDeviceWake"],
+    }]:
+        raise McpReleaseError("mcp_wake_binding_contract_invalid")
     policy=release.get("safety") or {}
     if any(policy.get(k) is not False for k in (
         "allow_d1","allow_legacy_fallback","allow_untrusted_model_dispatch",
@@ -99,10 +109,26 @@ def validate(foundation:dict,config:dict)->bool:
     if issuer!="https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1" or release.get("oauth_issuer")!=issuer:
         raise McpReleaseError("mcp_wrong_oauth_issuer")
     vars=config.get("vars") or {}
+    # This is a public OAuth client identifier, never a credential or grant.
+    # Source of truth for the published MCP Worker is wrangler.mcp.toml.
+    owner_client=vars.get("PRODUCT_OWNER_OAUTH_CLIENT_ID")
+    if (not isinstance(owner_client,str)
+        or not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            owner_client)):
+        raise McpReleaseError("mcp_owner_oauth_client_not_canonical")
+    # This is one tightly scoped, authenticated Owner rollout. No model-supplied
+    # target is ever accepted, and Owner choice is NOT Device attestation.
+    if vars.get("CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED") != "enabled" \
+        or vars.get("CENTRAL_OWNER_SELECTION_ENABLED") != "enabled":
+        raise McpReleaseError("owner_central_rollout_flags_incomplete")
     if vars != {
         "PRODUCT_AUTH_ISSUER":issuer,
         "PRODUCT_AUTH_AUDIENCE":"authenticated",
         "PRODUCT_AUTH_JWKS_URL":issuer+"/.well-known/jwks.json",
+        "PRODUCT_OWNER_OAUTH_CLIENT_ID":owner_client,
+        "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED":"enabled",
+        "CENTRAL_OWNER_SELECTION_ENABLED":"enabled",
     }:
         raise McpReleaseError("mcp_auth_vars_not_canonical")
     hyperdrive=foundation.get("live_evidence",{}).get("hyperdrive",{})
@@ -206,13 +232,10 @@ def validate_interactive_candidate(foundation:dict,config:dict)->bool:
     required=(
         "PRODUCT_MCP_CORE_READ_TOOLS",
         "PRODUCT_MCP_DIRECT_TOOLS",
-        "ATTESTED_ACTION_TOOLS",
+        "ATTESTED_DEVICE_ACTION_TOOLS",
         "createAttestedDeviceActionHandler",
-        "createAttestedRepositoryCatalogHandler",
-        "createAttestedProjectContinuityHandler",
         "supports_attested_remote_reads: true",
         "supports_remote_actions: true",
-        "supports_project_continuity: true",
         "trusted_operation_required",
         "createCanonicalProductMcpReadHandlers",
         "PRODUCT_TRUSTED_CLIENT_HOSTNAME",

@@ -1,0 +1,3 @@
+# Preserve canonical PostgreSQL migration Git blob hashes across Windows and Unix.
+control-plane/supabase/migrations/*.sql text eol=lf
+control-plane/supabase/tests/*.sql text eol=lf

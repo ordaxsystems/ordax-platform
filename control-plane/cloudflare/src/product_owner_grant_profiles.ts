@@ -18,6 +18,8 @@ const WRITE_ACTIONS = new Set<string>([
   "computer.mouse_move", "computer.path_move", "computer.path_remove", "computer.scroll",
   "computer.terminate_process", "computer.text_patch", "computer.text_write", "computer.type",
   "browser.click", "browser.navigate", "browser.start", "browser.stop", "browser.type",
+  "computer.terminal_exec", "terminal.exec", "process.start", "process.write_stdin", "process.stop",
+  "computer.process_start", "computer.process_write_stdin", "computer.process_stop",
   "continuity.update", "handoff.create",
 ]);
 
@@ -45,7 +47,25 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
   "app-intelligence-read": profile("device", APP_INTELLIGENCE_DEVICE_ACTIONS),
   "repository-catalog-read": profile("device", REPOSITORY_CATALOG_DEVICE_ACTIONS),
   "project-continuity": profile("project", PROJECT_CONTINUITY_ACTIONS),
+  "orchestrator-app-read": profile("device", ["orchestrator.app_read"]),
+  // Project snapshots are a separate least-privilege Product grant. Runtime
+  // still requires a live resource binding before it can read any local root.
+  "project-workspace-read": profile("project", ["workspace.project_snapshot"]),
   "project-browser-automation": profile("project", PROJECT_BROWSER_ACTIONS),
+  "device-native-terminal": profile("device", ["computer.terminal_exec"]),
+  "device-native-process": profile("device", [
+    "computer.process_start",
+    "computer.process_status",
+    "computer.process_list",
+    "computer.process_logs",
+    "computer.process_write_stdin",
+    "computer.process_stop",
+  ]),
+  "project-native-terminal": profile("project", ["terminal.exec"]),
+  "project-native-process": profile("project", [
+    "process.start", "process.status", "process.list", "process.logs",
+    "process.write_stdin", "process.stop",
+  ]),
 });
 
 export function ownerMcpGrantProfile(key: string): OwnerGrantProfile | null {
