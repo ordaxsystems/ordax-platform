@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Release guards for OrdaX's ONE public MCP endpoint, independent of old D1.
 
-Production remains fail-closed until the full E2E proof set exists. A separate
-attested interactive candidate gate may deploy the canonical PostgreSQL/OAuth
-Worker for real-device validation while production readiness remains false.
+Production remains fail-closed until the full E2E proof set exists. The
+attested interactive candidate gate authorizes tests and dry-run bundling only:
+it must never publish the public Worker while production readiness is false.
 """
 from __future__ import annotations
 import argparse
@@ -187,7 +187,7 @@ def validate(foundation:dict,config:dict)->bool:
 
 
 def validate_interactive_candidate(foundation:dict,config:dict)->bool:
-    """Allow real-device candidate deployment without claiming production readiness."""
+    """Validate candidate contracts without authorizing public Worker publication."""
     production_ready=validate(foundation,config)
     if production_ready:
         raise McpReleaseError("candidate_gate_cannot_authorize_production_release")
@@ -254,7 +254,7 @@ def main()->int:
     parser.add_argument("--inspect",action="store_true",
         help="Allow a blocked production candidate for CI/audit; NEVER authorizes production deploy.")
     parser.add_argument("--validation-candidate",action="store_true",
-        help="Authorize the canonical attested interactive candidate for real-device E2E.")
+        help="Validate the canonical attested interactive candidate for dry-run checks only.")
     opt=parser.parse_args()
     try:
         data=json.loads(FOUNDATION.read_text("utf-8"))
