@@ -7,6 +7,48 @@ import {
   token, withIssuer, request, actionRecord,
 } from "./product_mcp_test_fixtures.mts";
 
+test("MCP retains an explicitly requested Space; it cannot become a global device action (#118)", async () => {
+  const deviceId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const unauthorizedSpace = "782c01a5-0ee3-4589-9f9b-11555191f35a";
+  const created: Record<string, unknown>[] = [];
+  const handlers = {
+    session: async () => Response.json({ ok: true, session: { subject_id: owner, client_id: client } }),
+    targets: async () => { assert.fail("device action must not enumerate targets in the MCP mapper"); },
+    getAction: async () => { assert.fail("denied enqueue must not be polled"); },
+    createAction: async (input: Request) => {
+      created.push(await input.json() as Record<string, unknown>);
+      return Response.json({ ok: false, error: "product_device_action_invalid" }, { status: 400 });
+    },
+  };
+  const invoke = async (args: Record<string, unknown>) => {
+    const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call",
+        params: { name: "computer_screen_info", arguments: args } }),
+    }), handlers);
+    assert.equal(response.status, 200);
+    const body = await response.json() as any;
+    assert.equal(body.result.isError, true);
+    return body.result.structuredContent;
+  };
+
+  const denied = await invoke({ device_id: deviceId, space_id: unauthorizedSpace });
+  assert.equal(denied.error, "product_device_action_invalid");
+  assert.deepEqual(created, [{
+    device_id: deviceId, space_id: unauthorizedSpace, action: "computer.screen_info",
+    project: null, arguments: {},
+  }]);
+
+  const invalid = await invoke({ device_id: deviceId, space_id: "not-a-uuid" });
+  assert.equal(invalid.error, "space_id_invalid");
+  assert.equal(created.length, 1, "malformed Space must fail before handler dispatch");
+
+  // Omission is represented as null, never by silently overwriting a supplied UUID.
+  await invoke({ device_id: deviceId });
+  assert.equal(created[1].space_id, null);
+});
+
 test("status reader receives only signed owner/exact client and the requested canonical action UUID", async () => {
   await withIssuer(async () => {
     const calls: unknown[] = [];
