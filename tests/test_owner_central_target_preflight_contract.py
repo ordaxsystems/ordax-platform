@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SQL = ROOT / "control-plane/supabase/proposals/owner_central_session_targets_v1.sql"
 OWNER = ROOT / "control-plane/cloudflare/src/product_owner_grant_admin.ts"
+AUTH = ROOT / "control-plane/cloudflare/src/product_auth.ts"
 ENTRY = ROOT / "control-plane/cloudflare/src/product_mcp_entry.ts"
 
 class OwnerCentralTargetsContract(unittest.TestCase):
@@ -40,9 +41,11 @@ class OwnerCentralTargetsContract(unittest.TestCase):
         # Do not put Owner-session authority on the unshipped legacy Worker.
         self.assertNotIn("PRODUCT_OWNER_OAUTH_CLIENT_ID", other_config["vars"])
         source = OWNER.read_text(encoding="utf-8")
-        self.assertIn("env.PRODUCT_OWNER_OAUTH_CLIENT_ID", source)
-        self.assertIn("identity.clientId.toLowerCase() !== pinned", source)
-        self.assertIn("owner_primary_session_required", source)
+        authority = AUTH.read_text(encoding="utf-8")
+        self.assertIn("authorizeProductOwnerIdentity(", source)
+        self.assertIn("env.PRODUCT_OWNER_OAUTH_CLIENT_ID", authority)
+        self.assertIn("identity.clientId.toLowerCase() !== pinned", authority)
+        self.assertIn("owner_primary_session_required", authority)
         self.assertIn('CENTRAL_OWNER_SELECTION_ENABLED !== "enabled"', source)
 
     def test_disabled_owner_only_exact_client_route(self):

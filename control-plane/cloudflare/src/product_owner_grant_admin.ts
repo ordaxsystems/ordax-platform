@@ -1,4 +1,4 @@
-import { authenticateProductRequest, type ProductAuthEnv } from "./product_auth.ts";
+import { authenticateProductRequest, authorizeProductOwnerIdentity, type ProductAuthEnv } from "./product_auth.ts";
 import {
   approveProjectWorkspaceResource,
   listOwnerMcpRemoteAuthority,
@@ -21,7 +21,6 @@ import { canonicalOwnerWorkspaceApproval } from "./project_workspace_issue_contr
 type Env = ProductAuthEnv & ProductPostgresEnv & {
   CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED?: string;
   CENTRAL_OWNER_SELECTION_ENABLED?: string;
-  PRODUCT_OWNER_OAUTH_CLIENT_ID?: string;
 };
 type Json = Record<string, unknown>;
 const ROOT = "/v3/owner/remote-authority";
@@ -55,22 +54,11 @@ export function parseOwnerWorkspaceResourceRevocation(
 }
 
 async function owner(request: Request, env: Env): Promise<string | Response> {
-  const identity = await authenticateProductRequest(request, env);
+  const identity = authorizeProductOwnerIdentity(
+    await authenticateProductRequest(request, env), env,
+  );
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
-  if (identity.role !== "authenticated" || !isCanonicalUuid(identity.subjectId))
-    return json({ ok: false, error: "product_owner_identity_invalid" }, 403);
-  // A delegated Product MCP JWT is NOT an Owner decision. The official
-  // Owner CLI uses its own public PKCE client, so do not reject all client_id
-  // claims: accept only a first-party account JWT or the explicitly pinned
-  // first-party Owner OAuth client configured in canonical Platform metadata.
-  // Every Owner route is privileged, including grant creation/revocation,
-  // workspace consent, and discovery. Never let a delegated MCP OAuth client
-  // authorize itself simply because it has a signed end-user access token.
-  const pinned = (env.PRODUCT_OWNER_OAUTH_CLIENT_ID ?? "").trim().toLowerCase();
-  if (identity.clientId !== null
-      && (!isCanonicalUuid(pinned) || identity.clientId.toLowerCase() !== pinned))
-    return json({ ok: false, error: "owner_primary_session_required" }, 403);
-  return identity.subjectId;
+  return identity.ownerUserId;
 }
 
 function failure(error: unknown): Response {

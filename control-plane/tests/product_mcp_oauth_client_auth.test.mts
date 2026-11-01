@@ -125,7 +125,21 @@ test("unsigned/malformed OAuth client_id, non-authenticated role and legacy subj
       const token = await signedJwt(key, claims);
       const result = await authenticateProductMcpClientRequest(request(token), config);
       assert.equal(result.ok, false, JSON.stringify(claims));
-      if (!result.ok) assert.equal(result.status, 403);
+      if (!result.ok) assert.equal(result.status,
+        typeof claims.client_id === "object" && claims.client_id !== null ? 401 : 403);
+    }
+  });
+});
+
+test("malformed signed client_id never becomes a first-party Owner session", async () => {
+  await verifyWithMockIssuer(async (key) => {
+    for (const client_id of [false, 123, [], { id: firstClient }]) {
+      const result = await authenticateProductRequest(
+        request(await signedJwt(key, { ...baseClaims(), client_id })), config,
+      );
+      assert.deepEqual(result, {
+        ok: false, error: "product_token_claims_invalid", status: 401,
+      });
     }
   });
 });
