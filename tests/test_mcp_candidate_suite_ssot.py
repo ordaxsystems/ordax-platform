@@ -71,11 +71,16 @@ class CanonicalMcpCandidateSuiteTests(unittest.TestCase):
                             f'"control-plane/cloudflare/src/{name}"', section,
                             f"{path.name}: source {name} can evade candidate CI",
                         )
-                    for name in REQUIRED_TESTS:
-                        self.assertIn(
-                            f'"control-plane/tests/{name}"', section,
-                            f"{path.name}: regression {name} can evade candidate CI",
-                        )
+                    self.assertEqual(
+                        section.count('"control-plane/tests/*.test.mts"'), 1,
+                        f"{path.name}: every new MCP regression must trigger candidate CI",
+                    )
+                    for line in section.splitlines():
+                        if '"control-plane/tests/' in line:
+                            self.assertEqual(
+                                line.strip(), '- "control-plane/tests/*.test.mts"',
+                                f"{path.name}: remove duplicated per-test trigger lists",
+                            )
                     self.assertIn('"scripts/cloudflare/run_mcp_candidate_tests.sh"', section)
                     self.assertIn('"tests/test_mcp_candidate_suite_ssot.py"', section)
 
