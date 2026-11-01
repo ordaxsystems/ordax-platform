@@ -238,6 +238,37 @@ async function heartbeat(request: Request, env: ProductPostgresEnv, deviceId: st
   return respond({ ok: true, recorded, server_time: new Date().toISOString() });
 }
 
+/**
+ * Strict JSON number semantics for the existing lease contract. Do not
+ * coerce strings, booleans or blank fields into a duration: an absent lease
+ * length retains the original 120-second default, while an invalid supplied
+ * length fails before touching the durable action queue.
+ */
+export function canonicalDeviceLeaseSeconds(value: unknown): number | null {
+  if (value === undefined) return 120;
+  return typeof value === "number" && Number.isSafeInteger(value)
+    && value >= 30 && value <= 300 ? value : null;
+}
+
+/** Typed progress metadata for the existing PostgreSQL progress authority.
+ * Reject malformed telemetry instead of converting non-string messages to
+ * "[object Object]" or a blank/boolean percent to zero/one.
+ */
+export function canonicalDeviceActionProgress(
+  body: Json | null,
+): { stage: string; message: string | null; percent: number | null } | null {
+  if (!body) return null;
+  const stage = typeof body.stage === "string" ? body.stage.trim() : "";
+  const message = body.message === null || body.message === undefined ? null : body.message;
+  const percent = body.progress_percent === null || body.progress_percent === undefined
+    ? null : body.progress_percent;
+  if (stage.length < 1 || stage.length > 96
+      || (message !== null && (typeof message !== "string" || message.length > 512))
+      || (percent !== null && (typeof percent !== "number"
+        || !Number.isSafeInteger(percent) || percent < 0 || percent > 100))) return null;
+  return { stage, message: message as string | null, percent: percent as number | null };
+}
+
 async function claim(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
   const body = await readBoundedJsonObject(request, 16 * 1024);
   if (!body) return respond({ ok: false, error: "claim_invalid" }, 400);
@@ -246,8 +277,8 @@ async function claim(request: Request, env: ProductPostgresEnv, deviceId: string
   if (!identity || (hasRuntimeProvenance(body) && !provenance)) {
     return respond({ ok: false, error: "claim_invalid" }, 400);
   }
-  const leaseSeconds = body.lease_seconds === undefined ? 120 : Number(body.lease_seconds);
-  if (!Number.isInteger(leaseSeconds) || leaseSeconds < 30 || leaseSeconds > 300) {
+  const leaseSeconds = canonicalDeviceLeaseSeconds(body.lease_seconds);
+  if (leaseSeconds === null) {
     return respond({ ok: false, error: "claim_invalid" }, 400);
   }
   const claimed = await claimProductAction(env, {
@@ -279,8 +310,8 @@ async function lease(request: Request, env: ProductPostgresEnv, deviceId: string
   const body = await readBoundedJsonObject(request, 16 * 1024);
   const ctx = body ? executionContext(body) : null;
   if (!ctx) return respond({ ok: false, error: "lease_invalid" }, 400);
-  const leaseSeconds = body!.lease_seconds === undefined ? 120 : Number(body!.lease_seconds);
-  if (!Number.isInteger(leaseSeconds) || leaseSeconds < 30 || leaseSeconds > 300) {
+  const leaseSeconds = canonicalDeviceLeaseSeconds(body!.lease_seconds);
+  if (leaseSeconds === null) {
     return respond({ ok: false, error: "lease_invalid" }, 400);
   }
   const leaseExpiresAt = await renewProductActionLease(env, { deviceId, ...ctx, leaseSeconds });
@@ -291,15 +322,12 @@ async function lease(request: Request, env: ProductPostgresEnv, deviceId: string
 async function progress(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
   const body = await readBoundedJsonObject(request, 32 * 1024);
   const ctx = body ? executionContext(body) : null;
-  const stage = body && typeof body.stage === "string" ? body.stage.trim() : "";
-  const message = body && body.message != null ? String(body.message) : null;
-  const percent = body && body.progress_percent != null ? Number(body.progress_percent) : null;
-  if (!ctx || stage.length < 1 || stage.length > 96 || (message !== null && message.length > 512)
-      || (percent !== null && (!Number.isInteger(percent) || percent < 0 || percent > 100))) {
+  const progress = canonicalDeviceActionProgress(body);
+  if (!ctx || !progress) {
     return respond({ ok: false, error: "progress_invalid" }, 400);
   }
   const ok = await progressProductAction(env, { deviceId, ...ctx,
-    stage, message, progressPercent: percent });
+    stage: progress.stage, message: progress.message, progressPercent: progress.percent });
   return respond({ ok, ...(ok ? {} : { error: "lease_not_active" }) }, ok ? 200 : 409);
 }
 
