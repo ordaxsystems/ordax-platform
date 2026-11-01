@@ -244,9 +244,14 @@ export function createAttestedProjectContinuityHandler(
   const now = deps.now ?? Date.now;
   const operationId = deps.operationId ?? (() => crypto.randomUUID());
 
-  return async function createAction(request: Request): Promise<Response> {
+  return async function createAction(request: Request, retryDigest?: string | null): Promise<Response> {
     if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
     if (!validAttestedDevice(trusted)) return json({ ok: false, error: "trusted_operation_required" }, 403);
+    // The signed MCP gateway derives this identifier from the OAuth client,
+    // ChatGPT session and JSON-RPC call ID. Never use a model-selected key.
+    if (retryDigest === null || (retryDigest !== undefined && !/^[a-f0-9]{64}$/.test(retryDigest))) {
+      return json({ ok: false, error: "product_mcp_retry_correlation_invalid" }, 400);
+    }
 
     const identity = await authenticate(request, env);
     if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
@@ -299,8 +304,9 @@ export function createAttestedProjectContinuityHandler(
         return grantRequired();
       }
 
-      const opId = operationId().toLowerCase();
-      if (!isCanonicalUuid(opId)) return json({ ok: false, error: "product_action_unavailable" }, 503);
+      const opId = retryDigest ?? operationId().toLowerCase();
+      if (retryDigest === undefined && !isCanonicalUuid(opId))
+        return json({ ok: false, error: "product_action_unavailable" }, 503);
       const actionArguments = { ...body.arguments };
       delete actionArguments.repository_full_name;
       const payload: Json = {

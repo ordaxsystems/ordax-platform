@@ -319,3 +319,41 @@ test("continuity forwards only the request-owned wake scheduler after grant and 
   });
   assert.equal((await noContext(actionRequest("continuity.get", { repository_full_name: REPOSITORY }))).status, 202);
 });
+
+test("continuity retries preserve one PostgreSQL key and replay one accepted receipt", async () => {
+  const digest = "a".repeat(64);
+  const keys: string[] = [];
+  const handler = createAttestedProjectContinuityHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject: resolvedProject,
+    listTargets: async () => catalog(grantGroup("continuity.get", "read")),
+    enqueue: async (_env, input) => {
+      keys.push(input.idempotencyKey);
+      assert.equal(input.spaceId, SPACE);
+      assert.equal(input.projectId, PROJECT);
+      return { ok: true, replayed: keys.length > 1,
+        request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => { assert.fail("verified retry must not generate another UUID"); },
+  });
+  const original = actionRequest("continuity.get", { repository_full_name: REPOSITORY });
+  const retry = actionRequest("continuity.get", { repository_full_name: REPOSITORY });
+  const first = await handler(original, digest);
+  const second = await handler(retry, digest);
+  assert.equal(first.status, 202);
+  assert.equal(second.status, 200);
+  assert.equal((await first.json()).request_id, REQUEST);
+  assert.equal((await second.json()).request_id, REQUEST);
+  assert.deepEqual(keys, [`mcp-read-${digest}`, `mcp-read-${digest}`]);
+
+  // A ChatGPT tool call without a valid verified session correlation must
+  // not enqueue an action that cannot safely recover after a lost response.
+  for (const invalid of [null, "", "x".repeat(64), "A".repeat(64)]) {
+    const denied = await handler(
+      actionRequest("continuity.get", { repository_full_name: REPOSITORY }), invalid,
+    );
+    assert.equal(denied.status, 400);
+    assert.equal((await denied.json()).error, "product_mcp_retry_correlation_invalid");
+  }
+  assert.equal(keys.length, 2);
+});

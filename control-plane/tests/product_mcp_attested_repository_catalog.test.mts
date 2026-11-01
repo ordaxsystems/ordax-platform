@@ -133,3 +133,34 @@ test("repository discovery forwards waitUntil scheduler but never includes it in
   });
   assert.equal((await noContext(request())).status, 202);
 });
+
+test("repository catalog retries reuse the signed MCP correlation instead of queuing twice", async () => {
+  const digest = "b".repeat(64);
+  const keys: string[] = [];
+  const handler = createAttestedRepositoryCatalogHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(),
+    enqueue: async (_env, input) => {
+      keys.push(input.idempotencyKey);
+      assert.equal(input.capability, "workspace.repository_catalog");
+      assert.deepEqual(input.payload, {});
+      return { ok: true, replayed: keys.length > 1,
+        request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => { assert.fail("signed MCP retries must not generate another UUID"); },
+  });
+  const first = await handler(request(), digest);
+  const retry = await handler(request(), digest);
+  assert.equal(first.status, 202);
+  assert.equal(retry.status, 200);
+  assert.equal((await first.json()).request_id, REQUEST);
+  assert.equal((await retry.json()).request_id, REQUEST);
+  assert.deepEqual(keys, [`mcp-read-${digest}`, `mcp-read-${digest}`]);
+
+  for (const invalid of [null, "", "x".repeat(64), "B".repeat(64)]) {
+    const denied = await handler(request(), invalid);
+    assert.equal(denied.status, 400);
+    assert.equal((await denied.json()).error, "product_mcp_retry_correlation_invalid");
+  }
+  assert.equal(keys.length, 2);
+});
