@@ -68,7 +68,7 @@ const REPLACEMENTS = {
 };
 
 const TOOLS: ToolSpec[] = [
-  { name: "ordax_session", description: "Inspect whether the current ORDAX Product connection is authenticated." },
+  { name: "ordax_session", description: "Inspect authenticated ORDAX Product connection and its effective, signed, non-secret OAuth client_id for exact Owner grant selection. This does not grant device authority." },
   { name: "ordax_profile", description: "Return the authenticated OrdaX account subject id for connector identity display. Compatibility tool: not an OS Profile, Profile Pack, Space or preferences." },
   { name: "ordax_targets", description: "List authorized ORDAX devices, reported presence, Spaces and grants. Offline devices require their Runtime to reconnect for local work; unknown presence is not proof of connectivity. This does not discover cloud executors or synchronize repository files." },
   { name: "ordax_action_status", description: "Read the status/result of a previously queued ORDAX action.", properties: { request_id: STRING }, required: ["request_id"] },
@@ -891,11 +891,21 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
     const response = await handlers.session(cloneWithAuth(source, new URL("/v3/product/session", source.url).toString(), "GET"));
     const payload = await bodyJson(response);
     const authenticated = response.ok && payload.ok === true;
+    // The only client identity shown to the model comes from the already
+    // authenticated Product session endpoint. Query, body and custom headers
+    // cannot select or replace it. This UUID is public OAuth metadata, not
+    // an OAuth access token, device credential or grant.
+    const session = payload.session;
+    const identity = session && typeof session === "object" && !Array.isArray(session)
+      ? session as JsonObject : null;
+    const signedClientId = authenticated && identity?.client_kind === "product-mcp"
+      && isCanonicalUuid(identity.client_id) ? identity.client_id.toLowerCase() : null;
     return textToolResult(
       authenticated
         ? {
             ok: true,
             authenticated: true,
+            ...(signedClientId ? { client_id: signedClientId, client_kind: "product-mcp" } : {}),
             mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
             mcp_tool_count: advertisedToolCount,
           }

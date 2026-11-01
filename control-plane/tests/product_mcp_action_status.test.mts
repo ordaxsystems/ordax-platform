@@ -216,3 +216,66 @@ test("missing PostgreSQL configuration and transport failure do not fall back or
     assert.deepEqual(await failed.json(), { ok: false, error: "product_action_status_unavailable" });
   });
 });
+
+
+test("ordax_session reveals only the effective signed OAuth client for Owner grant diagnosis (#291)", async () => {
+  await withIssuer(async () => {
+    // Both clients use the same signed Owner and the same MCP tool, but must
+    // see their own exact client IDs. A model-provided client_id and spoofed
+    // HTTP headers cannot substitute the effective OAuth client identity.
+    const handlers = createCanonicalProductMcpReadHandlers(env);
+    for (const oauthClient of [client, otherClient]) {
+      const bearer = await token({ client_id: oauthClient });
+      const response = await handleOrdaxMcp(new Request(
+        "https://ordax.example/mcp?client_id=" + (oauthClient === client ? otherClient : client),
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer " + bearer,
+            "content-type": "application/json",
+            "x-ordax-client-id": oauthClient === client ? otherClient : client,
+            "x-ordax-owner-user-id": otherOwner,
+          },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 27, method: "tools/call", params: {
+            name: "ordax_session",
+            arguments: { client_id: oauthClient === client ? otherClient : client },
+          } }),
+        },
+      ), handlers);
+      assert.equal(response.status, 200);
+      const rpc = await response.json() as any;
+      const result = rpc.result.structuredContent;
+      assert.equal(result.ok, true);
+      assert.equal(result.authenticated, true);
+      assert.equal(result.client_kind, "product-mcp");
+      assert.equal(result.client_id, oauthClient,
+        "only JWT-signed effective OAuth client may be displayed");
+      assert.equal(JSON.stringify(result).includes("Bearer "), false);
+      assert.equal(JSON.stringify(result).includes(bearer), false);
+      assert.equal(Object.hasOwn(result, "subject_id"), false);
+      assert.equal(Object.hasOwn(result, "device_id"), false);
+    }
+
+    for (const bearer of [null, await token({ client_id: undefined })]) {
+      const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(bearer ? { authorization: "Bearer " + bearer } : {}),
+          "x-ordax-client-id": client,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 28, method: "tools/call",
+          params: { name: "ordax_session", arguments: { client_id: client } } }),
+      }), handlers);
+      // Authentication is a pre-dispatch gate: an invalid bearer receives
+      // an HTTP denial, never a successful JSON-RPC tool response.
+      assert.ok([401, 403].includes(response.status), "invalid OAuth must fail before MCP dispatch");
+      const denied = await response.json() as any;
+      assert.equal(denied.ok, false);
+      assert.equal(Object.hasOwn(denied, "client_id"), false,
+        "failed OAuth must never reflect caller-selected client_id");
+      assert.equal(Object.hasOwn(denied, "result"), false,
+        "a denied session cannot masquerade as a successful MCP tool call");
+    }
+  });
+});
