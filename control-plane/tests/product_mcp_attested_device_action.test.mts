@@ -671,3 +671,30 @@ test("attested device retries preserve one PostgreSQL key and replay the origina
   assert.equal(missing.status, 400);
   assert.equal(keys.length, 2);
 });
+
+test("attested device action forwards only the trusted Worker wake scheduler", async () => {
+  const scheduleWake = (_wake: Promise<void>) => {};
+  let received: any = null;
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("computer-observe", "computer.screen_info", "read")),
+    enqueue: async (_env, input) => {
+      received = input;
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    scheduleWake,
+  });
+  const response = await handler(actionRequest("computer.screen_info"));
+  assert.equal(response.status, 202);
+  assert.equal(received.scheduleWake, scheduleWake);
+  assert.equal(Object.hasOwn(received.payload, "scheduleWake"), false);
+  const noContext = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("computer-observe", "computer.screen_info", "read")),
+    enqueue: async (_env, input) => {
+      assert.equal(Object.hasOwn(input, "scheduleWake"), false);
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+  });
+  assert.equal((await noContext(actionRequest("computer.screen_info"))).status, 202);
+});
