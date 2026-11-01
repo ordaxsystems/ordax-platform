@@ -16,6 +16,7 @@ import {
 } from "./product_central_device_session_store.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
+import { hasExactQueryParameters } from "./request_query.ts";
 import { canonicalOwnerWorkspaceApproval } from "./project_workspace_issue_contract.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv & {
@@ -47,8 +48,7 @@ export function parseOwnerWorkspaceResourceRevocation(
   const resourceId = url.pathname.slice(WORKSPACE_RESOURCES.length);
   const clientId = url.searchParams.get("client_id") ?? "";
   if (!RESOURCE_ID_RE.test(resourceId) || !isCanonicalUuid(clientId)
-      || [...url.searchParams.keys()].some(key => key !== "client_id")
-      || url.searchParams.getAll("client_id").length !== 1)
+      || !hasExactQueryParameters(url, ["client_id"]))
     return null;
   return { clientId, resourceId };
 }
@@ -105,8 +105,7 @@ export async function handleProductOwnerGrantAdmin(
       if (env.CENTRAL_OWNER_SELECTION_ENABLED !== "enabled")
         return json({ ok: false, error: "not_found" }, 404);
       if (request.method === "GET") {
-        if ([...url.searchParams.keys()].some(key => key !== "client_id")
-            || url.searchParams.getAll("client_id").length !== 1)
+        if (!hasExactQueryParameters(url, ["client_id"]))
           return json({ ok: false, error: "owner_central_selection_invalid" }, 400);
         const clientId = (url.searchParams.get("client_id") ?? "").toLowerCase();
         if (!CLIENT_ID_RE.test(clientId))
@@ -143,8 +142,7 @@ export async function handleProductOwnerGrantAdmin(
       if (env.CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED !== "enabled")
         return json({ ok: false, error: "not_found" }, 404);
       if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405);
-      if ([...url.searchParams.keys()].some(key => key !== "client_id")
-          || url.searchParams.getAll("client_id").length !== 1)
+      if (!hasExactQueryParameters(url, ["client_id"]))
         return json({ ok: false, error: "owner_central_targets_invalid" }, 400);
       const clientId = (url.searchParams.get("client_id") ?? "").toLowerCase();
       if (!CLIENT_ID_RE.test(clientId)) return json({ ok: false, error: "owner_central_targets_invalid" }, 400);
@@ -191,12 +189,14 @@ export async function handleProductOwnerGrantAdmin(
 
     if (request.method === "GET" && url.pathname === ROOT) {
       const deviceId = (url.searchParams.get("device_id") ?? "").toLowerCase();
-      if (!isCanonicalUuid(deviceId)) return json({ ok: false, error: "device_id_invalid" }, 400);
+      if (!isCanonicalUuid(deviceId) || !hasExactQueryParameters(url, ["device_id"]))
+        return json({ ok: false, error: "device_id_invalid" }, 400);
       const result = await listOwnerMcpRemoteAuthority(env, ownerId, deviceId);
       return json(result, result.ok === false ? 403 : 200);
     }
 
     if (request.method === "POST" && url.pathname === GROUPS) {
+      if (url.search !== "") return json({ ok: false, error: "owner_grant_invalid" }, 400);
       const body = await readBoundedJsonObject(request, 16 * 1024);
       const allowed = new Set(["client_id","device_id","profile_key","space_id","project_id","valid_until"]);
       if (!body || Object.keys(body).some((key) => !allowed.has(key)))
@@ -227,7 +227,8 @@ export async function handleProductOwnerGrantAdmin(
     if (request.method === "DELETE" && url.pathname.startsWith(GROUPS + "/")) {
       const groupId = url.pathname.slice((GROUPS + "/").length).toLowerCase();
       const clientId = (url.searchParams.get("client_id") ?? "").toLowerCase();
-      if (!isCanonicalUuid(groupId) || !CLIENT_ID_RE.test(clientId))
+      if (!isCanonicalUuid(groupId) || !CLIENT_ID_RE.test(clientId)
+          || !hasExactQueryParameters(url, ["client_id"]))
         return json({ ok: false, error: "owner_grant_revoke_invalid" }, 400);
       const result = await revokeOwnerMcpGrantGroup(env, ownerId, clientId, groupId);
       return json(result, result.ok === true ? 200 : 404);

@@ -6,6 +6,7 @@ import {
   type ProductIdentity,
 } from "./product_auth.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
+import { hasExactQueryParameters } from "./request_query.ts";
 import type { ProductPostgresEnv } from "./product_postgres_store.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
@@ -145,6 +146,11 @@ export function createOwnerProjectScopeHandler(env: Env, deps: Dependencies = {}
     const identity = authorizeProductOwnerIdentity(await authenticate(request, env), env);
     if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
 
+    // Reject duplicate/extra parameters rather than silently selecting the
+    // first Space, device or repository name supplied by an untrusted caller.
+    if (!hasExactQueryParameters(url, ["device_id", "repository_full_name"])) {
+      return json({ ok: false, error: "owner_project_scope_invalid" }, 400);
+    }
     const deviceId = (url.searchParams.get("device_id") ?? "").toLowerCase();
     const repositoryFullName = canonicalGithubRepositoryFullName(
       url.searchParams.get("repository_full_name"),

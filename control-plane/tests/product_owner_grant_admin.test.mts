@@ -141,6 +141,39 @@ test("all Owner grant and consent routes reject delegated OAuth clients before a
   });
 });
 
+test("Owner authority query boundaries reject duplicate, unexpected and ignored identifiers", async () => {
+  await withIssuer(async () => {
+    const firstParty = await token({client_id: null});
+    const device = "11111111-1111-4111-8111-111111111111";
+    const group = "22222222-2222-4222-8222-222222222222";
+    const origin = "https://mcp.ordax.com.br";
+    const cases = [
+      {url: "/v3/owner/remote-authority", method: "GET", error: "device_id_invalid"},
+      {url: "/v3/owner/remote-authority?device_id="+device+"&device_id="+device, method: "GET", error: "device_id_invalid"},
+      {url: "/v3/owner/remote-authority?device_id="+device+"&owner_user_id="+device, method: "GET", error: "device_id_invalid"},
+      {url: "/v3/owner/remote-authority?device_id="+device+"&space_id="+device, method: "GET", error: "device_id_invalid"},
+      {url: "/v3/owner/remote-grant-groups?client_id="+client, method: "POST", error: "owner_grant_invalid"},
+      {url: "/v3/owner/remote-grant-groups?space_id="+device, method: "POST", error: "owner_grant_invalid"},
+      {url: "/v3/owner/remote-grant-groups/"+group+"?client_id="+client+"&client_id="+client, method: "DELETE", error: "owner_grant_revoke_invalid"},
+      {url: "/v3/owner/remote-grant-groups/"+group+"?client_id="+client+"&space_id="+device, method: "DELETE", error: "owner_grant_revoke_invalid"},
+      {url: "/v3/owner/remote-grant-groups/"+group+"?client_id="+client+"&owner_user_id="+device, method: "DELETE", error: "owner_grant_revoke_invalid"},
+      {url: "/v3/owner/remote-grant-groups/"+group+"?client_id="+client+"&%63lient_id="+client, method: "DELETE", error: "owner_grant_revoke_invalid"},
+    ] as const;
+    for (const input of cases) {
+      const response = await handleProductOwnerGrantAdmin(new Request(origin + input.url, {
+        method: input.method,
+        headers: {
+          authorization: "Bearer " + firstParty,
+          ...(input.method === "POST" ? {"content-type":"application/json"} : {}),
+        },
+        ...(input.method === "POST" ? {body:"{}"} : {}),
+      }), env);
+      assert.equal(response.status, 400, input.url);
+      assert.deepEqual(await response.json(), {ok:false,error:input.error}, input.url);
+    }
+  });
+});
+
 test("owner grant source contains no device-link or pairing authority", () => {
   const source=fs.readFileSync(path.resolve(HERE,"../cloudflare/src/product_owner_grant_admin.ts"),"utf8")
     +fs.readFileSync(path.resolve(HERE,"../cloudflare/src/product_owner_grant_profiles.ts"),"utf8");
