@@ -1049,6 +1049,7 @@ async function recordSuccessfulToolCall(
   requestId: unknown,
   toolName: string,
   args: JsonObject,
+  verifiedRetryDigest: string | null,
 ): Promise<void> {
   if (!handlers.recordUsage || !handlers.usageFingerprintKey || handlers.usageFingerprintKey.length < 32
       || !(typeof requestId === "string" || typeof requestId === "number")) return;
@@ -1059,10 +1060,18 @@ async function recordSuccessfulToolCall(
   if (!isCanonicalUuid(ownerUserId) || !isCanonicalUuid(clientId)) return;
 
   try {
-    // MCP request ids are correlation ids, not action authority. Key the
-    // request id, tool name and arguments to suppress transport retries; only
-    // the keyed digest is persisted, never the arguments or conversation text.
-    const fingerprintInput = JSON.stringify({ id: requestId, tool: toolName, arguments: args });
+    // A JSON-RPC id can be reused by the same OAuth client in different
+    // ChatGPT conversations. Its HMAC alone would silently undercount those
+    // distinct calls. The existing gateway-derived retry digest already binds
+    // the verified OAuth client, valid ChatGPT session marker and exact RPC id.
+    // Scope shadow usage to that correlation without persisting the marker.
+    // Without a valid session marker, retain the legacy conservative fallback:
+    // that caller cannot promise perfect cross-conversation deduplication.
+    const fingerprintInput = JSON.stringify({
+      version: "ordax-mcp-usage-fingerprint-v2",
+      id: requestId, tool: toolName, arguments: args,
+      ...(verifiedRetryDigest ? { retry_correlation: verifiedRetryDigest } : {}),
+    });
     if (typeof fingerprintInput !== "string") return;
     const key = await crypto.subtle.importKey(
       "raw",
@@ -1167,7 +1176,7 @@ export async function handleOrdaxMcp(
         // Shadow-only accounting is not an execution dependency. A slow usage
         // write must not delay a successful MCP answer or cause a duplicate
         // user retry after the canonical action receipt was committed.
-        const usage = recordSuccessfulToolCall(handlers, sessionPayload, id, name, args);
+        const usage = recordSuccessfulToolCall(handlers, sessionPayload, id, name, args, retryDigest);
         if (context) {
           try {
             context.waitUntil(usage);
