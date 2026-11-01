@@ -542,6 +542,15 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
   } };
 }
 
+/** Action error codes are public machine identifiers, never free-form runtime
+ * diagnostics, connection URLs or exception messages. Both the PostgreSQL
+ * read adapter and MCP projection use this one contract.
+ */
+export function isProductActionErrorCode(value: unknown): value is string | null {
+  return value === null || (typeof value === "string"
+    && /^[A-Za-z][A-Za-z0-9._-]{0,119}$/.test(value));
+}
+
 function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObject {
   const invalid = { ok: false, monitoring_state: "unknown", error: "action_status_invalid_response",
     ...(requestId ? { request_id: requestId } : {}) };
@@ -581,6 +590,7 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
       && runtimeVersion === runtimeVersion.trim()
       && !/[\x00-\x1f\x7f]/u.test(runtimeVersion);
     if (!provenanceUnknown && !provenanceValid) return invalid;
+    if (action.error_code !== undefined && !isProductActionErrorCode(action.error_code)) return invalid;
     return {
       ok: payload.ok !== false,
       pending,
