@@ -155,9 +155,64 @@ test("an accepted action remains uncertain after a 401, 403 or 404 status lookup
     assert.equal(Object.hasOwn(result, "pending"), false);
     assert.equal(result.monitoring_state, "unknown");
     assert.equal(result.upstream_status, status);
-    assert.equal(result.error, "action_status_unavailable");
+    assert.equal(result.error, status === 404 ? "action_status_not_visible" : "action_status_access_denied");
     assert.match(result.message, /Do not resubmit/);
     assert.doesNotMatch(JSON.stringify(result), /secret/);
+  }
+});
+
+test("direct status read distinguishes revoked access or invisible request from transient gateway failure", async () => {
+  for (const [status, expected] of [
+    [401, "action_status_access_denied"],
+    [403, "action_status_access_denied"],
+    [404, "action_status_not_visible"],
+    [429, "action_status_unavailable"],
+    [503, "action_status_unavailable"],
+  ] as const) {
+    let reads = 0;
+    const { body } = await call("ordax_action_status", {
+      createAction: async () => { assert.fail("status lookup cannot enqueue"); },
+      getAction: async () => {
+        reads++;
+        return Response.json({ error: "private SQL secret", trace: "sensitive" }, {status});
+      },
+    });
+    assert.equal(reads, 1);
+    assert.equal(body.result.isError, true);
+    const projected = body.result.structuredContent;
+    assert.equal(projected.ok, false);
+    assert.equal(projected.error, expected);
+    assert.equal(projected.request_id, acceptedId);
+    assert.equal(projected.upstream_status, status);
+    assert.equal(projected.monitoring_state, "unknown");
+    assert.equal(Object.hasOwn(projected, "pending"), false);
+    assert.match(projected.message, /Do not resubmit/);
+    assert.doesNotMatch(JSON.stringify(projected), /private|secret|sensitive|trace/);
+  }
+});
+
+test("untrusted pending status message cannot expose backend diagnostics to public MCP", async () => {
+  for (const name of ["ordax_action_status", "git_status"]) {
+    let created = 0;
+    const {body} = await call(name, {
+      createAction: async () => {
+        created++;
+        return Response.json({ok:true,request_id:acceptedId});
+      },
+      getAction: async () => Response.json({
+        ok: true, pending: true, request_id: acceptedId,
+        message: "private SQL token=secret connection=postgres://credentials",
+        debug_stack: "sensitive",
+      }),
+    });
+    const content = body.result.structuredContent;
+    assert.equal(content.request_id, acceptedId);
+    assert.equal(content.ok, true);
+    assert.equal(content.pending, true);
+    assert.equal(body.result.isError, false);
+    assert.match(content.message, /ordax_action_status/);
+    assert.doesNotMatch(JSON.stringify(body), /secret|private SQL|postgres:|sensitive/);
+    assert.equal(created, name === "git_status" ? 1 : 0);
   }
 });
 
