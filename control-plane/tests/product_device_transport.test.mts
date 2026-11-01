@@ -29,6 +29,79 @@ test("device transport is POST-only and rejects unauthenticated device before Po
   assert.deepEqual(await post.json(), { ok: false, error: "device_auth_required" });
 });
 
+test("unknown device routes do not consume SQL token-verification queries", async () => {
+  const authenticatedShape = {
+    "x-ordax-device-id": "22222222-2222-4222-8222-222222222222",
+    "x-ordax-device-token": "a".repeat(64),
+  };
+  const unknown = [
+    "/v3/device/transport/unknown",
+    "/v3/device/transport/heartbeat/unexpected",
+    "/v3/device/transport/report/extra",
+    "/v3/device/transport/wake/subscribe",
+  ];
+  for (const urlPath of unknown) {
+    const request = new Request("https://mcp.example" + urlPath, {
+      method: "POST", headers: authenticatedShape,
+    });
+    // No POSTGRES binding exists in this env. An attempted SQL verification
+    // would return 503; nonexistent routes must return 404 without DB access.
+    const result = await handleProductDeviceTransport(request, fakeEnv);
+    assert.equal(result.status, 404, urlPath);
+    assert.deepEqual(await result.json(), { ok: false, error: "not_found" });
+  }
+});
+
+test("staged workspace routes preserve auth-first secrecy even while disabled", async () => {
+  const variants = [
+    {},
+    { WORKSPACE_RESOURCE_VERIFIER_ENABLED: "enabled" },
+    { WORKSPACE_RESOURCE_ISSUANCE_ENABLED: "enabled" },
+  ];
+  for (const urlPath of ["/workspace-confirm", "/workspace-proof"]) {
+    for (const flags of variants) {
+      const response = await handleProductDeviceTransport(
+        new Request("https://mcp.example/v3/device/transport" + urlPath, { method: "POST" }),
+        { ...fakeEnv, ...flags },
+      );
+      assert.equal(response.status, 401, urlPath + JSON.stringify(flags));
+      assert.deepEqual(await response.json(), { ok: false, error: "device_auth_required" });
+    }
+  }
+});
+
+test("enabled and recognized device paths always retain PostgreSQL authentication", async () => {
+  const recognized = [
+    "/heartbeat", "/claim", "/start", "/lease",
+    "/orchestrator-read-authorization", "/progress",
+    "/report", "/recover-report",
+  ];
+  const flags = {
+    WORKSPACE_RESOURCE_VERIFIER_ENABLED: "enabled",
+    WORKSPACE_RESOURCE_ISSUANCE_ENABLED: "enabled",
+  };
+  for (const urlPath of [...recognized, "/workspace-proof", "/workspace-confirm"]) {
+    const response = await handleProductDeviceTransport(
+      new Request("https://mcp.example/v3/device/transport" + urlPath, { method: "POST" }),
+      { ...fakeEnv, ...flags },
+    );
+    assert.equal(response.status, 401, urlPath);
+    assert.deepEqual(await response.json(), { ok: false, error: "device_auth_required" });
+  }
+  const wake = await handleProductDeviceTransport(
+    new Request("https://mcp.example/v3/device/transport/wake"), fakeEnv,
+  );
+  assert.equal(wake.status, 401, "WebSocket subscriptions still require SQL device authentication");
+  const wrongMethod = await handleProductDeviceTransport(
+    new Request("https://mcp.example/v3/device/transport/wake", { method: "POST" }), fakeEnv,
+  );
+  assert.equal(wrongMethod.status, 405);
+  const otherGet = await handleProductDeviceTransport(
+    new Request("https://mcp.example/v3/device/transport/unknown"), fakeEnv,
+  );
+  assert.equal(otherGet.status, 405, "preserve existing method precedence");
+});
+
 test("canonical MCP gateway mounts device transport without exposing another MCP tool", async () => {
   const gateway = createCanonicalProductMcpGateway(fakeEnv, {
     session: async () => Response.json({ ok: false }, { status: 401 }),

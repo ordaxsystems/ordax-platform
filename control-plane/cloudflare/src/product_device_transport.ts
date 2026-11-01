@@ -483,34 +483,61 @@ export async function handleProductDeviceTransport(
     return subscribeProductDeviceWake(env, auth.deviceId, request);
   }
   if (request.method !== "POST") return respond({ ok: false, error: "method_not_allowed" }, 405);
+
+  // Reject unknown routes BEFORE authenticating through SQL: no operation
+  // exists to authorize. Known routes (including disabled staged features)
+  // preserve the auth-first contract and must not expose feature flags.
+  let execute: (deviceId: string) => Promise<Response>;
+  switch (path) {
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/heartbeat":
+      execute = deviceId => heartbeat(request, env, deviceId);
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/claim":
+      execute = deviceId => claim(request, env, deviceId);
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/start":
+      execute = deviceId => start(request, env, deviceId);
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/lease":
+      execute = deviceId => lease(request, env, deviceId);
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/orchestrator-read-authorization":
+      execute = deviceId => orchestratorAuthorization(request, env, deviceId);
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-confirm":
+      execute = async deviceId => {
+        // Preserve the existing auth-first contract: disabled feature flags
+        // are not disclosed to a client without a valid device credential.
+        if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled"
+            || env.WORKSPACE_RESOURCE_ISSUANCE_ENABLED !== "enabled")
+          return respond({ ok: false, error: "not_found" }, 404);
+        return workspaceResourceConfirmation(request, env, deviceId);
+      };
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-proof":
+      execute = async deviceId => {
+        // The SQL is still a proposal. Deploying this source cannot enable
+        // the capability; authenticated clients require an explicit opt-in.
+        if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled")
+          return respond({ ok: false, error: "not_found" }, 404);
+        return workspaceResourceProof(request, env, deviceId);
+      };
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/progress":
+      execute = deviceId => progress(request, env, deviceId);
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/report":
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/recover-report":
+      execute = deviceId => report(request, env, deviceId);
+      break;
+    default:
+      return respond({ ok: false, error: "not_found" }, 404);
+  }
+
   const auth = await authenticateDeviceRequest(request, env);
   if (!auth.ok) return auth.response;
   try {
-    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/heartbeat") return heartbeat(request, env, auth.deviceId);
-    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/claim") return claim(request, env, auth.deviceId);
-    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/start") return start(request, env, auth.deviceId);
-    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/lease") return lease(request, env, auth.deviceId);
-    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/orchestrator-read-authorization")
-      return orchestratorAuthorization(request, env, auth.deviceId);
-    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-confirm") {
-      if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled"
-          || env.WORKSPACE_RESOURCE_ISSUANCE_ENABLED !== "enabled")
-        return respond({ ok: false, error: "not_found" }, 404);
-      return workspaceResourceConfirmation(request, env, auth.deviceId);
-    }
-    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-proof") {
-      // The SQL is still a proposal. Deploying this source cannot enable the
-      // capability; explicit migration governance and this opt-in are required.
-      if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled")
-        return respond({ ok: false, error: "not_found" }, 404);
-      return workspaceResourceProof(request, env, auth.deviceId);
-    }
-    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/progress") return progress(request, env, auth.deviceId);
-    if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/report"
-        || path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/recover-report") {
-      return report(request, env, auth.deviceId);
-    }
-    return respond({ ok: false, error: "not_found" }, 404);
+    return await execute(auth.deviceId);
   } catch (error) {
     if (error instanceof ProductPostgresError) {
       return respond({ ok: false, error: error.code }, error.status);
