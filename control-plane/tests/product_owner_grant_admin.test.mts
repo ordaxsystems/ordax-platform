@@ -10,6 +10,7 @@ import {
   OWNER_MCP_GRANT_PROFILES,
   productCapabilityAccessMode,
 } from "../cloudflare/src/product_owner_grant_profiles.ts";
+import { env, token, withIssuer, client } from "./product_mcp_test_fixtures.mts";
 import {
   COMPUTER_DEVICE_ACTIONS,
   OBSERVE_COMPUTER_CONTROL_MODE,
@@ -81,6 +82,63 @@ test("owner grant admin fails closed before database access without signed owner
     {method:"POST",headers:{"content-type":"application/json"},body:"{}"},
   ),env);
   assert.equal(post.status,401);
+});
+
+test("all Owner grant and consent routes reject delegated OAuth clients before any mutation", async () => {
+  await withIssuer(async () => {
+    const pinnedOwnerClient = "202fd3e1-b058-4531-8750-82c57e4b6ca0";
+    const configured = {
+      ...env,
+      PRODUCT_OWNER_OAUTH_CLIENT_ID: pinnedOwnerClient,
+      CENTRAL_OWNER_SELECTION_ENABLED: "enabled",
+      CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED: "enabled",
+      WORKSPACE_RESOURCE_VERIFIER_ENABLED: "enabled",
+      WORKSPACE_RESOURCE_ISSUANCE_ENABLED: "enabled",
+    } as any;
+    const device = "11111111-1111-4111-8111-111111111111";
+    const group = "22222222-2222-4222-8222-222222222222";
+    const challenge = "33333333-3333-4333-8333-333333333333";
+    const origin = "https://mcp.ordax.com.br";
+    const cases = [
+      {url: "/v3/owner/remote-authority?device_id="+device, method: "GET"},
+      {url: "/v3/owner/remote-grant-groups", method: "POST", body: {}},
+      {url: "/v3/owner/remote-grant-groups/"+group+"?client_id="+client, method: "DELETE"},
+      {url: "/v3/owner/central-session-targets?client_id="+client, method: "GET"},
+      {url: "/v3/owner/central-session-selections?client_id="+client, method: "GET"},
+      {url: "/v3/owner/central-session-selections", method: "POST",
+       body: {client_id:client, challenge_id:challenge, device_id:device}},
+      {url: "/v3/owner/workspace-resources/approvals", method: "POST", body: {}},
+      {url: "/v3/owner/workspace-resources/resource_aaaaaaaa?client_id="+client, method: "DELETE"},
+    ] as const;
+    const delegatedToken = await token(); // Signed but NOT Owner-authorized.
+    for (const c of cases) {
+      const request = new Request(origin+c.url, {
+        method: c.method,
+        headers: { authorization: "Bearer "+delegatedToken,
+          ...("body" in c ? {"content-type":"application/json"} : {}) },
+        ...("body" in c ? {body: JSON.stringify(c.body)} : {}),
+      });
+      const response = await handleProductOwnerGrantAdmin(request, configured);
+      assert.equal(response.status, 403, c.url);
+      assert.deepEqual(await response.json(), {ok:false,error:"owner_primary_session_required"}, c.url);
+    }
+    // A signed native Owner's OAuth client, or normal first-party account
+    // session without client_id, may reach validation without this denial.
+    for (const authorized of [await token({client_id: pinnedOwnerClient}), await token({client_id:null})]) {
+      const response = await handleProductOwnerGrantAdmin(new Request(origin+"/v3/owner/remote-grant-groups", {
+        method: "POST",headers: {authorization:"Bearer "+authorized,"content-type":"application/json"},
+        body: JSON.stringify({}),
+      }), configured);
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), {ok:false,error:"owner_grant_invalid"});
+    }
+    // Misconfigured pin must not silently accept an OAuth client.
+    const denied = await handleProductOwnerGrantAdmin(new Request(origin+"/v3/owner/remote-grant-groups", {
+      method:"POST",headers:{authorization:"Bearer "+await token({client_id:pinnedOwnerClient}),
+        "content-type":"application/json"},body:"{}",
+    }), {...env} as any);
+    assert.equal(denied.status,403);
+  });
 });
 
 test("owner grant source contains no device-link or pairing authority", () => {
