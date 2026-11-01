@@ -44,11 +44,16 @@ class CentralMcpCandidateGateTests(unittest.TestCase):
                             f'"control-plane/cloudflare/src/{name}"', section,
                             f"{workflow.name} misses source: {name}"
                         )
-                    for name in REQUIRED_TESTS:
-                        self.assertIn(
-                            f'"control-plane/tests/{name}"', section,
-                            f"{workflow.name} misses test: {name}"
-                        )
+                    self.assertEqual(
+                        section.count('"control-plane/tests/*.test.mts"'), 1,
+                        f"{workflow.name} must watch every current/future candidate test",
+                    )
+                    self.assertFalse(
+                        any('"control-plane/tests/' in line
+                            and line.strip() != '- "control-plane/tests/*.test.mts"'
+                            for line in section.splitlines()),
+                        f"{workflow.name} retains stale per-file test allowlist",
+                    )
 
     def test_owner_sql_e2e_is_executed_in_both_non_deploy_candidate_jobs(self):
         # The single canonical runner discovers all Product tests, including
