@@ -1041,6 +1041,18 @@
         "blob_sha": "23fe7424a65cd957bd88187be3461f885d2775fb"
       },
       "ledger_name": "central_owner_device_selection_v1"
+    },
+    {
+      "name": "20261101204500_product_mcp_target_discovery_idempotent_v1",
+      "applied_version": "20261101203933",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261101204500_product_mcp_target_discovery_idempotent_v1.sql",
+        "blob_sha": "1284df355b6c85b2768c41d74d8416ead05290ce"
+      },
+      "ledger_name": "product_mcp_target_discovery_idempotent_v1"
     }
   ]
 }
