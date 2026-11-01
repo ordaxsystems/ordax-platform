@@ -75,6 +75,51 @@ test("MCP pre-routing caps streamed tool bodies before attestation or dispatch",
   assert.equal(calls.getAction, 0);
 });
 
+test("invalid RPC envelopes cannot trigger pre-routing attested session recovery", async () => {
+  const { handlers, calls } = fakeHandlers();
+  let resolutions = 0;
+  let opens = 0;
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+    new Set(["computer_access_status"]), {
+      resolve: async () => {
+        resolutions++;
+        throw new Error("invalid RPC must not resolve an attested device");
+      },
+      open: async () => {
+        opens++;
+        throw new Error("invalid RPC must not open an Owner challenge");
+      },
+    });
+  const params = { name: "computer_access_status",
+    arguments: { device_id: "22222222-2222-4222-8222-222222222222" } };
+  const cases: Array<{ envelope: Record<string, unknown>; code: number }> = [
+    { envelope: { jsonrpc: "2.0", method: "tools/call", params }, code: -32600 },
+    { envelope: { jsonrpc: "2.0", id: null, method: "tools/call", params }, code: -32600 },
+    { envelope: { jsonrpc: "2.0", id: false, method: "tools/call", params }, code: -32600 },
+    { envelope: { jsonrpc: "2.0", id: [], method: "tools/call", params }, code: -32600 },
+    { envelope: { jsonrpc: "2.0", id: 1.5, method: "tools/call", params }, code: -32600 },
+    { envelope: { jsonrpc: "2.0", id: 7, method: "tools/call",
+      params: { ...params, arguments: null } }, code: -32602 },
+    { envelope: { jsonrpc: "2.0", id: 8, method: "tools/call",
+      params: { ...params, arguments: [] } }, code: -32602 },
+    { envelope: { jsonrpc: "2.0", id: 9, method: "tools/call",
+      params: { ...params, arguments: "bad" } }, code: -32602 },
+  ];
+  for (const { envelope, code } of cases) {
+    const response = await gateway(new Request(MCP_URL, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(envelope),
+    }));
+    const payload = await response.json() as any;
+    assert.equal(payload.error.code, code, JSON.stringify(envelope));
+  }
+  assert.equal(resolutions, 0, "rejected RPC input must not enter session recovery");
+  assert.equal(opens, 0, "rejected RPC input must not open an Owner challenge");
+  assert.equal(calls.session, cases.length, "OAuth preflight still applies to every request");
+  assert.equal(calls.targets, 0);
+  assert.equal(calls.getAction, 0);
+});
+
 test("OrdaX OS presence uses the canonical MCP PostgreSQL ingress without granting actions", async () => {
   const { isProductTrustedClientPath } = await import("../cloudflare/src/product_mcp_entry.ts");
   const path = "/v3/product/device/presence";

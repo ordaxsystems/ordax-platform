@@ -1042,6 +1042,24 @@ function validRpcRequestId(value: unknown): value is string | number {
     || (typeof value === "number" && Number.isSafeInteger(value));
 }
 
+/** The single structural tools/call envelope validator. Both the gateway's
+ * pre-routing/session bootstrap and the JSON-RPC dispatcher must agree before
+ * any authenticated session challenge, device resolution or action dispatch.
+ * Policy for named tools/permissions remains in the dispatcher/SQL authority. */
+export function validMcpToolCallEnvelope(value: unknown): value is JsonObject & {
+  id: string | number;
+  params: JsonObject;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const body = value as JsonObject;
+  if (body.jsonrpc !== "2.0" || body.method !== "tools/call"
+    || !validRpcRequestId(body.id)) return false;
+  const params = body.params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) return false;
+  const args = (params as JsonObject).arguments;
+  return args === undefined || (args !== null && typeof args === "object" && !Array.isArray(args));
+}
+
 export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandlers, allowedTools?: ReadonlySet<string>): Promise<Response> {
   if (request.method === "GET") return new Response(null, { status: 405, headers: { allow: "POST" } });
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "GET, POST" } });
@@ -1083,16 +1101,10 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
   });
   if (method === "tools/list") return rpcResult(id, { tools: toolDefinitions(allowedTools) });
   if (method === "tools/call") {
+    if (!validMcpToolCallEnvelope(message)) return rpcError(id, -32602, "Invalid params");
     const params = message.params;
-    if (!params || typeof params !== "object" || Array.isArray(params)) return rpcError(id, -32602, "Invalid params");
-    const name = typeof (params as JsonObject).name === "string" ? String((params as JsonObject).name) : "";
-    const rawArgs = (params as JsonObject).arguments;
-    // Omission means no arguments; explicit malformed arguments must never
-    // silently turn into a valid read or a no-argument device operation.
-    if (rawArgs !== undefined && (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs))) {
-      return rpcError(id, -32602, "Invalid params");
-    }
-    const args = (rawArgs ?? {}) as JsonObject;
+    const name = typeof params.name === "string" ? String(params.name) : "";
+    const args = (params.arguments ?? {}) as JsonObject;
     if (!specFor(name) || (allowedTools && !allowedTools.has(name))) return rpcError(id, -32601, "Tool not found", { tool: name });
     try {
       const retryDigest = await verifiedMcpRetryDigest(sessionPayload, id, params);

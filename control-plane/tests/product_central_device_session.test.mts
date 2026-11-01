@@ -71,6 +71,39 @@ test("oversized but valid tools/call JSON cannot supply a session marker or open
   assert.equal(resolved, 0);
 });
 
+test("invalid RPC IDs and malformed arguments cannot open a Central session", async () => {
+  const jwt = await token();
+  const params = { name: "ordax_session", arguments: {},
+    _meta: { "openai/session": marker } };
+  const invalid = [
+    { jsonrpc: "2.0", method: "tools/call", params },
+    { jsonrpc: "2.0", id: null, method: "tools/call", params },
+    { jsonrpc: "2.0", id: true, method: "tools/call", params },
+    { jsonrpc: "2.0", id: [], method: "tools/call", params },
+    { jsonrpc: "2.0", id: 1.25, method: "tools/call", params },
+    { jsonrpc: "2.0", id: 9, method: "tools/call", params: { ...params, arguments: null } },
+    { jsonrpc: "2.0", id: 9, method: "tools/call", params: { ...params, arguments: [] } },
+    { jsonrpc: "2.0", id: 9, method: "tools/call", params: { ...params, arguments: "invalid" } },
+  ];
+  let opened = 0;
+  for (const payload of invalid) {
+    const makeRequest = () => new Request("https://mcp.ordax.com.br/mcp", {
+      method: "POST", headers: { authorization: "Bearer " + jwt, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(await centralSessionMarker(makeRequest()), null);
+    const response = await openCentralSessionFromMcp(makeRequest(), env, {
+      open: async () => {
+        opened++;
+        throw new Error("invalid JSON-RPC envelope must not open a Central challenge");
+      },
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).error, "central_session_marker_required");
+  }
+  assert.equal(opened, 0);
+});
+
 test("signed OAuth client opens challenge without trusting model device_id",async()=>{
   await withIssuer(async()=>{
     const jwt=await token();
