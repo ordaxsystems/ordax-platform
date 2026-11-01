@@ -1007,6 +1007,13 @@ async function recordSuccessfulToolCall(
 /** Shared upper bound for both MCP pre-routing and JSON-RPC parsing. */
 export const MAX_MCP_REQUEST_BYTES = 1024 * 1024;
 
+/** Correlation ID must be safe to echo and usable for action completion.
+ * JSON-RPC notifications must never enqueue side-effecting tools. */
+function validRpcRequestId(value: unknown): value is string | number {
+  return (typeof value === "string" && value.length > 0 && value.length <= 256)
+    || (typeof value === "number" && Number.isSafeInteger(value));
+}
+
 export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandlers, allowedTools?: ReadonlySet<string>): Promise<Response> {
   if (request.method === "GET") return new Response(null, { status: 405, headers: { allow: "POST" } });
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "GET, POST" } });
@@ -1030,10 +1037,15 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
   } catch {
     return rpcError(null, -32700, "Parse error");
   }
-  if (message.jsonrpc !== "2.0" || typeof message.method !== "string") return rpcError(message.id, -32600, "Invalid Request");
+  if (message.jsonrpc !== "2.0" || typeof message.method !== "string") return rpcError(null, -32600, "Invalid Request");
   const id = message.id;
   const method = message.method;
-  if (method === "notifications/initialized") return new Response(null, { status: 202 });
+  if (method === "notifications/initialized" && id === undefined) return new Response(null, { status: 202 });
+  // Only notifications are one-way. Every request, especially tools/call, must
+  // carry a safe correlation ID so no device operation loses its reply identity.
+  if (!validRpcRequestId(id) || method === "notifications/initialized") {
+    return rpcError(null, -32600, "Invalid Request");
+  }
   if (method === "ping") return rpcResult(id, {});
   if (method === "initialize") return rpcResult(id, {
     protocolVersion: "2025-06-18",
@@ -1047,7 +1059,12 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
     if (!params || typeof params !== "object" || Array.isArray(params)) return rpcError(id, -32602, "Invalid params");
     const name = typeof (params as JsonObject).name === "string" ? String((params as JsonObject).name) : "";
     const rawArgs = (params as JsonObject).arguments;
-    const args = rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? rawArgs as JsonObject : {};
+    // Omission means no arguments; explicit malformed arguments must never
+    // silently turn into a valid read or a no-argument device operation.
+    if (rawArgs !== undefined && (!rawArgs || typeof rawArgs !== "object" || Array.isArray(rawArgs))) {
+      return rpcError(id, -32602, "Invalid params");
+    }
+    const args = (rawArgs ?? {}) as JsonObject;
     if (!specFor(name) || (allowedTools && !allowedTools.has(name))) return rpcError(id, -32601, "Tool not found", { tool: name });
     try {
       const result = await callTool(request, name, args, handlers, toolDefinitions(allowedTools).length);

@@ -24,6 +24,78 @@ async function call(name: string, overrides: Partial<OrdaxMcpHandlers> = {}, arg
   return { response, body: await response.json() };
 }
 
+test("invalid JSON-RPC ids cannot dispatch or lose action correlation", async () => {
+  let sessions = 0;
+  let dispatched = 0;
+  const handlers: OrdaxMcpHandlers = {
+    session: async () => { sessions++; return Response.json({ ok: true }); },
+    targets: async () => { dispatched++; throw new Error("invalid RPC ID reached target discovery"); },
+    createAction: async () => { dispatched++; throw new Error("invalid RPC ID reached action dispatch"); },
+    getAction: async () => { dispatched++; throw new Error("invalid RPC ID reached status polling"); },
+  };
+  const send = (id: unknown, method = "tools/call") => handleOrdaxMcp(
+    new Request("https://ordax.example/mcp", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", ...(id === undefined ? {} : { id }), method,
+        params: { name: "ordax_targets", arguments: {} },
+      }),
+    }), handlers,
+  );
+
+  for (const invalidId of [undefined, null, false, true, {}, [], 1.5,
+    Number.MAX_SAFE_INTEGER + 1, "", "x".repeat(257)]) {
+    const response = await send(invalidId);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" },
+    });
+  }
+  assert.equal(dispatched, 0);
+  assert.equal(sessions, 10, "normal OAuth preflight stays mandatory for invalid requests");
+
+  const notification = await send(undefined, "notifications/initialized");
+  assert.equal(notification.status, 202);
+  assert.equal(dispatched, 0);
+  const masqueradingNotification = await send(42, "notifications/initialized");
+  assert.equal((await masqueradingNotification.json() as any).error.code, -32600);
+  assert.equal(dispatched, 0);
+});
+
+test("malformed explicit JSON-RPC arguments fail before a device action", async () => {
+  let dispatched = 0;
+  const handlers: OrdaxMcpHandlers = {
+    session: async () => Response.json({ ok: true }),
+    targets: async () => { dispatched++; throw new Error("malformed arguments reached discovery"); },
+    createAction: async () => { dispatched++; throw new Error("malformed arguments reached action enqueue"); },
+    getAction: async () => { dispatched++; throw new Error("malformed arguments reached status polling"); },
+  };
+  const send = (id: string | number, name: string, args: unknown, includeArgs = true) =>
+    handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call",
+        params: { name, ...(includeArgs ? { arguments: args } : {}) } }),
+    }), handlers);
+
+  for (const args of [null, [], false, 42, "not-an-object"]) {
+    for (const tool of ["ordax_targets", "computer_screen_info"]) {
+      const response = await send("action-correlation-1", tool, args);
+      const payload = await response.json() as any;
+      assert.equal(payload.id, "action-correlation-1");
+      assert.equal(payload.error.code, -32602);
+      assert.equal(payload.error.message, "Invalid params");
+    }
+  }
+  assert.equal(dispatched, 0);
+
+  const valid = await send("status-request-1", "ordax_session", undefined, false);
+  const body = await valid.json() as any;
+  assert.equal(body.id, "status-request-1");
+  assert.equal(body.result.isError, false, "omitted optional arguments remain valid");
+  const numeric = await send(42, "ordax_session", {});
+  assert.equal((await numeric.json() as any).id, 42);
+});
+
 test("invalid session probes block every tool before discovery or dispatch", async () => {
   for (const payload of [null, {}, { ok: false }, { ok: "true" }, []]) {
     for (const name of ["ordax_targets", "git_status", "ordax_session"]) {
