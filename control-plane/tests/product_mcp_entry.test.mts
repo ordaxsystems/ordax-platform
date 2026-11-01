@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { createCanonicalProductMcpGateway, resolveOrBootstrapAttestedSession, PRODUCT_MCP_DIRECT_TOOLS } from "../cloudflare/src/product_mcp_entry.ts";
+import { MAX_MCP_REQUEST_BYTES } from "../cloudflare/src/mcp_http.ts";
 
 const ENV = Object.freeze({
   PRODUCT_AUTH_ISSUER: "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1",
@@ -32,6 +33,46 @@ test("published entry cannot accidentally import legacy D1 Worker or configure D
   assert.match(config, /main = "src\/product_mcp_entry.ts"/);
   assert.match(config, /binding = "POSTGRES"/);
   assert.match(config, /id = "4b601ec5815f43259bd8040053825d2a"/);
+});
+
+test("MCP pre-routing caps streamed tool bodies before attestation or dispatch", async () => {
+  assert.equal(MAX_MCP_REQUEST_BYTES, 1024 * 1024);
+  const { handlers, calls } = fakeHandlers();
+  let attestationReads = 0;
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+    new Set(["computer_access_status"]), {
+      resolve: async () => {
+        attestationReads++;
+        throw new Error("oversized body must never enter attestation");
+      },
+    });
+
+  // A 4 MiB source: unbounded Request.json() would exhaust all 64 chunks.
+  let pulls = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls++;
+      if (pulls > 64) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(new Uint8Array(64 * 1024).fill(0x20));
+    },
+  });
+  const oversized = new Request(MCP_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: stream,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
+  const response = await gateway(oversized);
+  const json = await response.json() as any;
+  assert.equal(json.error.code, -32700);
+  assert.ok(pulls < 40, `pre-routing overconsumed stream: ${pulls}`);
+  assert.equal(attestationReads, 0);
+  assert.equal(calls.session, 1);
+  assert.equal(calls.targets, 0);
+  assert.equal(calls.getAction, 0);
 });
 
 test("OrdaX OS presence uses the canonical MCP PostgreSQL ingress without granting actions", async () => {

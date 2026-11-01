@@ -12,7 +12,8 @@
  * Runtime-attested Product session and current canonical PostgreSQL grants.
  */
 export { ProductDeviceWake } from "./product_device_wake.ts";
-import { handleOrdaxMcp, type OrdaxMcpHandlers } from "./mcp_http.ts";
+import { handleOrdaxMcp, MAX_MCP_REQUEST_BYTES, type OrdaxMcpHandlers } from "./mcp_http.ts";
+import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
@@ -179,16 +180,14 @@ function resourceMetadata(origin: string, issuer: string) {
 
 async function mcpToolName(request: Request): Promise<string | null> {
   if (request.method !== "POST") return null;
-  try {
-    const body = await request.clone().json() as Record<string, unknown>;
-    if (!body || body.jsonrpc !== "2.0" || body.method !== "tools/call") return null;
-    const params = body.params;
-    if (!params || typeof params !== "object" || Array.isArray(params)) return null;
-    const name = (params as Record<string, unknown>).name;
-    return typeof name === "string" ? name : null;
-  } catch {
-    return null;
-  }
+  // Do not eagerly buffer an unbounded client body just to identify a tool.
+  // Reuse the same stream reader and limit as the downstream JSON-RPC parser.
+  const body = await readBoundedJsonObject(request.clone(), MAX_MCP_REQUEST_BYTES);
+  if (!body || body.jsonrpc !== "2.0" || body.method !== "tools/call") return null;
+  const params = body.params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) return null;
+  const name = (params as Record<string, unknown>).name;
+  return typeof name === "string" ? name : null;
 }
 
 /** Session recovery is only coordination. A device remains trusted exclusively

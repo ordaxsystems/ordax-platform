@@ -24,7 +24,10 @@ export async function readBoundedJsonObject(
   } catch {
     return null;
   } finally {
-    try { await reader.cancel(); } catch { /* The stream may already be closed. */ }
+    // A Request.clone() body is a tee: awaiting cancellation of one branch
+    // can deadlock until the original branch is consumed by the MCP handler.
+    // Initiate best-effort cancellation without holding up the caller.
+    try { void reader.cancel().catch(() => {}); } catch { /* Already closed. */ }
     reader.releaseLock();
   }
 }
