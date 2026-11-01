@@ -45,6 +45,8 @@ type Dependencies = Readonly<{
   authenticate?: (request: Request, env: ProductAuthEnv) => Promise<VerifiedProductMcpClient>;
   listTargets?: typeof listCanonicalProductTargets;
   enqueue?: typeof enqueueProductAction;
+  /** Supplied only by Worker waitUntil; no model or HTTP input controls it. */
+  scheduleWake?: (wake: Promise<void>) => void;
   now?: () => number;
   operationId?: () => string;
 }>;
@@ -501,6 +503,7 @@ export function createAttestedDeviceActionHandler(
         payload: body.arguments,
         idempotencyKey: `mcp-${accessMode}-${opId}`,
         expiresAt: new Date(now() + QUEUE_TTL_MS).toISOString(),
+        ...(deps.scheduleWake ? { scheduleWake: deps.scheduleWake } : {}),
       });
 
       if (result.ok === false) {
