@@ -428,9 +428,9 @@ export function createCanonicalProductMcpGateway(
               : ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
               ? createAttestedProjectActionHandler(env, trusted, wakeDependencies)
               : ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)
-                ? createAttestedProjectContinuityHandler(env, trusted)
+                ? createAttestedProjectContinuityHandler(env, trusted, wakeDependencies)
                 : ATTESTED_REPOSITORY_CATALOG_TOOLS.has(toolName)
-                  ? createAttestedRepositoryCatalogHandler(env, trusted)
+                  ? createAttestedRepositoryCatalogHandler(env, trusted, wakeDependencies)
                   : createAttestedDeviceActionHandler(env, trusted, wakeDependencies),
         };
       }
