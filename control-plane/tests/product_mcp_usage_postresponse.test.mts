@@ -64,7 +64,7 @@ test("Worker waitUntil owns slow shadow accounting; MCP answer never waits for t
   const payload = await response.json() as any;
   assert.equal(payload.jsonrpc, "2.0");
   assert.equal(payload.id, 17);
-  assert.equal(payload.result.isError, undefined, "shadow write cannot mark accepted tool as failed");
+  assert.equal(payload.result.isError, false, "shadow write cannot mark accepted tool as failed");
   assert.equal(scheduled.length, 1, "exactly one request-owned background task");
   await usage.called;
   assert.equal(usage.recorded.length, 1);
