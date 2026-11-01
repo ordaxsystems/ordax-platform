@@ -281,3 +281,41 @@ test("continuity denies foreign OAuth owner and caller-supplied Space before pro
   assert.equal((await spaceDenied.json()).error, "product_project_continuity_action_invalid");
   assert.equal(resolved, 0);
 });
+
+test("continuity forwards only the request-owned wake scheduler after grant and project checks", async () => {
+  const scheduled: Promise<void>[] = [];
+  const scheduleWake = (wake: Promise<void>) => { scheduled.push(wake); };
+  let input: any = null;
+  const handler = createAttestedProjectContinuityHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject: resolvedProject,
+    listTargets: async () => catalog(grantGroup("continuity.get", "read")),
+    enqueue: async (_env, value) => {
+      input = value;
+      // Mimics an enqueue whose Durable Object never finishes: ownership
+      // belongs to waitUntil, not the committed receipt's response lifetime.
+      value.scheduleWake?.(new Promise<void>(() => {}));
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    scheduleWake,
+    operationId: () => OPERATION,
+  });
+  const response = await handler(actionRequest("continuity.get", { repository_full_name: REPOSITORY }));
+  assert.equal(response.status, 202);
+  assert.equal(input.scheduleWake, scheduleWake);
+  assert.equal(scheduled.length, 1);
+  assert.equal(input.projectId, PROJECT);
+  assert.equal(input.spaceId, SPACE);
+  assert.equal(Object.hasOwn(input.payload, "scheduleWake"), false);
+
+  const noContext = createAttestedProjectContinuityHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject: resolvedProject,
+    listTargets: async () => catalog(grantGroup("continuity.get", "read")),
+    enqueue: async (_env, value) => {
+      assert.equal(Object.hasOwn(value, "scheduleWake"), false);
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+  });
+  assert.equal((await noContext(actionRequest("continuity.get", { repository_full_name: REPOSITORY }))).status, 202);
+});

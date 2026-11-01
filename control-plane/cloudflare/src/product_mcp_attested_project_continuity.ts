@@ -36,6 +36,8 @@ type Dependencies = Readonly<{
   listTargets?: typeof listCanonicalProductTargets;
   resolveProject?: typeof resolveOwnerProjectScope;
   enqueue?: typeof enqueueProductAction;
+  /** Request-owned Worker waitUntil; advisory signal never delays committed SQL receipt. */
+  scheduleWake?: (wake: Promise<void>) => void;
   now?: () => number;
   operationId?: () => string;
 }>;
@@ -321,6 +323,7 @@ export function createAttestedProjectContinuityHandler(
         payload,
         idempotencyKey: `mcp-${accessMode}-${opId}`,
         expiresAt: new Date(now() + QUEUE_TTL_MS).toISOString(),
+        ...(deps.scheduleWake ? { scheduleWake: deps.scheduleWake } : {}),
       });
 
       if (result.ok === false) {

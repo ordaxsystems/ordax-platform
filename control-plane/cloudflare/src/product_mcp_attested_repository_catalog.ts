@@ -29,6 +29,8 @@ type Dependencies = Readonly<{
   authenticate?: (request: Request, env: ProductAuthEnv) => Promise<VerifiedProductMcpClient>;
   listTargets?: typeof listCanonicalProductTargets;
   enqueue?: typeof enqueueProductAction;
+  /** Request-owned Worker waitUntil; advisory signal never delays committed SQL receipt. */
+  scheduleWake?: (wake: Promise<void>) => void;
   now?: () => number;
   operationId?: () => string;
 }>;
@@ -163,6 +165,7 @@ export function createAttestedRepositoryCatalogHandler(
         payload: {},
         idempotencyKey: `mcp-${accessMode}-${opId}`,
         expiresAt: new Date(now() + QUEUE_TTL_MS).toISOString(),
+        ...(deps.scheduleWake ? { scheduleWake: deps.scheduleWake } : {}),
       });
 
       if (result.ok === false) {

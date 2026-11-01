@@ -99,3 +99,37 @@ test("repository catalog rejects model-selected device and extra arguments", asy
   assert.equal((await extra.json()).error, "product_repository_catalog_action_invalid");
   assert.equal(touched, false);
 });
+
+test("repository discovery forwards waitUntil scheduler but never includes it in the canonical payload", async () => {
+  const scheduled: Promise<void>[] = [];
+  const scheduleWake = (wake: Promise<void>) => { scheduled.push(wake); };
+  let input: any = null;
+  const handler = createAttestedRepositoryCatalogHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(),
+    enqueue: async (_env, value) => {
+      input = value;
+      value.scheduleWake?.(new Promise<void>(() => {}));
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    scheduleWake,
+  });
+  const response = await handler(request());
+  assert.equal(response.status, 202);
+  assert.equal(input.scheduleWake, scheduleWake);
+  assert.equal(scheduled.length, 1);
+  assert.equal(input.spaceId, null);
+  assert.equal(input.projectId, null);
+  assert.deepEqual(input.payload, {});
+  assert.equal(Object.hasOwn(input.payload, "scheduleWake"), false);
+
+  const noContext = createAttestedRepositoryCatalogHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(),
+    enqueue: async (_env, value) => {
+      assert.equal(Object.hasOwn(value, "scheduleWake"), false);
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+  });
+  assert.equal((await noContext(request())).status, 202);
+});
