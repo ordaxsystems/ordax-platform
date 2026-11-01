@@ -484,9 +484,9 @@ export async function handleProductDeviceTransport(
   }
   if (request.method !== "POST") return respond({ ok: false, error: "method_not_allowed" }, 405);
 
-  // Decide route and opt-in eligibility BEFORE authenticating through SQL.
-  // Unknown or disabled paths cannot execute and must never burn the shared
-  // Hyperdrive query budget on device-token verification.
+  // Reject unknown routes BEFORE authenticating through SQL: no operation
+  // exists to authorize. Known routes (including disabled staged features)
+  // preserve the auth-first contract and must not expose feature flags.
   let execute: (deviceId: string) => Promise<Response>;
   switch (path) {
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/heartbeat":
@@ -505,17 +505,23 @@ export async function handleProductDeviceTransport(
       execute = deviceId => orchestratorAuthorization(request, env, deviceId);
       break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-confirm":
-      if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled"
-          || env.WORKSPACE_RESOURCE_ISSUANCE_ENABLED !== "enabled")
-        return respond({ ok: false, error: "not_found" }, 404);
-      execute = deviceId => workspaceResourceConfirmation(request, env, deviceId);
+      execute = async deviceId => {
+        // Preserve the existing auth-first contract: disabled feature flags
+        // are not disclosed to a client without a valid device credential.
+        if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled"
+            || env.WORKSPACE_RESOURCE_ISSUANCE_ENABLED !== "enabled")
+          return respond({ ok: false, error: "not_found" }, 404);
+        return workspaceResourceConfirmation(request, env, deviceId);
+      };
       break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-proof":
-      // The SQL is still a proposal. Deploying this source cannot enable the
-      // capability; explicit migration governance and this opt-in are required.
-      if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled")
-        return respond({ ok: false, error: "not_found" }, 404);
-      execute = deviceId => workspaceResourceProof(request, env, deviceId);
+      execute = async deviceId => {
+        // The SQL is still a proposal. Deploying this source cannot enable
+        // the capability; authenticated clients require an explicit opt-in.
+        if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled")
+          return respond({ ok: false, error: "not_found" }, 404);
+        return workspaceResourceProof(request, env, deviceId);
+      };
       break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/progress":
       execute = deviceId => progress(request, env, deviceId);
