@@ -434,7 +434,7 @@ export function createCanonicalProductMcpGateway(
                   : createAttestedDeviceActionHandler(env, trusted, wakeDependencies),
         };
       }
-      return handleOrdaxMcp(request, handlers, allowedTools);
+      return handleOrdaxMcp(request, handlers, allowedTools, context);
     }
     return respond({ ok: false, error: "not_found" }, 404);
   };
