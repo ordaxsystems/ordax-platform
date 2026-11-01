@@ -267,10 +267,15 @@ test("ordax_session reveals only the effective signed OAuth client for Owner gra
         body: JSON.stringify({ jsonrpc: "2.0", id: 28, method: "tools/call",
           params: { name: "ordax_session", arguments: { client_id: client } } }),
       }), handlers);
-      const rpc = await response.json() as any;
-      assert.equal(rpc.result.structuredContent.authenticated, false);
-      assert.equal(Object.hasOwn(rpc.result.structuredContent, "client_id"), false,
+      // Authentication is a pre-dispatch gate: an invalid bearer receives
+      // an HTTP denial, never a successful JSON-RPC tool response.
+      assert.ok([401, 403].includes(response.status), "invalid OAuth must fail before MCP dispatch");
+      const denied = await response.json() as any;
+      assert.equal(denied.ok, false);
+      assert.equal(Object.hasOwn(denied, "client_id"), false,
         "failed OAuth must never reflect caller-selected client_id");
+      assert.equal(Object.hasOwn(denied, "result"), false,
+        "a denied session cannot masquerade as a successful MCP tool call");
     }
   });
 });
