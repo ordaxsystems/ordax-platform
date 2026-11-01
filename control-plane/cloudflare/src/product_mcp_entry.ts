@@ -284,7 +284,10 @@ export function createCanonicalProductMcpGateway(
     ...reads,
     createAction: async () => respond({ ok: false, error: "trusted_operation_required" }, 403),
   };
-  return async (request: Request): Promise<Response> => {
+  return async (
+    request: Request,
+    context?: { waitUntil(promise: Promise<unknown>): void },
+  ): Promise<Response> => {
     const url = new URL(request.url);
     if (url.hostname === PRODUCT_TRUSTED_CLIENT_HOSTNAME && !isProductTrustedClientPath(url.pathname)) {
       return respond({ ok: false, error: "not_found" }, 404);
@@ -407,6 +410,12 @@ export function createCanonicalProductMcpGateway(
         } catch {
           trusted = null;
         }
+        // The signalling Durable Object is advisory only. Schedule its wake
+        // on the *current request's* Worker lifetime after SQL commits; never
+        // block the persisted action receipt on a secondary channel.
+        const wakeDependencies = context
+          ? { scheduleWake: (wake: Promise<void>) => context.waitUntil(wake) }
+          : {};
         handlers = {
           ...reads,
           createAction: pending
@@ -417,12 +426,12 @@ export function createCanonicalProductMcpGateway(
                     ? { challenge_id: ownerChallengeId, action_dispatched: false } : {}),
                 }, 409)
               : ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
-              ? createAttestedProjectActionHandler(env, trusted)
+              ? createAttestedProjectActionHandler(env, trusted, wakeDependencies)
               : ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)
                 ? createAttestedProjectContinuityHandler(env, trusted)
                 : ATTESTED_REPOSITORY_CATALOG_TOOLS.has(toolName)
                   ? createAttestedRepositoryCatalogHandler(env, trusted)
-                  : createAttestedDeviceActionHandler(env, trusted),
+                  : createAttestedDeviceActionHandler(env, trusted, wakeDependencies),
         };
       }
       return handleOrdaxMcp(request, handlers, allowedTools);
@@ -432,8 +441,12 @@ export function createCanonicalProductMcpGateway(
 }
 
 export default {
-  fetch(request: Request, env: Env): Promise<Response> {
-    return createCanonicalProductMcpGateway(env)(request);
+  fetch(
+    request: Request,
+    env: Env,
+    context?: { waitUntil(promise: Promise<unknown>): void },
+  ): Promise<Response> {
+    return createCanonicalProductMcpGateway(env)(request, context);
   },
   scheduled(_controller: { scheduledTime: number; cron: string }, env: Env, context: { waitUntil(promise: Promise<unknown>): void }): void {
     context.waitUntil(pruneProductMcpUsage(env).catch(() => {
