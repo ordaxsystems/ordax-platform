@@ -1,6 +1,7 @@
 import { openPostgresSession } from "./data_postgres_driver.ts";
 import {
   authenticateProductRequest,
+  authorizeProductOwnerIdentity,
   type ProductAuthEnv,
   type ProductIdentity,
 } from "./product_auth.ts";
@@ -139,11 +140,10 @@ export function createOwnerProjectScopeHandler(env: Env, deps: Dependencies = {}
       return json({ ok: false, error: "not_found" }, 404);
     }
 
-    const identity = await authenticate(request, env);
+    // A signed delegated MCP client is not an Owner, even for read-only
+    // resource resolution. Reuse the exact gate used for grant mutations.
+    const identity = authorizeProductOwnerIdentity(await authenticate(request, env), env);
     if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
-    if (identity.role !== "authenticated" || !isCanonicalUuid(identity.subjectId)) {
-      return json({ ok: false, error: "product_owner_identity_invalid" }, 403);
-    }
 
     const deviceId = (url.searchParams.get("device_id") ?? "").toLowerCase();
     const repositoryFullName = canonicalGithubRepositoryFullName(
@@ -154,7 +154,7 @@ export function createOwnerProjectScopeHandler(env: Env, deps: Dependencies = {}
     }
 
     try {
-      const raw = await resolve(env, identity.subjectId, deviceId, repositoryFullName);
+      const raw = await resolve(env, identity.ownerUserId, deviceId, repositoryFullName);
       const result = projectScopeResponse(raw, repositoryFullName);
       return json(result, resultStatus(result));
     } catch (error) {
