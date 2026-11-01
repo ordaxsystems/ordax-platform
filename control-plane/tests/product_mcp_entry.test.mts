@@ -603,3 +603,12 @@ test("first device operation waits through installed 20-second Runtime cadence",
   assert.equal(checks, 12);
 });
 
+
+test("published MCP Worker passes request-owned waitUntil to both attested action handlers", async () => {
+  const source = await readFile(new URL("../cloudflare/src/product_mcp_entry.ts", import.meta.url), "utf8");
+  assert.match(source, /scheduleWake: \(wake: Promise<void>\) => context\.waitUntil\(wake\)/);
+  assert.match(source, /createAttestedProjectActionHandler\(env, trusted, wakeDependencies\)/);
+  assert.match(source, /createAttestedDeviceActionHandler\(env, trusted, wakeDependencies\)/);
+  assert.match(source, /createCanonicalProductMcpGateway\(env\)\(request, context\)/);
+  assert.doesNotMatch(source, /void notifyProductDeviceWake\(/);
+});
