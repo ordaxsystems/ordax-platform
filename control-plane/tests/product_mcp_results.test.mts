@@ -3,25 +3,28 @@ import test from "node:test";
 import { handleOrdaxMcp } from "../cloudflare/src/mcp_http.ts";
 import { scopeProductResult } from "../cloudflare/src/product_results.ts";
 
+// PostgreSQL Product queue receipts are UUIDs, not arbitrary transport strings.
+const acceptedId = "11111111-1111-4111-8111-111111111111";
+
 for (const status of ["queued", "leased", "running", "succeeded", "failed", "cancelled"]) {
   test(`action status preserves ${status} and its continuation id`, async () => {
     const handlers = {
       session: async () => Response.json({ ok: true }),
       targets: async () => Response.json({ ok: true, targets: [] }),
-      createAction: async () => Response.json({ ok: true, request_id: "request-1" }),
-      getAction: async () => Response.json({ ok: true, action: { request_id: "request-1", action: "git.status", status, result: null } }),
+      createAction: async () => Response.json({ ok: true, request_id: acceptedId }),
+      getAction: async () => Response.json({ ok: true, action: { request_id: acceptedId, action: "git.status", status, result: null } }),
     };
     for (const name of ["ordax_action_status", "git_status"]) {
       const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {
-          name, arguments: { request_id: "request-1", device_id: "device-1", project: "review", wait_for_completion_ms: 0 },
+          name, arguments: { request_id: acceptedId, device_id: "device-1", project: "review", wait_for_completion_ms: 0 },
         } }),
       }), handlers);
       const { result } = await response.json();
       const pending = ["queued", "leased", "running"].includes(status);
       assert.equal(result.structuredContent.pending, pending);
-      assert.equal(result.structuredContent.request_id, "request-1");
+      assert.equal(result.structuredContent.request_id, acceptedId);
       if (name === "ordax_action_status") assert.equal(result.structuredContent.action.status, status);
       if (pending) assert.equal(result.isError, false);
       else if (name === "git_status") assert.equal(result.isError, status !== "succeeded");
@@ -46,14 +49,14 @@ test("pending tool wait preserves the exact queued, leased and running stage", a
     const result = await callQueuedAction({
       session: async () => Response.json({ ok: true }),
       targets: async () => Response.json({ ok: true, targets: [] }),
-      createAction: async () => Response.json({ ok: true, request_id: "request-1" }),
+      createAction: async () => Response.json({ ok: true, request_id: acceptedId }),
       getAction: async () => Response.json({ ok: true, action: {
-        request_id: "request-1", action: "git.status", status: stage, result: null,
+        request_id: acceptedId, action: "git.status", status: stage, result: null,
       } }),
     }, 0);
     assert.equal(result.structuredContent.pending, true);
     assert.equal(result.structuredContent.action.status, stage);
-    assert.equal(result.structuredContent.request_id, "request-1");
+    assert.equal(result.structuredContent.request_id, acceptedId);
     assert.match(result.structuredContent.message, /ordax_action_status/);
     assert.doesNotMatch(result.structuredContent.message, /Action is still running/);
   }
@@ -67,7 +70,7 @@ test("a lost status query after accepted enqueue does not assert action failure 
       targets: async () => Response.json({ ok: true, targets: [] }),
       createAction: async () => {
         createCount++;
-        return Response.json({ ok: true, request_id: "request-1" });
+        return Response.json({ ok: true, request_id: acceptedId });
       },
       getAction: async () => {
         if (failure === "throw") throw new Error("db unreachable");
@@ -76,7 +79,7 @@ test("a lost status query after accepted enqueue does not assert action failure 
       },
     }, 0);
     assert.equal(createCount, 1);
-    assert.equal(result.structuredContent.request_id, "request-1");
+    assert.equal(result.structuredContent.request_id, acceptedId);
     if (failure === "401") {
       assert.equal(result.structuredContent.ok, false);
       assert.equal(Object.hasOwn(result.structuredContent, "pending"), false);
@@ -99,11 +102,11 @@ test("queued wait uses bounded backoff instead of a 250ms database polling loop"
   const result = await callQueuedAction({
     session: async () => Response.json({ ok: true }),
     targets: async () => Response.json({ ok: true, targets: [] }),
-    createAction: async () => Response.json({ ok: true, request_id: "request-1" }),
+    createAction: async () => Response.json({ ok: true, request_id: acceptedId }),
     getAction: async () => {
       reads++;
       return Response.json({ ok: true, action: {
-        request_id: "request-1", action: "git.status", status: "queued", result: null,
+        request_id: acceptedId, action: "git.status", status: "queued", result: null,
       } });
     },
   }, 1100);
@@ -117,11 +120,11 @@ test("successful completion during a bounded wait is returned, not left pending"
   const result = await callQueuedAction({
     session: async () => Response.json({ ok: true }),
     targets: async () => Response.json({ ok: true, targets: [] }),
-    createAction: async () => Response.json({ ok: true, request_id: "request-1" }),
+    createAction: async () => Response.json({ ok: true, request_id: acceptedId }),
     getAction: async () => {
       reads++;
       return Response.json({ ok: true, action: {
-        request_id: "request-1", action: "git.status",
+        request_id: acceptedId, action: "git.status",
         status: reads === 1 ? "queued" : "succeeded", result: { ok: true },
       } });
     },
