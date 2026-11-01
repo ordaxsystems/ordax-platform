@@ -789,32 +789,53 @@ function pendingActionMessage(status: unknown): string {
   return "Action has not reached a verified terminal state; check ordax_action_status with this request_id.";
 }
 
-async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers): Promise<JsonObject> {
-  const deadline = Date.now() + timeoutMs;
-  let pollRound = 0;
-  let transientRetryUsed = false;
-  // A single bounded retry may recover a temporary Hyperdrive read failure
-  // without creating a second action. Respect the original wait deadline and
-  // never retry auth denials, 404, rate limits or a zero-wait request.
-  const retryRead = async (): Promise<boolean> => {
-    if (transientRetryUsed || deadline - Date.now() < 250) return false;
-    transientRetryUsed = true;
+/** Reuse the same one-retry read policy for direct status and accepted-action
+ * polling. The deadline is owned by the caller, not inferred from a response.
+ * A transient failure may justify one *read*, never another enqueue.
+ */
+function boundedTransientActionStatusRetry(deadline: number): () => Promise<boolean> {
+  let used = false;
+  return async () => {
+    if (used || deadline - Date.now() < 250) return false;
+    used = true;
     await new Promise((resolve) => setTimeout(resolve, 200));
     return true;
   };
+}
+
+async function readActionStatusWithRecovery(
+  source: Request,
+  requestId: string,
+  handlers: OrdaxMcpHandlers,
+  retry: () => Promise<boolean>,
+): Promise<Response | null> {
   while (true) {
-    const statusRequest = cloneWithAuth(source, new URL(`/v3/product/actions/${requestId}`, source.url).toString(), "GET");
     let statusResponse: Response;
-    try { statusResponse = await handlers.getAction(statusRequest, requestId); }
-    catch {
-      if (await retryRead()) continue;
-      return actionMonitoringUnavailable(requestId);
+    try {
+      statusResponse = await handlers.getAction(
+        cloneWithAuth(source, new URL(`/v3/product/actions/${requestId}`, source.url).toString(), "GET"),
+        requestId,
+      );
+    } catch {
+      if (await retry()) continue;
+      return null;
     }
+    // Never repeat an authorization denial or backpressure response. The
+    // exact signed OAuth identity is checked again by the canonical adapter.
+    if ((statusResponse.status === 408 || statusResponse.status >= 500) && await retry()) continue;
+    return statusResponse;
+  }
+}
+
+async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers): Promise<JsonObject> {
+  const deadline = Date.now() + timeoutMs;
+  let pollRound = 0;
+  const retryRead = boundedTransientActionStatusRetry(deadline);
+  while (true) {
+    const statusResponse = await readActionStatusWithRecovery(source, requestId, handlers, retryRead);
+    if (!statusResponse) return actionMonitoringUnavailable(requestId);
     if (!statusResponse.ok) {
       const status = statusResponse.status;
-      // A temporary database or gateway failure after a committed enqueue
-      // is not an action failure. Do not retry 429 (server backpressure).
-      if ((status === 408 || status >= 500) && await retryRead()) continue;
       if (status === 408 || status === 429 || status >= 500) {
         return actionMonitoringUnavailable(requestId, status);
       }
@@ -910,11 +931,14 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
     const requestId = typeof args.request_id === "string" ? args.request_id : "";
     if (!requestId) return textToolResult({ ok: false, error: "request_id_required" }, true);
     if (!/^[A-Za-z0-9:_-]{1,128}$/.test(requestId)) return textToolResult({ ok: false, error: "product_request_id_invalid" }, true);
-    let response: Response;
-    try { response = await handlers.getAction(cloneWithAuth(source, new URL(`/v3/product/actions/${requestId}`, source.url).toString(), "GET"), requestId); }
-    catch { return textToolResult(unverifiedActionStatus(requestId), true); }
-    const payload = await bodyJson(response);
-    const projected = response.ok ? sanitizeActionPayload(payload, requestId)
+    // A direct status lookup is read-only: recover one transient 408/5xx or
+    // connection exception, but never enqueue a new action or mask 401/403/404
+    // and 429 as a healthy read. The request ID and OAuth client stay exact.
+    const response = await readActionStatusWithRecovery(
+      source, requestId, handlers, boundedTransientActionStatusRetry(Date.now() + 1000),
+    );
+    if (!response) return textToolResult(unverifiedActionStatus(requestId), true);
+    const projected = response.ok ? sanitizeActionPayload(await bodyJson(response), requestId)
       : unverifiedActionStatus(requestId, response.status);
     return textToolResult(projected, projected.ok !== true);
   }
