@@ -30,6 +30,26 @@ class RetiredOperatorEndpointsTests(unittest.TestCase):
                 self.assertIn(route, src)
                 self.assertIn(f'error: "{error}" }}, 410)', src)
 
+    def test_legacy_openai_review_grant_workflow_is_retired(self):
+        # The old manual workflow could mint grants via a shared operator
+        # bearer and a D1 endpoint. Owner/PostgreSQL is the only live writer.
+        workflow = ROOT / ".github/workflows/openai-review-grant.yml"
+        self.assertFalse(workflow.exists())
+        runbook = (ROOT / "docs/OPENAI_PLUGIN_REVIEW.md").read_text(encoding="utf-8")
+        for retired in (
+            "ORDAX_OPERATOR_TOKEN",
+            "/v3/product-grants/from-link",
+            "ordax-ac1ca1b50d09.workers.dev",
+            "eobcxuyvhkvdmkbaihwh",
+        ):
+            with self.subTest(retired=retired):
+                self.assertNotIn(retired, runbook)
+        import json
+        manifest = json.loads((ROOT / "plugins/ordax-chatgpt/mcp.json").read_text(encoding="utf-8"))
+        self.assertIn(manifest["mcpServers"]["ordax"]["url"], runbook)
+        self.assertIn("/v3/owner/remote-grant-groups", runbook)
+        self.assertIn("product_owner_grant_profiles.ts", runbook)
+
 
 if __name__ == "__main__":
     unittest.main()
