@@ -243,7 +243,8 @@ test("accepted action retains continuation ID across HTTP and thrown status fail
         assert.equal(body.result.structuredContent.monitoring_error, "action_status_unavailable");
         assert.match(body.result.structuredContent.message, /Do not resubmit/);
       }
-      assert.equal(reads, 1); assert.equal(dispatched, name === "git_status" ? 1 : 0);
+      assert.equal(reads, name === "ordax_action_status" ? 2 : 1);
+      assert.equal(dispatched, name === "git_status" ? 1 : 0);
       for (const secret of ["secret", "private", "SQL", "postgres://"]) assert.equal(JSON.stringify(body).includes(secret), false);
     }
   }
@@ -289,7 +290,8 @@ test("direct status read distinguishes revoked access or invisible request from 
         return Response.json({ error: "private SQL secret", trace: "sensitive" }, {status});
       },
     });
-    assert.equal(reads, 1);
+    assert.equal(reads, status === 503 ? 2 : 1,
+      "only transient failures can consume the one bounded status retry");
     assert.equal(body.result.isError, true);
     const projected = body.result.structuredContent;
     assert.equal(projected.ok, false);
@@ -759,4 +761,79 @@ test("status denials and rate limits do not trigger automatic retry under load",
     assert.equal(body.result.structuredContent.error, status === 429 ? undefined
       : status === 404 ? "action_status_not_visible" : "action_status_access_denied");
   }
+});
+
+test("direct status reads recover one transient 408/503 or thrown transport error", async () => {
+  for (const transient of [408, 500, 503, "throw"] as const) {
+    let reads = 0, enqueues = 0;
+    const seen: Array<{ url: string; id: string; auth: string | null }> = [];
+    const source = new Request("https://ordax.example/mcp", {
+      method: "POST", headers: { "authorization": "Bearer signed-mcp-client", "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 10, method: "tools/call",
+        params: { name: "ordax_action_status", arguments: { request_id: acceptedId } } }),
+    });
+    const response = await handleOrdaxMcp(source, {
+      session: async () => Response.json({ ok: true }),
+      targets: async () => { assert.fail("direct status cannot discover targets"); },
+      createAction: async () => { enqueues++; assert.fail("direct status cannot enqueue"); },
+      getAction: async (req, id) => {
+        reads++;
+        seen.push({ url: req.url, id, auth: req.headers.get("authorization") });
+        if (reads === 1) {
+          if (transient === "throw") throw Error("postgres://secret@internal");
+          return Response.json({ error: "private database state" }, { status: transient });
+        }
+        return Response.json(record({ status: "succeeded", result: { completion: "canonical" } }));
+      },
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json() as any;
+    assert.equal(enqueues, 0);
+    assert.equal(reads, 2);
+    assert.deepEqual(seen, [
+      { url: "https://ordax.example/v3/product/actions/" + acceptedId,
+        id: acceptedId, auth: "Bearer signed-mcp-client" },
+      { url: "https://ordax.example/v3/product/actions/" + acceptedId,
+        id: acceptedId, auth: "Bearer signed-mcp-client" },
+    ]);
+    assert.equal(body.result.isError, false);
+    assert.equal(body.result.structuredContent.request_id, acceptedId);
+    assert.equal(body.result.structuredContent.action.status, "succeeded");
+    assert.deepEqual(body.result.structuredContent.action.result, { completion: "canonical" });
+    assert.doesNotMatch(JSON.stringify(body), /postgres:\/\/secret|private database state/);
+  }
+});
+
+test("direct status caps 5xx retries, retains uncertainty and never retries 401/403/404/429", async () => {
+  for (const status of [401, 403, 404, 429, 503]) {
+    let calls = 0;
+    const { body } = await call("ordax_action_status", {
+      createAction: async () => { assert.fail("status must remain read-only"); },
+      getAction: async () => {
+        calls++;
+        return Response.json({ internal: "server secret" }, { status });
+      },
+    });
+    assert.equal(calls, status === 503 ? 2 : 1);
+    assert.equal(body.result.isError, true);
+    assert.equal(body.result.structuredContent.monitoring_state, "unknown");
+    assert.equal(body.result.structuredContent.request_id, acceptedId);
+    assert.equal(Object.hasOwn(body.result.structuredContent, "pending"), false);
+    assert.doesNotMatch(JSON.stringify(body), /server secret/);
+  }
+});
+
+test("direct status succeeds immediately without extra queries when PostgreSQL responds", async () => {
+  let reads = 0;
+  const { body } = await call("ordax_action_status", {
+    createAction: async () => { assert.fail("status cannot enqueue"); },
+    getAction: async () => {
+      reads++;
+      return Response.json(record({ status: "queued" }));
+    },
+  });
+  assert.equal(reads, 1);
+  assert.equal(body.result.isError, false);
+  assert.equal(body.result.structuredContent.pending, true);
+  assert.equal(body.result.structuredContent.action.status, "queued");
 });
