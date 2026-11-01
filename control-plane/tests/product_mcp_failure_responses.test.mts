@@ -105,6 +105,46 @@ test("unknown status, missing action and mismatched request stop observation wit
   }
 });
 
+test("public status output enforces canonical machine error codes without exposing diagnostics", async () => {
+  for (const suspicious of [
+    "postgres://user:secret@db.internal",
+    "private_token=secret",
+    "runtime failure with credentials",
+    "database\\nprivate",
+    "X".repeat(121),
+  ]) {
+    for (const name of ["ordax_action_status", "git_status"]) {
+      const { body } = await call(name, {
+        getAction: async () => Response.json(record({ status: "failed", error_code: suspicious })),
+      });
+      const projected = body.result.structuredContent;
+      assert.equal(projected.request_id, acceptedId);
+      assert.doesNotMatch(JSON.stringify(body), /secret|credentials|database\\nprivate/);
+      if (name === "ordax_action_status") {
+        assert.equal(body.result.isError, true);
+        assert.deepEqual(projected, {
+          ok: false, monitoring_state: "unknown", request_id: acceptedId,
+          error: "action_status_invalid_response",
+        });
+      } else {
+        // The enqueue is already acknowledged. Malformed monitoring data must
+        // never invite a duplicate write or be represented as a failed action.
+        assert.equal(projected.ok, true);
+        assert.equal(projected.pending, true);
+        assert.equal(projected.monitoring_error, "action_status_unavailable");
+        assert.match(projected.message, /Do not resubmit/);
+      }
+    }
+  }
+
+  for (const code of ["EACCES", "runtime_action_failed", "ENOENT_2"]) {
+    const { body } = await call("ordax_action_status", {
+      getAction: async () => Response.json(record({ status: "failed", error_code: code })),
+    });
+    assert.equal(body.result.structuredContent.action.error_code, code);
+  }
+});
+
 test("accepted action retains continuation ID across HTTP and thrown status failures without leaking upstream data", async () => {
   for (const statusFailure of [
     async () => Response.json({ error: "private SQL details", connection: "secret" }, { status: 503 }),
