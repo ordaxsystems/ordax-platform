@@ -9,6 +9,7 @@ import {
 import { ProductPostgresError, type ProductPostgresEnv } from "./product_postgres_store.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
+import { MAX_MCP_REQUEST_BYTES } from "./mcp_http.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 type Json = Record<string, unknown>;
@@ -34,18 +35,16 @@ async function sha256(value: string): Promise<string> {
  * OAuth client opens a challenge and the exact Product device confirms it.
  */
 export async function centralSessionMarker(request: Request): Promise<string | null> {
-  try {
-    const body = await request.clone().json() as Json;
-    if (!body || body.jsonrpc !== "2.0" || body.method !== "tools/call") return null;
-    const params = body.params;
-    if (!params || typeof params !== "object" || Array.isArray(params)) return null;
-    const meta = (params as Json)._meta;
-    if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
-    const marker = (meta as Json)["openai/session"];
-    return validChatGptSessionMarker(marker) ? marker : null;
-  } catch {
-    return null;
-  }
+  // The session marker is correlation data, but parsing it still occurs before
+  // JSON-RPC dispatch. Enforce the exact same stream bound as the MCP handler.
+  const body = await readBoundedJsonObject(request.clone(), MAX_MCP_REQUEST_BYTES);
+  if (!body || body.jsonrpc !== "2.0" || body.method !== "tools/call") return null;
+  const params = body.params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) return null;
+  const meta = (params as Json)._meta;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const marker = (meta as Json)["openai/session"];
+  return validChatGptSessionMarker(marker) ? marker : null;
 }
 
 export async function openCentralSessionFromMcp(
