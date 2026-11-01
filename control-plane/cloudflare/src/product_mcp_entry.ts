@@ -12,7 +12,7 @@
  * Runtime-attested Product session and current canonical PostgreSQL grants.
  */
 export { ProductDeviceWake } from "./product_device_wake.ts";
-import { handleOrdaxMcp, MAX_MCP_REQUEST_BYTES, type OrdaxMcpHandlers } from "./mcp_http.ts";
+import { handleOrdaxMcp, MAX_MCP_REQUEST_BYTES, validMcpToolCallEnvelope, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence.ts";
@@ -183,10 +183,10 @@ async function mcpToolName(request: Request): Promise<string | null> {
   // Do not eagerly buffer an unbounded client body just to identify a tool.
   // Reuse the same stream reader and limit as the downstream JSON-RPC parser.
   const body = await readBoundedJsonObject(request.clone(), MAX_MCP_REQUEST_BYTES);
-  if (!body || body.jsonrpc !== "2.0" || body.method !== "tools/call") return null;
-  const params = body.params;
-  if (!params || typeof params !== "object" || Array.isArray(params)) return null;
-  const name = (params as Record<string, unknown>).name;
+  // A malformed tool request must not open an Owner challenge or enter
+  // attested-session resolution before the JSON-RPC dispatcher rejects it.
+  if (!validMcpToolCallEnvelope(body)) return null;
+  const name = body.params.name;
   return typeof name === "string" ? name : null;
 }
 
