@@ -17,7 +17,7 @@ function request(url:string,jwt?:string,method="GET") {
 test("Owner target inspection stays default-OFF and never reaches the SQL port",async()=>{
   await withIssuer(async()=>{
     let touched=0;
-    const reply=await handleProductOwnerGrantAdmin(request(query(),await token()),env,{
+    const reply=await handleProductOwnerGrantAdmin(request(query(),await token({client_id:null})),env,{
       inspectCentralTargets:async()=>{touched++;throw Error("unreachable");},
     });
     assert.equal(reply.status,404);
@@ -39,7 +39,7 @@ test("only a signed Owner can inspect an exact consented client; model device ca
     };
     const absent=await handleProductOwnerGrantAdmin(request(query()),active,{inspectCentralTargets:inspect});
     assert.equal(absent.status,401);
-    const jwt=await token();
+    const jwt=await token({client_id:null});
     for(const suffix of ["&device_id="+target,"&client_id="+client,"&owner_user_id="+owner]) {
       const denied=await handleProductOwnerGrantAdmin(request(query(client,suffix),jwt),active,{inspectCentralTargets:inspect});
       assert.equal(denied.status,400);
@@ -57,7 +57,7 @@ test("only a signed Owner can inspect an exact consented client; model device ca
 });
 test("an unconsented client error cannot mint authority or dispatch",async()=>{
   await withIssuer(async()=>{
-    const r=await handleProductOwnerGrantAdmin(request(query(),await token()),
+    const r=await handleProductOwnerGrantAdmin(request(query(),await token({client_id:null})),
       {...env,CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED:"enabled"},{
       inspectCentralTargets:async()=>({ok:false,error:"owner_central_client_not_consented"}),
     });

@@ -63,12 +63,13 @@ async function owner(request: Request, env: Env): Promise<string | Response> {
   // Owner CLI uses its own public PKCE client, so do not reject all client_id
   // claims: accept only a first-party account JWT or the explicitly pinned
   // first-party Owner OAuth client configured in canonical Platform metadata.
-  if (new URL(request.url).pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH) {
-    const pinned = (env.PRODUCT_OWNER_OAUTH_CLIENT_ID ?? "").trim().toLowerCase();
-    if (identity.clientId !== null
-        && (!isCanonicalUuid(pinned) || identity.clientId.toLowerCase() !== pinned))
-      return json({ ok: false, error: "owner_primary_session_required" }, 403);
-  }
+  // Every Owner route is privileged, including grant creation/revocation,
+  // workspace consent, and discovery. Never let a delegated MCP OAuth client
+  // authorize itself simply because it has a signed end-user access token.
+  const pinned = (env.PRODUCT_OWNER_OAUTH_CLIENT_ID ?? "").trim().toLowerCase();
+  if (identity.clientId !== null
+      && (!isCanonicalUuid(pinned) || identity.clientId.toLowerCase() !== pinned))
+    return json({ ok: false, error: "owner_primary_session_required" }, 403);
   return identity.subjectId;
 }
 

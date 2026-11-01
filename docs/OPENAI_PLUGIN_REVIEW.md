@@ -46,7 +46,7 @@ Before recording or submitting:
 
 Use the OpenAI submission flow **With MCP** and submit the production HTTPS endpoint directly:
 
-`https://ordax-control-plane-v3.ordax-ac1ca1b50d09.workers.dev/mcp`
+`https://mcp.ordax.com.br/mcp`
 
 The public ZIP remains the canonical portable connector package. Registered-app mappings are for local/workspace packaging; the public MCP-backed submission uses the production endpoint in the dashboard.
 
@@ -83,23 +83,43 @@ The account should:
 
 Record the username/password only in private reviewer credential fields supplied by the OpenAI submission UI.
 
-## Provision the review grant
+## Grants de revisão — somente Owner canônico
 
-After the dedicated review account connects the review computer and creates a Product device link, copy only that link UUID into the GitHub Actions workflow `Provision OpenAI Review Grant`.
+O workflow antigo de concessão por link de dispositivo foi aposentado. Ele
+utilizava bearer global, infraestrutura legada e um endpoint D1; **não**
+executá-lo, recriá-lo ou repontá-lo para o Worker atual.
 
-The workflow uses the protected `cloudflare-v3` Environment and its existing `ORDAX_OPERATOR_TOKEN`. Do not copy the operator token into chat, issue comments or workflow inputs.
+1. Autenticar a conta dedicada de revisão pelo fluxo OAuth normal, registrar o
+   dispositivo de teste com o Runtime Product e identificar o `client_id` OAuth
+   efetivamente consentido. O dispositivo aparecer em `ordax_targets` não é
+   autorização de execução.
+2. No Owner autenticado, consultar `/v3/owner/remote-authority` e conceder
+   somente grupos de perfis **já definidos** em
+   `control-plane/cloudflare/src/product_owner_grant_profiles.ts`, pela rota
+   `/v3/owner/remote-grant-groups`. O backend vincula conta, cliente,
+   dispositivo e, para projetos, os UUIDs de Space e Project verificados.
+   Nunca aceitar um `client_id` arbitrário de uma ferramenta MCP como Owner.
+3. Exigir `valid_until` explícito para a revisão, limitar o projeto à
+   fixture isolada `ordax-review-demo`, verificar os grants de volta pelo
+   catálogo autorizado e revogar os grupos pelo mesmo Owner após a avaliação.
+   Não usar `service_role`, SQL manual, tokens globais ou autorização dentro
+   do modelo.
+4. **Bloquear a submissão se os perfis canônicos forem mais amplos do que a
+   revisão permite.** O perfil existente `interactive-computer-control`
+   também inclui `computer.hotkey`; não utilizá-lo fingindo que a ferramenta
+   foi negada. As demonstrações interativas e de projeto só são válidas depois
+   de provar um conjunto mínimo de capabilities na autoridade Owner existente,
+   com isolamento e revogação, sem novo provisionador privilegiado.
 
-The grant is intentionally fixed to:
+`computer.launch_app` requer, adicionalmente, permissão na política local
+`computer_access.allowed_applications` do dispositivo de revisão. Autorizar
+apenas `notepad.exe` na fixture; um grant remoto jamais contorna a política
+local do Runtime.
 
-- project: `ordax-review-demo`;
-- project-bounded discovery/actions: `projects.list`, `workspace.repository_catalog`, `project.text_read`, `project.search_text`, `project.text_write`, `git.status`;
-- bounded device-scoped Computer Control: access status, active/list windows, screen info, screenshot, focus, pointer move/click/scroll, bounded typing, process listing and app launch;
-- expiry: 30 days;
-- shell, hotkeys, process termination and persistent process start/stop: **not granted**.
-
-`computer.launch_app` also requires the review computer's local `computer_access.allowed_applications` policy to explicitly allow the executable. For the review fixture, allow only `notepad.exe`. A remote grant alone must never be sufficient to launch an application.
-
-If the reviewer account or device link changes, provision a new review grant from the new link rather than editing D1 directly.
+Se conta, cliente OAuth ou dispositivo de revisão mudarem, revogar os grupos
+anteriores e executar novamente o consentimento e a autorização Owner normais.
+Não transferir grants de outro computador e não alegar E2E enquanto o
+dispositivo não confirmar sessão e recibo de ação.
 
 ## Review project
 
@@ -213,12 +233,12 @@ Run before recording or submitting:
 
 ```bash
 python scripts/cloudflare/verify_product_oauth_server.py \
-  https://eobcxuyvhkvdmkbaihwh.supabase.co/auth/v1
+  https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1
 ```
 
 A 404 from discovery means the Supabase OAuth 2.1 Server is not enabled. Enable it in **Authentication → OAuth Server** and enable dynamic client registration before continuing.
 
-For the public connector, set **Authentication → URL Configuration → Site URL** to `https://ordax-control-plane-v3.ordax-ac1ca1b50d09.workers.dev` and keep **Authorization Path** as `/oauth/consent`. Do not leave Site URL pointed at retired infrastructure.
+Confirm the Supabase OAuth consent, callback URLs and public Site URL against the current **OrdaX Web/Site** identity configuration; never point any of them to the retired `workers.dev` origin. The MCP endpoint itself is `https://mcp.ordax.com.br/mcp` and is not a substitute for a browser Site URL. Run the actual authorization-code/PKCE consent flow before submission.
 
 ## Submission blockers
 
