@@ -3,8 +3,11 @@ import test from "node:test";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
-import { validOwnerMcpUsage, PRODUCT_OWNER_MCP_USAGE_PATH } from "../cloudflare/src/product_mcp_usage_read.ts";
+import {
+  validOwnerMcpUsage, PRODUCT_OWNER_MCP_USAGE_PATH, handleProductOwnerMcpUsageRead,
+} from "../cloudflare/src/product_mcp_usage_read.ts";
 import { createCanonicalProductMcpGateway, isProductTrustedClientPath } from "../cloudflare/src/product_mcp_entry.ts";
+import { env as signedEnv, owner, otherOwner, client, token, withIssuer } from "./product_mcp_test_fixtures.mts";
 
 const require = createRequire(new URL("../cloudflare/package.json", import.meta.url));
 const { PGlite } = require("@electric-sql/pglite");
@@ -37,6 +40,95 @@ test("signed owner usage endpoint never takes account IDs from a query or unauth
   assert.equal(post.status, 405);
   const unknown = await gateway(new Request("https://ordax-mcp.ordaxsystems.workers.dev/v3/product/usage/other"));
   assert.equal(unknown.status, 404);
+});
+
+test("Owner usage endpoint refuses delegated MCP clients and accepts only primary Owner sessions", async () => {
+  await withIssuer(async () => {
+    const ownerClient = "202fd3e1-b058-4531-8750-82c57e4b6ca0";
+    const config = {...signedEnv, PRODUCT_OWNER_OAUTH_CLIENT_ID: ownerClient};
+    const url = "https://mcp.ordax.com.br" + PRODUCT_OWNER_MCP_USAGE_PATH;
+    const signedRequest = (jwt: string, suffix = "") =>
+      new Request(url + suffix, {headers: {authorization: "Bearer " + jwt,
+        "x-ordax-owner-user-id": otherOwner, "x-ordax-client-id": client}});
+    let reads = 0;
+    const current = new Date();
+    const month = `${current.getUTCFullYear()}-${String(current.getUTCMonth()+1).padStart(2,"0")}-01`;
+    const previous = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth()-1, 1));
+    const prior = `${previous.getUTCFullYear()}-${String(previous.getUTCMonth()+1).padStart(2,"0")}-01`;
+    const canonical = {
+      ok: true as const, schema: "ordax.product-mcp-usage/1" as const,
+      observed_only: true as const, billable: false as const,
+      current_month: month, previous_month: prior,
+      entries: [{month, tool_name: "ordax_targets", tool_calls: 2,
+        internal_device_id: "PRIVATE_DEVICE", internal_token: "PRIVATE_ROW_TOKEN"}],
+      owner_user_id: "PRIVATE_OWNER", billing_trace: "PRIVATE_BILLING",
+    };
+    const read = async (_env: unknown, ownerId: string) => {
+      reads++;
+      assert.equal(ownerId, owner, "Owner always derives exclusively from signed JWT");
+      return canonical;
+    };
+    const delegate = await token();
+    const rejected = await handleProductOwnerMcpUsageRead(
+      signedRequest(delegate, "?owner_user_id="+otherOwner), config, read as any,
+    );
+    assert.equal(rejected.status, 403);
+    assert.deepEqual(await rejected.json(), {ok:false,error:"owner_primary_session_required"});
+    assert.equal(reads,0);
+
+    for (const acceptedJwt of [
+      await token({client_id:null}),
+      await token({client_id:undefined}),
+      await token({client_id:ownerClient}),
+      await token({client_id:ownerClient.toUpperCase()}),
+    ]) {
+      const response = await handleProductOwnerMcpUsageRead(signedRequest(acceptedJwt), config, read as any);
+      assert.equal(response.status,200);
+      assert.equal(response.headers.get("cache-control"),"no-store");
+      const publicBody = await response.json() as any;
+      assert.deepEqual(publicBody,{
+        ok:true,schema:"ordax.product-mcp-usage/1",observed_only:true,billable:false,
+        current_month:month,previous_month:prior,
+        entries:[{month,tool_name:"ordax_targets",tool_calls:2}],
+        collection_active_now:false,coverage:"partial_observational",quota:null,charge:null,
+      });
+      assert.doesNotMatch(JSON.stringify(publicBody),/PRIVATE_|internal_/);
+    }
+    assert.equal(reads,4);
+
+    for (const suffix of [
+      "?owner_user_id="+otherOwner,
+      "?client_id="+client,
+      "?device_id="+owner+"&device_id="+owner,
+      "?quota=true",
+    ]) {
+      const response = await handleProductOwnerMcpUsageRead(
+        signedRequest(await token({client_id:null}),suffix), config, read as any,
+      );
+      assert.equal(response.status,400);
+      assert.deepEqual(await response.json(),{ok:false,error:"product_mcp_usage_query_invalid"});
+    }
+    assert.equal(reads,4,"unexpected query selectors must never reach SQL");
+
+    const unpinned = await handleProductOwnerMcpUsageRead(
+      signedRequest(await token({client_id:ownerClient})), signedEnv, read as any,
+    );
+    assert.equal(unpinned.status,403,"unconfigured Owner OAuth pin cannot grant Owner authority");
+    assert.equal(reads,4);
+
+    const wrongRole = await handleProductOwnerMcpUsageRead(
+      signedRequest(await token({role:"anon",client_id:null})), config, read as any,
+    );
+    assert.equal(wrongRole.status,403);
+    assert.equal(reads,4);
+
+    const revoked = await handleProductOwnerMcpUsageRead(
+      signedRequest(await token({client_id:null})), config,
+      async () => ({ok:false,error:"product_owner_auth_ineligible"}) as any,
+    );
+    assert.equal(revoked.status,403);
+    assert.deepEqual(await revoked.json(), {ok:false,error:"product_owner_auth_ineligible"});
+  });
 });
 
 test("usage projection refuses forged billable state and malformed aggregates", () => {
