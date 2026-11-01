@@ -512,6 +512,7 @@ async function callRpc<T>(
   env: ProductPostgresEnv,
   rpc: RpcName,
   payload: JsonObject,
+  createClient: typeof openPostgresSession = openPostgresSession,
 ): Promise<T> {
   const connectionString = configuredConnectionString(env);
   if (!connectionString) {
@@ -522,7 +523,7 @@ async function callRpc<T>(
   const args = spec.casts.map((cast, index) => `$${index + 1}::${cast}`).join(", ");
   const resultCast = "resultCast" in spec ? `::${spec.resultCast}` : "";
   const query = `select public.${rpc}(${args})${resultCast} as result`;
-  const client = openPostgresSession(connectionString);
+  const client = createClient(connectionString);
 
   let phase: "connect" | "query" | "decode" = "connect";
   try {
@@ -557,6 +558,14 @@ async function callRpc<T>(
     // hostnames, credentials, messages or stacks.
     const diagnostic = safePostgresFailure(error, rpc);
     console.error(JSON.stringify({ ...diagnostic, phase }));
+    // SQLSTATE 23505 on the canonical enqueue can be an overlapping retry:
+    // another transaction committed the same Owner/key between SELECT and
+    // INSERT. Re-query once with the *identical* SQL inputs, never a new key.
+    // A conflicting payload is still rejected by the existing SQL authority.
+    if (rpc === "ordax_enqueue_product_action_v1"
+        && (diagnostic.code === "23505" || diagnostic.cause_code === "23505")) {
+      throw new ProductPostgresError("product_action_enqueue_unique_race", 409);
+    }
     // SQLSTATE 22P05 means the report contains a U+0000 character that
     // PostgreSQL JSONB cannot store. This is invalid action output, not an
     // unavailable database: retries of identical bytes can never succeed.
@@ -590,16 +599,14 @@ export async function enqueueProductAction(
     idempotencyKey: string;
     expiresAt: string;
   },
+  createClient: typeof openPostgresSession = openPostgresSession,
 ): Promise<ProductActionEnqueueResult> {
   // caller must derive this identity from verified credentials; never from payload
   const client = canonicalRemoteClient(input.ownerUserId, input.clientKind, input.clientId);
   if (!client || client.p_client_id === null) {
     throw new ProductPostgresError("product_action_client_identity_invalid", 400);
   }
-  const recorded = await callRpc<ProductActionEnqueueResult>(
-    env,
-    "ordax_enqueue_product_action_v1",
-    {
+  const rpcPayload: JsonObject = {
       p_owner_user_id: input.ownerUserId,
       p_space_id: input.spaceId,
       p_project_id: input.projectId,
@@ -611,8 +618,28 @@ export async function enqueueProductAction(
       p_payload: input.payload,
       p_idempotency_key: input.idempotencyKey,
       p_expires_at: input.expiresAt,
-    },
-  );
+  };
+  let recorded: ProductActionEnqueueResult | null = null;
+  // The original unique constraint prevents duplicate insertion, but an
+  // overlapping transaction can raise 23505 instead of returning the prior
+  // receipt. Reconnect once after the winner commits; reusing these exact
+  // inputs lets the sole PostgreSQL authority return replay or conflict.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      recorded = await callRpc<ProductActionEnqueueResult>(
+        env, "ordax_enqueue_product_action_v1", rpcPayload, createClient,
+      );
+      break;
+    } catch (error) {
+      const uniqueRace = error instanceof ProductPostgresError
+        && error.code === "product_action_enqueue_unique_race";
+      if (!uniqueRace || attempt === 1) {
+        if (uniqueRace) throw new ProductPostgresError("product_postgres_unavailable", 503);
+        throw error;
+      }
+    }
+  }
+  if (!recorded) throw new ProductPostgresError("product_postgres_invalid_response", 502);
   // Only a committed queue operation may emit a non-authoritative wake.
   // Even a replayed accepted enqueue is safe: the device must still claim
   // the actual lease through PostgreSQL. A missing DO never changes the RPC.
