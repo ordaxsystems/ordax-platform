@@ -187,7 +187,12 @@ test("malformed/mismatched canonical results cannot masquerade as an accepted ac
       actionRecord({ effect_id: null }), actionRecord({ capability: "shell; private" }),
       actionRecord({ status: "unknown" }), actionRecord({ created_at: "not-a-date" }),
       actionRecord({ started_at: "not-a-date" }), actionRecord({ finished_at: 42 }),
-      actionRecord({ error_code: "private\nSQL" }), actionRecord({ result: undefined }),
+      actionRecord({ error_code: "private\nSQL" }),
+      actionRecord({ error_code: "postgres://user:secret@db.internal" }),
+      actionRecord({ error_code: "private_token=secret" }),
+      actionRecord({ error_code: "runtime failure with internal details" }),
+      actionRecord({ error_code: "X".repeat(121) }),
+      actionRecord({ result: undefined }),
     ]) {
       const handlers = createCanonicalProductMcpReadHandlers(env, { getAction: async () => result as any });
       const response = await handlers.getAction(request(await token()), requestId);
