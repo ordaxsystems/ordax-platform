@@ -175,3 +175,30 @@ test("OAuth owner mismatch fails closed before grant resolution", async () => {
   assert.equal(response.status, 403);
   assert.equal((await response.json()).error, "trusted_operation_required");
 });
+
+test("project-scoped retries reuse their PostgreSQL key after a lost response", async () => {
+  const digest = "b".repeat(64);
+  const keys: string[] = [];
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject,
+    listTargets: async () => catalog(grantGroup("terminal.exec", "write")),
+    enqueue: async (_env, input) => {
+      keys.push(input.idempotencyKey);
+      assert.equal(input.spaceId, SPACE);
+      assert.equal(input.projectId, PROJECT);
+      return { ok: true, replayed: keys.length > 1,
+        request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => { assert.fail("stable project retry must not generate a new UUID"); },
+  });
+  const first = await handler(actionRequest("terminal.exec", { argv: ["python", "--version"] }), digest);
+  const retried = await handler(actionRequest("terminal.exec", { argv: ["python", "--version"] }), digest);
+  assert.equal(first.status, 202);
+  assert.equal(retried.status, 200);
+  assert.equal((await first.json()).request_id, REQUEST);
+  assert.equal((await retried.json()).request_id, REQUEST);
+  assert.deepEqual(keys, [`mcp-project-write-${digest}`, `mcp-project-write-${digest}`]);
+  assert.equal((await handler(actionRequest("terminal.exec", { argv: ["python"] }), null)).status, 400);
+  assert.equal(keys.length, 2);
+});

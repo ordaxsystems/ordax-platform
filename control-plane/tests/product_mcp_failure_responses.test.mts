@@ -593,3 +593,59 @@ test("shadow usage records one successful authenticated tool call and ignores MC
     assert.equal(JSON.stringify(logs).includes("private backend detail"), false);
   } finally { console.error = originalError; }
 });
+
+test("MCP retry correlation survives transport failure and isolates clients, sessions and call IDs", async () => {
+  const CLIENT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const CLIENT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const OWNER = "11111111-1111-4111-8111-111111111111";
+  const markerA = "openai-device-attested-session-retry-A";
+  const markerB = "openai-device-attested-session-retry-B";
+  const correlations: Array<string | null | undefined> = [];
+  let verifiedClient = CLIENT_A;
+  const handlers: OrdaxMcpHandlers = {
+    session: async () => Response.json({
+      ok: true, session: { subject_id: OWNER, client_id: verifiedClient },
+    }),
+    targets: async () => { assert.fail("no discovery needed for correlation proof"); },
+    createAction: async (req, retryDigest) => {
+      assert.equal(req.headers.get("x-ordax-internal-idempotency-sha256"), null);
+      correlations.push(retryDigest);
+      // Simulate a lost gateway response AFTER the PostgreSQL write. Retries
+      // must reconstruct the same backend key, not enqueue with a fresh UUID.
+      throw new Error("transport lost after durable enqueue");
+    },
+    getAction: async () => { assert.fail("lost enqueue response cannot be polled"); },
+  };
+  const invoke = async (id: string | number, marker?: string) => {
+    const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json",
+        "x-ordax-internal-idempotency-sha256": "f".repeat(64) },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id, method: "tools/call",
+        params: {
+          name: "computer_screen_info",
+          arguments: { device_id: "22222222-2222-4222-8222-222222222222" },
+          ...(marker === undefined ? {} : { _meta: { "openai/session": marker } }),
+        },
+      }),
+    }), handlers);
+    const body = await response.json() as any;
+    assert.equal(body.result.isError, true);
+  };
+  await invoke(7, markerA);
+  await invoke(7, markerA);
+  await invoke(8, markerA);
+  await invoke("7", markerA);
+  await invoke(7, markerB);
+  verifiedClient = CLIENT_B;
+  await invoke(7, markerA);
+  await invoke(7);
+  assert.equal(correlations.length, 7);
+  assert.match(correlations[0]!, /^[0-9a-f]{64}$/);
+  assert.equal(correlations[0], correlations[1], "exact retry uses identical SQL identity");
+  assert.equal(new Set(correlations.slice(0, 6)).size, 5,
+    "other ID, ID type, marker and signed client must not share an enqueue key");
+  assert.equal(correlations[6], null, "missing session marker cannot mint stable correlation");
+  assert.notEqual(correlations[0], "f".repeat(64), "untrusted inbound header cannot select the retry key");
+});

@@ -1,6 +1,7 @@
 import { OWNER_DEVICE_COMPUTER_GRANT_PROFILES } from "./product_action_scope.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
+import { validChatGptSessionMarker } from "./product_central_admission.ts";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -10,7 +11,9 @@ type StatusHandler = (request: Request, requestId: string) => Promise<Response>;
 export interface OrdaxMcpHandlers {
   session: Handler;
   targets: Handler;
-  createAction: Handler;
+  /** Internal retry correlation is computed from the verified client and
+   * ChatGPT session marker; never supplied by the model as an action argument. */
+  createAction: (request: Request, retryDigest?: string | null) => Promise<Response>;
   getAction: StatusHandler;
   /** Deployment-only HMAC secret. Never returned from a tool or logged. */
   usageFingerprintKey?: string;
@@ -823,7 +826,32 @@ async function waitForAction(source: Request, requestId: string, timeoutMs: numb
   }
 }
 
-async function callTool(source: Request, name: string, args: JsonObject, handlers: OrdaxMcpHandlers, advertisedToolCount: number): Promise<JsonObject> {
+/** Stable per signed OAuth client, ChatGPT session marker and JSON-RPC call ID.
+ * The digest is only a deduplication hint; the PostgreSQL enqueue RPC remains
+ * responsible for ownership, current grants, payload conflicts and replay.
+ * No bearer token, marker or user-provided key is persisted or forwarded. */
+async function verifiedMcpRetryDigest(
+  sessionPayload: JsonObject,
+  requestId: string | number,
+  params: unknown,
+): Promise<string | null> {
+  if (!params || typeof params !== "object" || Array.isArray(params)) return null;
+  const meta = (params as JsonObject)._meta;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const marker = (meta as JsonObject)["openai/session"];
+  const session = sessionPayload.session;
+  const clientId = session && typeof session === "object" && !Array.isArray(session)
+    ? (session as JsonObject).client_id : null;
+  if (!validChatGptSessionMarker(marker) || !isCanonicalUuid(clientId)) return null;
+  // Preserve JSON-RPC type: numeric 1 and string "1" are distinct request IDs.
+  const bytes = new TextEncoder().encode(JSON.stringify([
+    "ordax-mcp-enqueue-retry-v1", clientId.toLowerCase(), marker, typeof requestId, requestId,
+  ]));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, "0")).join("");
+}
+
+async function callTool(source: Request, name: string, args: JsonObject, handlers: OrdaxMcpHandlers, advertisedToolCount: number, retryDigest: string | null): Promise<JsonObject> {
   if (name === "ordax_session") {
     const response = await handlers.session(cloneWithAuth(source, new URL("/v3/product/session", source.url).toString(), "GET"));
     const payload = await bodyJson(response);
@@ -901,7 +929,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
     project,
     arguments: actionArgs,
   });
-  const created = await handlers.createAction(createRequest);
+  const created = await handlers.createAction(createRequest, retryDigest);
   const createdPayload = await bodyJson(created);
   if (!created.ok) {
     if (createdPayload.error === "central_device_offline"
@@ -1067,7 +1095,8 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
     const args = (rawArgs ?? {}) as JsonObject;
     if (!specFor(name) || (allowedTools && !allowedTools.has(name))) return rpcError(id, -32601, "Tool not found", { tool: name });
     try {
-      const result = await callTool(request, name, args, handlers, toolDefinitions(allowedTools).length);
+      const retryDigest = await verifiedMcpRetryDigest(sessionPayload, id, params);
+      const result = await callTool(request, name, args, handlers, toolDefinitions(allowedTools).length, retryDigest);
       if (result.isError !== true) await recordSuccessfulToolCall(handlers, sessionPayload, id, name, args);
       return rpcResult(id, result);
     } catch {
