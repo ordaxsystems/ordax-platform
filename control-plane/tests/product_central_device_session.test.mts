@@ -4,8 +4,10 @@ import {
   centralSessionMarker,
   handleProductDeviceCentralSession,
   openCentralSessionFromMcp,
+  resolveCentralSessionFromMcp,
 } from "../cloudflare/src/product_central_device_session.ts";
 import { env, owner, client, token, withIssuer } from "./product_mcp_test_fixtures.mts";
+import { MAX_MCP_REQUEST_BYTES } from "../cloudflare/src/mcp_http.ts";
 
 const device="22222222-2222-4222-8222-222222222222";
 const challenge="33333333-3333-4333-8333-333333333333";
@@ -33,6 +35,40 @@ test("provider marker is correlation only and parsed only from tools/call _meta"
     }}),
   })),null);
   assert.equal(await centralSessionMarker(mcpRequest(jwt,"bad marker with spaces")),null);
+});
+
+test("oversized but valid tools/call JSON cannot supply a session marker or open/resolve challenge", async () => {
+  const jwt = await token();
+  const payload = JSON.stringify({
+    jsonrpc: "2.0", id: 7, method: "tools/call",
+    params: { name: "ordax_session", _meta: { "openai/session": marker } },
+    padding: "x".repeat(MAX_MCP_REQUEST_BYTES),
+  });
+  assert.ok(new TextEncoder().encode(payload).byteLength > MAX_MCP_REQUEST_BYTES);
+  const oversized = () => new Request("https://mcp.ordax.com.br/mcp", {
+    method: "POST",
+    headers: { authorization: "Bearer " + jwt, "content-type": "application/json" },
+    body: payload,
+  });
+  assert.equal(await centralSessionMarker(oversized()), null);
+  let opened = 0, resolved = 0;
+  const failedOpen = await openCentralSessionFromMcp(oversized(), env, {
+    open: async () => {
+      opened++;
+      throw new Error("oversized body must not open an Owner challenge");
+    },
+  });
+  assert.equal(failedOpen.status, 409);
+  assert.deepEqual(await failedOpen.json(), { ok: false, error: "central_session_marker_required" });
+  const failedResolve = await resolveCentralSessionFromMcp(oversized(), env, {
+    resolve: async () => {
+      resolved++;
+      throw new Error("oversized body must not resolve a challenge");
+    },
+  });
+  assert.deepEqual(failedResolve, { ok: false, error: "central_session_marker_required" });
+  assert.equal(opened, 0);
+  assert.equal(resolved, 0);
 });
 
 test("signed OAuth client opens challenge without trusting model device_id",async()=>{
