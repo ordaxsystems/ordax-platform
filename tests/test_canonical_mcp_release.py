@@ -290,8 +290,14 @@ class McpReleaseContract(unittest.TestCase):
                     expected_path_counts,
                 )
                 self.assertEqual(
-                    source.count('- "control-plane/tests/product_mcp_discovery_store.test.mts"'),
+                    source.count('- "control-plane/tests/*.test.mts"'),
                     expected_path_counts,
+                    "new discovery/status/grant test files must trigger every MCP gate",
+                )
+                self.assertNotIn(
+                    '- "control-plane/tests/product_mcp_discovery_store.test.mts"',
+                    source,
+                    "per-test allowlist must not be maintained in parallel",
                 )
                 self.assertIn(
                     "run: bash scripts/cloudflare/run_mcp_candidate_tests.sh",
