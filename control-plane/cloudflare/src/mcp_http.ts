@@ -1109,7 +1109,12 @@ export function validMcpToolCallEnvelope(value: unknown): value is JsonObject & 
   return args === undefined || (args !== null && typeof args === "object" && !Array.isArray(args));
 }
 
-export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandlers, allowedTools?: ReadonlySet<string>): Promise<Response> {
+export async function handleOrdaxMcp(
+  request: Request,
+  handlers: OrdaxMcpHandlers,
+  allowedTools?: ReadonlySet<string>,
+  context?: { waitUntil(promise: Promise<unknown>): void },
+): Promise<Response> {
   if (request.method === "GET") return new Response(null, { status: 405, headers: { allow: "POST" } });
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "GET, POST" } });
 
@@ -1158,7 +1163,24 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
     try {
       const retryDigest = await verifiedMcpRetryDigest(sessionPayload, id, params);
       const result = await callTool(request, name, args, handlers, toolDefinitions(allowedTools).length, retryDigest);
-      if (result.isError !== true) await recordSuccessfulToolCall(handlers, sessionPayload, id, name, args);
+      if (result.isError !== true && handlers.recordUsage) {
+        // Shadow-only accounting is not an execution dependency. A slow usage
+        // write must not delay a successful MCP answer or cause a duplicate
+        // user retry after the canonical action receipt was committed.
+        const usage = recordSuccessfulToolCall(handlers, sessionPayload, id, name, args);
+        if (context) {
+          try {
+            context.waitUntil(usage);
+          } catch {
+            // Preserve the original awaited behavior for an invalid Worker
+            // execution context: do not silently drop an accounting attempt.
+            await usage;
+          }
+        } else {
+          // Direct/test callers without Worker context retain legacy ordering.
+          await usage;
+        }
+      }
       return rpcResult(id, result);
     } catch {
       return rpcResult(id, textToolResult({ ok: false, error: "ordax_mcp_internal_error" }, true));
