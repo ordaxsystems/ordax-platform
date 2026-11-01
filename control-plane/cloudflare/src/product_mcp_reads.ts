@@ -1,5 +1,5 @@
 import { authenticateProductMcpClientRequest, type ProductAuthEnv } from "./product_auth.ts";
-import { sanitizeTargets, isProductActionStatus, type OrdaxMcpHandlers } from "./mcp_http.ts";
+import { sanitizeTargets, isProductActionStatus, isProductActionErrorCode, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import {
   listCanonicalProductTargets,
   getProductAction,
@@ -74,9 +74,7 @@ function validAction(value: unknown, requestId: string): value is Record<string,
     && validRuntimeProvenance(action)
     && timestamp(action.created_at) !== null
     && [action.started_at, action.finished_at].every(item => item === null || timestamp(item) !== null)
-    && (action.error_code === null || (typeof action.error_code === "string"
-      && action.error_code.length >= 1 && action.error_code.length <= 120
-      && !/[\x00-\x1f]/.test(action.error_code)))
+    && isProductActionErrorCode(action.error_code)
     && Object.hasOwn(action, "result") && action.result !== undefined;
 }
 
