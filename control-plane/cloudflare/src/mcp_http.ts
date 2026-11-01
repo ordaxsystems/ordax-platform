@@ -557,7 +557,9 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
       ok: payload.ok !== false,
       pending: true,
       request_id: requestId ?? (typeof payload.request_id === "string" ? payload.request_id : ""),
-      message: typeof payload.message === "string" ? payload.message : "Action is still running.",
+      // Never reflect an untrusted backend diagnostic into a public MCP tool
+      // result. A valid request ID does not make its arbitrary message safe.
+      message: "Action is awaiting a verified status; check ordax_action_status with this request_id.",
     };
   }
   const rawAction = payload.action;
@@ -747,13 +749,23 @@ function actionMonitoringUnavailable(requestId: string, upstreamStatus?: number)
  * cause clients to submit the same non-idempotent action again.
  */
 function unverifiedActionStatus(requestId: string, upstreamStatus?: number): JsonObject {
+  // A denied or invisible status read is not a gateway outage. Keep the same
+  // continuation identity, but do not claim execution failed, stopped or was
+  // never queued. The backend response body is untrusted and must not leak.
+  const denied = upstreamStatus === 401 || upstreamStatus === 403;
+  const invisible = upstreamStatus === 404;
   return {
     ok: false,
     request_id: requestId,
-    error: "action_status_unavailable",
+    error: denied ? "action_status_access_denied"
+      : invisible ? "action_status_not_visible" : "action_status_unavailable",
     monitoring_state: "unknown",
     ...(upstreamStatus === undefined ? {} : { upstream_status: upstreamStatus }),
-    message: "Action status could not be verified. Do not resubmit the action; retry ordax_action_status with the same request_id.",
+    message: denied
+      ? "This client cannot read the action status. Do not resubmit the action; restore authorized access before checking this request_id."
+      : invisible
+        ? "The request is not visible to this client. Do not resubmit the action; verify the original client and request_id."
+        : "Action status could not be verified. Do not resubmit the action; retry ordax_action_status with the same request_id.",
   };
 }
 
