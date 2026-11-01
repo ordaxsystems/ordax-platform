@@ -95,6 +95,47 @@ test("resolver remains fail-closed for no match, ambiguity and invalid model-sel
   assert.equal(called, false);
 });
 
+test("Owner project scope denies delegated OAuth clients before canonical SQL resolution", async () => {
+  const pinned = "202fd3e1-b058-4531-8750-82c57e4b6ca0";
+  for (const clientId of ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "invalid-client", ""]) {
+    let resolved = 0;
+    const handler = createOwnerProjectScopeHandler({
+      ...ENV, PRODUCT_OWNER_OAUTH_CLIENT_ID: pinned,
+    }, {
+      authenticate: async () => ({ ...(await authenticated()), clientId }),
+      resolve: async () => { resolved++; throw Error("must not access SQL"); },
+    });
+    const response = await handler(request());
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { ok: false, error: "owner_primary_session_required" });
+    assert.equal(resolved, 0);
+  }
+
+  for (const clientId of [null, pinned, pinned.toUpperCase()]) {
+    let resolved = 0;
+    const handler = createOwnerProjectScopeHandler({
+      ...ENV, PRODUCT_OWNER_OAUTH_CLIENT_ID: pinned,
+    }, {
+      authenticate: async () => ({ ...(await authenticated()), clientId }),
+      resolve: async () => {
+        resolved++;
+        return { ok: false, error: "owner_project_scope_not_found" };
+      },
+    });
+    const response = await handler(request());
+    assert.equal(response.status, 404);
+    assert.equal(resolved, 1);
+  }
+
+  let resolved = 0;
+  const unconfigured = createOwnerProjectScopeHandler(ENV, {
+    authenticate: async () => ({ ...(await authenticated()), clientId: pinned }),
+    resolve: async () => { resolved++; throw Error("unexpected SQL"); },
+  });
+  assert.equal((await unconfigured(request())).status, 403);
+  assert.equal(resolved, 0);
+});
+
 test("resolver endpoint is read-only and requires authenticated Product Owner identity", async () => {
   const handler = createOwnerProjectScopeHandler(ENV, {
     authenticate: authenticated,
