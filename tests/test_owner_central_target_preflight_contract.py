@@ -52,7 +52,11 @@ class OwnerCentralTargetsContract(unittest.TestCase):
         source = OWNER.read_text(encoding="utf-8")
         entry = ENTRY.read_text(encoding="utf-8")
         self.assertIn('CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED !== "enabled"',source)
-        self.assertIn('url.searchParams.getAll("client_id").length !== 1',source)
+        # Exact request keys now share one shape guard with other Owner routes.
+        self.assertIn('hasExactQueryParameters(url, ["client_id"])',source)
+        query = (ROOT / "control-plane/cloudflare/src/request_query.ts").read_text(encoding="utf-8")
+        self.assertIn("actual.length !== required.length",query)
+        self.assertIn("seen.has(name)",query)
         self.assertIn('inspectOwnerCentralSessionTargets',source)
         self.assertIn('const ownerId = await owner(request, env)',source)
         self.assertIn('pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH',entry)
