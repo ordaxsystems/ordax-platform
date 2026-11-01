@@ -67,13 +67,17 @@ function failure(error: unknown): Response {
 }
 
 function optionalUuid(value: unknown): string | null | undefined {
-  if (value === null || value === undefined || value === "") return null;
+  // null is the *explicit* unscoped choice. Empty/omitted form fields are
+  // not permission to create a device-wide grant.
+  if (value === null) return null;
   if (typeof value !== "string" || !isCanonicalUuid(value)) return undefined;
   return value;
 }
 
 function validUntil(value: unknown): string | null | undefined {
-  if (value === null || value === undefined || value === "") return null;
+  // An unbounded grant must be intentional. Never interpret a blank expiry
+  // input or omitted field as an explicit request for no expiration.
+  if (value === null) return null;
   if (typeof value !== "string" || value.length > 64) return undefined;
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp) || timestamp <= Date.now()
@@ -198,8 +202,12 @@ export async function handleProductOwnerGrantAdmin(
     if (request.method === "POST" && url.pathname === GROUPS) {
       if (url.search !== "") return json({ ok: false, error: "owner_grant_invalid" }, 400);
       const body = await readBoundedJsonObject(request, 16 * 1024);
-      const allowed = new Set(["client_id","device_id","profile_key","space_id","project_id","valid_until"]);
-      if (!body || Object.keys(body).some((key) => !allowed.has(key)))
+      // All scope/expiry fields must be explicitly present. A missing value
+      // previously became null and could silently widen a scoped or expiring
+      // request into a device-wide/unbounded Owner grant. Explicit JSON null
+      // remains the supported way to choose an unscoped or unbounded grant.
+      if (!body || Object.keys(body).sort().join(",")
+          !== "client_id,device_id,profile_key,project_id,space_id,valid_until")
         return json({ ok: false, error: "owner_grant_invalid" }, 400);
       const clientId = typeof body.client_id === "string" ? body.client_id.toLowerCase() : "";
       const deviceId = typeof body.device_id === "string" ? body.device_id.toLowerCase() : "";
