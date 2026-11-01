@@ -5,6 +5,8 @@ export interface ProductAuthEnv {
   PRODUCT_AUTH_ISSUER?: string;
   PRODUCT_AUTH_AUDIENCE?: string;
   PRODUCT_AUTH_JWKS_URL?: string;
+  /** The single first-party Owner OAuth client; never an MCP model input. */
+  PRODUCT_OWNER_OAUTH_CLIENT_ID?: string;
 }
 
 export type ProductIdentity =
@@ -252,6 +254,14 @@ export async function authenticateProductRequest(
     return { ok: false, error: "product_signature_invalid", status: 401 };
   }
 
+  // A signed but malformed OAuth claim must not become null and thereby
+  // impersonate a first-party account session at Owner endpoints.
+  if (Object.prototype.hasOwnProperty.call(payload, "client_id")
+      && payload.client_id !== null
+      && typeof payload.client_id !== "string") {
+    return { ok: false, error: "product_token_claims_invalid", status: 401 };
+  }
+
   return {
     ok: true,
     subjectId,
@@ -263,6 +273,28 @@ export async function authenticateProductRequest(
     clientId: typeof payload.client_id === "string" ? payload.client_id : null,
     role: typeof payload.role === "string" ? payload.role : null,
   };
+}
+
+/**
+ * A single Owner principal gate for every /v3/owner/* handler. Authorization
+ * is distinct from a signed Product MCP client token: only the normal account
+ * session or the explicitly pinned first-party Owner PKCE client may act.
+ * PostgreSQL remains the sole grant/Space/project authority after this gate.
+ */
+export function authorizeProductOwnerIdentity(
+  identity: ProductIdentity,
+  env: ProductAuthEnv,
+): { ok: true; ownerUserId: string } | { ok: false; error: string; status: number } {
+  if (!identity.ok) return identity;
+  if (identity.role !== "authenticated" || !isCanonicalUuid(identity.subjectId))
+    return { ok: false, error: "product_owner_identity_invalid", status: 403 };
+  if (identity.clientId !== null) {
+    const pinned = (env.PRODUCT_OWNER_OAUTH_CLIENT_ID ?? "").trim().toLowerCase();
+    if (!isCanonicalUuid(pinned) || !isCanonicalUuid(identity.clientId)
+        || identity.clientId.toLowerCase() !== pinned)
+      return { ok: false, error: "owner_primary_session_required", status: 403 };
+  }
+  return { ok: true, ownerUserId: identity.subjectId };
 }
 
 /**
