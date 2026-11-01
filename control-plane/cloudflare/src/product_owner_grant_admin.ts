@@ -91,6 +91,7 @@ export async function handleProductOwnerGrantAdmin(
     inspectCentralTargets?: typeof inspectOwnerCentralSessionTargets;
     listSelections?: typeof listOwnerCentralSelections;
     selectDevice?: typeof selectOwnerCentralDevice;
+    replaceGrantGroup?: typeof replaceOwnerMcpGrantGroup;
   } = {},
 ): Promise<Response> {
   const url = new URL(request.url);
@@ -223,7 +224,7 @@ export async function handleProductOwnerGrantAdmin(
         return json({ ok: false, error: "owner_grant_scope_invalid" }, 400);
       if (profile.scope === "project" && (spaceId === null || projectId === null))
         return json({ ok: false, error: "owner_grant_scope_invalid" }, 400);
-      const result = await replaceOwnerMcpGrantGroup(env, {
+      const result = await (deps.replaceGrantGroup ?? replaceOwnerMcpGrantGroup)(env, {
         ownerUserId: ownerId, deviceId, clientId, profileKey,
         spaceId, projectId, capabilities: profile.capabilities, validUntil: until,
       });
