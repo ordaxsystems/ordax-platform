@@ -95,6 +95,35 @@ test("resolver remains fail-closed for no match, ambiguity and invalid model-sel
   assert.equal(called, false);
 });
 
+test("Owner project scope rejects extraneous or duplicate query parameters before SQL", async () => {
+  let resolved = 0;
+  const handler = createOwnerProjectScopeHandler(ENV, {
+    authenticate: authenticated,
+    resolve: async () => { resolved++; return {ok:false,error:"owner_project_scope_not_found"}; },
+  });
+  const root = "https://mcp.example/v3/owner/project-scope";
+  const base = "?device_id="+DEVICE+"&repository_full_name=ordaxsystems%2Fordax-runtime";
+  for (const suffix of [
+    "", "?device_id="+DEVICE, "?repository_full_name=ordaxsystems%2Fordax-runtime",
+    base+"&device_id="+DEVICE,
+    base+"&repository_full_name=other%2Frepository",
+    base+"&owner_user_id="+OWNER,
+    base+"&space_id="+SPACE,
+    base+"&project_id="+PROJECT,
+    base+"&client_id="+OWNER,
+    base+"&%64evice_id="+DEVICE,
+  ]) {
+    const response = await handler(new Request(root + suffix, {headers:{authorization:"Bearer test"}}));
+    assert.equal(response.status, 400, suffix);
+    assert.deepEqual(await response.json(), {ok:false,error:"owner_project_scope_invalid"}, suffix);
+  }
+  assert.equal(resolved,0,"untrusted query must not reach SQL");
+  const valid = await handler(new Request(root+"?repository_full_name=ordaxsystems%2Fordax-runtime&device_id="+DEVICE,
+    {headers:{authorization:"Bearer test"}}));
+  assert.equal(valid.status,404,"canonical keys are accepted in either order");
+  assert.equal(resolved,1);
+});
+
 test("Owner project scope denies delegated OAuth clients before canonical SQL resolution", async () => {
   const pinned = "202fd3e1-b058-4531-8750-82c57e4b6ca0";
   for (const clientId of ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "invalid-client", ""]) {
