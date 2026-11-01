@@ -403,7 +403,7 @@ test("failed envelope takes precedence over pending or a superficially successfu
 
 test("malformed dispatch acknowledgement cannot start polling or export private response fields", async () => {
   for (const payload of [
-    {}, { ok: false, request_id: acceptedId }, { ok: true, request_id: "../../escape" },
+    {}, { ok: false, request_id: acceptedId }, { ok: true, request_id: "../../escape" }, { ok: true, request_id: "legacy-request-1" },
     { ok: true, request_id: "x".repeat(129) }, { ok: true, private_token: "secret" },
   ]) {
     let dispatched = 0;
