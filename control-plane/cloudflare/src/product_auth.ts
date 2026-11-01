@@ -276,7 +276,8 @@ export async function authenticateProductRequest(
 }
 
 /**
- * A single Owner principal gate for every /v3/owner/* handler. Authorization
+ * A single Owner principal gate for privileged /v3/owner/* handlers and
+ * the Owner-only account usage aggregate at /v3/product/usage. Authorization
  * is distinct from a signed Product MCP client token: only the normal account
  * session or the explicitly pinned first-party Owner PKCE client may act.
  * PostgreSQL remains the sole grant/Space/project authority after this gate.

@@ -1,12 +1,11 @@
 /** Signed Owner usage read: informational MCP aggregates, never chargeable data. */
-import { authenticateProductRequest, type ProductAuthEnv } from "./product_auth.ts";
+import { authenticateProductRequest, authorizeProductOwnerIdentity, type ProductAuthEnv } from "./product_auth.ts";
 import {
   readProductMcpUsage,
   productMcpUsageMeterEnabled,
   ProductPostgresError,
   type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
-import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 type UsageReader = typeof readProductMcpUsage;
@@ -56,20 +55,36 @@ export async function handleProductOwnerMcpUsageRead(
   read: UsageReader = readProductMcpUsage,
 ): Promise<Response> {
   if (request.method !== "GET") return respond({ ok: false, error: "method_not_allowed" }, 405);
-  const identity = await authenticateProductRequest(request, env);
-  if (!identity.ok) return respond({ ok: false, error: identity.error }, identity.status);
-  if (identity.role !== "authenticated" || !isCanonicalUuid(identity.subjectId)) {
-    return respond({ ok: false, error: "product_owner_identity_invalid" }, 403);
+  // Usage is account-wide, not scoped to the delegated MCP OAuth client.
+  // Reuse the only Owner gate used by grant administration and project scope.
+  const owner = authorizeProductOwnerIdentity(await authenticateProductRequest(request, env), env);
+  if (!owner.ok) return respond({ ok: false, error: owner.error }, owner.status);
+  // There is no query selector in this API: never silently ignore an Owner,
+  // client, device or billing identifier supplied by an untrusted caller.
+  if (new URL(request.url).search !== "") {
+    return respond({ ok: false, error: "product_mcp_usage_query_invalid" }, 400);
   }
   try {
-    const usage = await read(env, identity.subjectId);
+    const usage = await read(env, owner.ownerUserId);
     if (usage?.ok === false && usage.error === "product_owner_auth_ineligible") {
       return respond({ ok: false, error: "product_owner_auth_ineligible" }, 403);
     }
     if (!validOwnerMcpUsage(usage)) {
       return respond({ ok: false, error: "product_mcp_usage_invalid_response" }, 502);
     }
-    return respond({ ...usage,
+    // PostgreSQL is the data authority, but its JSON envelope is not a public
+    // response schema. Explicitly project only validated public fields,
+    // including row fields, to avoid leaking future internal SQL columns.
+    return respond({
+      ok: true,
+      schema: usage.schema,
+      observed_only: true,
+      billable: false,
+      current_month: usage.current_month,
+      previous_month: usage.previous_month,
+      entries: usage.entries.map(row => ({
+        month: row.month, tool_name: row.tool_name, tool_calls: row.tool_calls,
+      })),
       collection_active_now: productMcpUsageMeterEnabled(env),
       coverage: "partial_observational",
       quota: null,
