@@ -1,4 +1,6 @@
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { enqueueProductAction } from "../cloudflare/src/product_postgres_store.ts";
 
@@ -116,4 +118,21 @@ test("if a supplied scheduler throws, the original wake path is preserved", asyn
   fixture.release();
   assert.deepEqual(await pending, RECEIPT);
   assert.equal(fixture.calls, 1);
+});
+
+test("one Worker request owns the wake scheduler across every attested MCP enqueue route", () => {
+  const gatewaySource = readFileSync(fileURLToPath(new URL(
+    "../cloudflare/src/product_mcp_entry.ts", import.meta.url,
+  )), "utf8");
+  const expected = [
+    "createAttestedDeviceActionHandler(env, trusted, wakeDependencies)",
+    "createAttestedProjectActionHandler(env, trusted, wakeDependencies)",
+    "createAttestedProjectContinuityHandler(env, trusted, wakeDependencies)",
+    "createAttestedRepositoryCatalogHandler(env, trusted, wakeDependencies)",
+  ];
+  assert.equal(
+    gatewaySource.includes("scheduleWake: (wake: Promise<void>) => context.waitUntil(wake)"),
+    true,
+  );
+  for (const route of expected) assert.equal(gatewaySource.includes(route), true, route);
 });
