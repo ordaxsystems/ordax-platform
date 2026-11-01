@@ -81,6 +81,7 @@ test("a lost status query after accepted enqueue does not assert action failure 
       assert.equal(result.structuredContent.ok, false);
       assert.equal(Object.hasOwn(result.structuredContent, "pending"), false);
       assert.equal(result.structuredContent.monitoring_state, "unknown");
+      assert.equal(result.structuredContent.error, "action_status_access_denied");
       assert.match(result.structuredContent.message, /Do not resubmit/);
       assert.equal(result.isError, true);
     } else {
