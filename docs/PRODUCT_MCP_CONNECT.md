@@ -237,6 +237,23 @@ da gravação pelo PostgreSQL; não cria estado de fila paralelo, concede
 capabilities, reexecuta ações nem substitui recibos/leases canônicos.
 A mudança de código não é publicação ou homologação física do Runtime.
 
+## Recibos canônicos e espera de ações MCP
+
+Ferramentas que admitem `wait_for_completion_ms` exigem um número JSON
+**inteiro de 0 a 20000**, com padrão de 8000 ms apenas quando o campo
+não foi enviado. `null`, string numérica, booleano, fração ou valor fora
+do intervalo são erros de argumento **antes de qualquer enqueue**; não
+podem ser convertidos silenciosamente em uma espera diferente.
+
+O identificador de uma ação persistida (`request_id`) é sempre um UUID
+canônico do PostgreSQL. `ordax_action_status` recusa strings não UUID
+antes de fazer a leitura autenticada, e uma resposta de enqueue sem UUID
+válido não é publicada como recibo de continuidade. Uma falha de leitura
+após um recibo **válido** preserva esse mesmo UUID e não autoriza
+reexecutar a operação. Identidade, grants, idempotência e conclusão
+permanecem sob as respectivas autoridades Product/Runtime; essa validação
+não equivale a execução confirmada nem a teste físico no Windows.
+
 ## Computer Control
 
 Computer Control é composto por tools pequenas e tipadas. Não deve existir uma única ação genérica capaz de contornar as políticas das demais.
