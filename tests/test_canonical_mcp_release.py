@@ -293,9 +293,14 @@ class McpReleaseContract(unittest.TestCase):
                     source.count('- "control-plane/tests/product_mcp_discovery_store.test.mts"'),
                     expected_path_counts,
                 )
-                self.assertRegex(
+                self.assertIn(
+                    "run: bash scripts/cloudflare/run_mcp_candidate_tests.sh",
                     source,
-                    r"(?m)^\s*run: node --test[^\n]*control-plane/tests/product_mcp_discovery_store\.test\.mts",
+                )
+                runner = (ROOT / "scripts/cloudflare/run_mcp_candidate_tests.sh").read_text("utf-8")
+                self.assertIn("node --test control-plane/tests/*.test.mts", runner)
+                self.assertTrue(
+                    (ROOT / "control-plane/tests/product_mcp_discovery_store.test.mts").is_file()
                 )
 
     def test_new_source_has_one_canonical_attested_action_boundary(self):
