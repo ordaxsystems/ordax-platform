@@ -124,6 +124,17 @@ A resposta canônica de `ordax_targets`, quando seu catálogo de dispositivos e 
 
 **Remediação correta:** no Owner, revisar o cliente OAuth **efetivo** e autorizar o dispositivo pretendido por `/v3/owner/remote-authority` e `/v3/owner/remote-grant-groups`; não copiar grants do Notebook para o Desktop via SQL ou parâmetros MCP. Após consentimento, aguardar a sessão atestada do Runtime no dispositivo correto e executar somente um teste de leitura com recibo. A leitura deste novo hint jamais escreve grants nem força seleção de dispositivo. Rastreio: [ordax-platform#291](https://github.com/ordaxsystems/ordax-platform/issues/291).
 
+**Emissão de grants Owner:** `POST /v3/owner/remote-grant-groups` exige os seis
+campos `client_id`, `device_id`, `profile_key`, `space_id`, `project_id`
+e `valid_until` presentes no JSON. Para um perfil de dispositivo, enviar
+`space_id: null` e `project_id: null` explicitamente; para um perfil de
+projeto, enviar os dois UUIDs reais. Para um grant sem prazo, enviar
+`valid_until: null` **explicitamente**; quando tiver prazo, enviar timestamp
+válido futuro. Campo omitido ou string vazia nunca é interpretado como
+`null`: evita que um formulário incompleto emita um grant sem escopo ou
+sem expiração por acidente. Esta exigência é validação adicional na rota
+Owner, não substitui consentimento, grant SSOT ou auditoria PostgreSQL.
+
 ## Descoberta dos dispositivos
 
 `ordax_targets` retorna somente a visão autorizada para a sessão atual, incluindo presença informada e grupos de grants publicados.
