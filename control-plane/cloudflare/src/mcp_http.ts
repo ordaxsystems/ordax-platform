@@ -559,10 +559,11 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
     ...(requestId ? { request_id: requestId } : {}) };
   if (payload.ok !== true) return { ...invalid,
     error: publicErrorCode(payload.error, "action_status_invalid_response") };
-  const matchesId = (value: unknown): value is string => typeof value === "string"
-    && /^[A-Za-z0-9:_-]{1,128}$/.test(value)
-    && (!requestId || value === requestId || (isCanonicalUuid(value)
-      && isCanonicalUuid(requestId) && value.toLowerCase() === requestId.toLowerCase()));
+  // The only canonical Product queue identifier is a PostgreSQL UUID.
+  // Permissive transport strings must not be projected as action receipts.
+  const matchesId = (value: unknown): value is string => isCanonicalUuid(value)
+    && (!requestId || (isCanonicalUuid(requestId)
+      && value.toLowerCase() === requestId.toLowerCase()));
   if (payload.pending === true && !Object.hasOwn(payload, "action")) {
     if (!matchesId(payload.request_id)) return invalid;
     return {
@@ -940,7 +941,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   if (name === "ordax_action_status") {
     const requestId = typeof args.request_id === "string" ? args.request_id : "";
     if (!requestId) return textToolResult({ ok: false, error: "request_id_required" }, true);
-    if (!/^[A-Za-z0-9:_-]{1,128}$/.test(requestId)) return textToolResult({ ok: false, error: "product_request_id_invalid" }, true);
+    if (!isCanonicalUuid(requestId)) return textToolResult({ ok: false, error: "product_request_id_invalid" }, true);
     // A direct status lookup is read-only: recover one transient 408/5xx or
     // connection exception, but never enqueue a new action or mask 401/403/404
     // and 429 as a healthy read. The request ID and OAuth client stay exact.
@@ -964,8 +965,17 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
     return textToolResult({ ok: false, error: "space_id_invalid" }, true);
   }
   const spaceId = typeof args.space_id === "string" ? args.space_id : null;
-  const rawWait = typeof args.wait_for_completion_ms === "number" && Number.isFinite(args.wait_for_completion_ms) ? args.wait_for_completion_ms : 8000;
-  const waitMs = Math.max(0, Math.min(20000, Math.floor(rawWait)));
+  // MCP schemas are advisory to callers. Enforce the exact integer wire
+  // contract before dispatch; a string/null/boolean, fraction or out-of-range
+  // value must not silently become an eight-second status-polling workload.
+  const rawWait = args.wait_for_completion_ms;
+  if (Object.hasOwn(args, "wait_for_completion_ms")
+      && (typeof rawWait !== "number" || !Number.isSafeInteger(rawWait)
+        || rawWait < 0 || rawWait > 20000)) {
+    return textToolResult({ ok: false, error: "wait_for_completion_invalid",
+      action_dispatched: false }, true);
+  }
+  const waitMs = typeof rawWait === "number" ? rawWait : 8000;
   const actionArgs: JsonObject = {};
   for (const [key, value] of Object.entries(args)) {
     if (!["device_id", "project", "space_id", "wait_for_completion_ms"].includes(key)) actionArgs[key] = value;
@@ -1033,7 +1043,9 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
     return textToolResult({ ok: false, error: publicErrorCode(createdPayload.error, "product_action_unavailable") }, true);
   }
   const requestId = typeof createdPayload.request_id === "string" ? createdPayload.request_id : "";
-  if (createdPayload.ok !== true || !/^[A-Za-z0-9:_-]{1,128}$/.test(requestId)) {
+  if (createdPayload.ok !== true || !isCanonicalUuid(requestId)) {
+    // Do not publish a fake continuation token: the Product queue only
+    // creates UUID receipts. An invalid ACK is not a successful enqueue.
     return textToolResult({ ok: false, error: "product_request_id_missing" }, true);
   }
   if (waitMs === 0 && createdPayload.status === "queued") {

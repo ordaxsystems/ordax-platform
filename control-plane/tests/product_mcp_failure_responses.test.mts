@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { handleOrdaxMcp, type OrdaxMcpHandlers } from "../cloudflare/src/mcp_http.ts";
 
-const acceptedId = "accepted-request-1";
+const acceptedId = "11111111-1111-4111-8111-111111111111";
 function record(overrides: Record<string, unknown> = {}) {
   return { ok: true, action: { request_id: acceptedId, action: "git.status", status: "running", ...overrides } };
 }
@@ -23,6 +23,68 @@ async function call(name: string, overrides: Partial<OrdaxMcpHandlers> = {}, arg
   assert.equal(response.headers.get("cache-control"), "no-store");
   return { response, body: await response.json() };
 }
+
+
+test("MCP wait_for_completion_ms follows its integer schema before any queue write", async () => {
+  let enqueues = 0;
+  let reads = 0;
+  for (const invalid of [null, "", "0", "8000", false, true, [], {}, [1],
+    -1, 20001, 0.5, 1.25, Number.MAX_SAFE_INTEGER + 1]) {
+    const { body } = await call("computer_terminal_exec", {
+      createAction: async () => { enqueues++; throw Error("invalid wait must not enqueue"); },
+      getAction: async () => { reads++; throw Error("invalid wait must not poll"); },
+    }, { wait_for_completion_ms: invalid });
+    assert.deepEqual(body.result.structuredContent, {
+      ok: false, error: "wait_for_completion_invalid", action_dispatched: false,
+    }, JSON.stringify(invalid));
+    assert.equal(body.result.isError, true);
+  }
+  assert.equal(enqueues, 0);
+  assert.equal(reads, 0);
+  // Zero wait must expose the durable queued receipt without an extra query.
+  const zero = await call("computer_terminal_exec", {
+    createAction: async () => {
+      enqueues++;
+      return Response.json({ ok: true, request_id: acceptedId, status: "queued" }, { status: 202 });
+    },
+    getAction: async () => { reads++; throw Error("zero wait does not need queued status query"); },
+  }, { wait_for_completion_ms: 0 });
+  assert.equal(zero.body.result.structuredContent.request_id, acceptedId);
+  assert.equal(zero.body.result.structuredContent.pending, true);
+  assert.equal(reads, 0);
+  // Values at the top of the published schema are valid: the first read is
+  // already terminal, so the gateway neither waits nor repeats the enqueue.
+  const maximum = await call("computer_terminal_exec", {
+    createAction: async () => {
+      enqueues++;
+      return Response.json({ ok: true, request_id: acceptedId, status: "running" }, { status: 202 });
+    },
+    getAction: async () => {
+      reads++;
+      return Response.json(record({ status: "succeeded" }));
+    },
+  }, { wait_for_completion_ms: 20000 });
+  assert.equal(maximum.body.result.structuredContent.pending, false);
+  assert.equal(maximum.body.result.structuredContent.request_id, acceptedId);
+  assert.equal(enqueues, 2, "each valid invocation enqueues at most once");
+  assert.equal(reads, 1);
+});
+
+test("MCP status rejects non-UUID request identifiers before status SQL", async () => {
+  let reads = 0, enqueues = 0;
+  for (const invalid of ["request-1", "accepted-request-1", "legacy:status:1", "not_a_uuid"]) {
+    const { body } = await call("ordax_action_status", {
+      createAction: async () => { enqueues++; throw Error("status tool must not enqueue"); },
+      getAction: async () => { reads++; throw Error("malformed id must not read PostgreSQL"); },
+    }, { request_id: invalid });
+    assert.deepEqual(body.result.structuredContent, {
+      ok: false, error: "product_request_id_invalid",
+    }, invalid);
+    assert.equal(body.result.isError, true);
+  }
+  assert.equal(reads, 0);
+  assert.equal(enqueues, 0);
+});
 
 test("invalid JSON-RPC ids cannot dispatch or lose action correlation", async () => {
   let sessions = 0;
@@ -341,7 +403,7 @@ test("failed envelope takes precedence over pending or a superficially successfu
 
 test("malformed dispatch acknowledgement cannot start polling or export private response fields", async () => {
   for (const payload of [
-    {}, { ok: false, request_id: acceptedId }, { ok: true, request_id: "../../escape" },
+    {}, { ok: false, request_id: acceptedId }, { ok: true, request_id: "../../escape" }, { ok: true, request_id: "legacy-request-1" },
     { ok: true, request_id: "x".repeat(129) }, { ok: true, private_token: "secret" },
   ]) {
     let dispatched = 0;
