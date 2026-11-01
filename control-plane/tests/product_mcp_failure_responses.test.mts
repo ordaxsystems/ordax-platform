@@ -649,3 +649,114 @@ test("MCP retry correlation survives transport failure and isolates clients, ses
   assert.equal(correlations[6], null, "missing session marker cannot mint stable correlation");
   assert.notEqual(correlations[0], "f".repeat(64), "untrusted inbound header cannot select the retry key");
 });
+
+test("queued PostgreSQL ACK with zero wait is a durable receipt without a redundant status query", async () => {
+  let enqueues = 0, reads = 0;
+  const { body } = await call("computer_screen_info", {
+    createAction: async () => {
+      enqueues++;
+      return Response.json({ ok: true, request_id: acceptedId, status: "queued", replayed: false }, { status: 202 });
+    },
+    getAction: async () => {
+      reads++;
+      throw new Error("no status query needed after an authenticated queued ACK");
+    },
+  });
+  const result = body.result.structuredContent;
+  assert.equal(body.result.isError, false);
+  assert.deepEqual(result, {
+    ok: true, pending: true, request_id: acceptedId,
+    action: { name: "computer.screen_info", status: "queued" },
+    message: "Action is queued and has not started; check ordax_action_status with this request_id.",
+  });
+  assert.equal(enqueues, 1);
+  assert.equal(reads, 0, "zero-wait read must not consume another PostgreSQL connection");
+});
+
+test("zero wait does not invent queued state for terminal or malformed ACKs", async () => {
+  for (const status of ["succeeded", "failed", "running", null, undefined]) {
+    let reads = 0;
+    const { body } = await call("computer_screen_info", {
+      createAction: async () => Response.json({ ok: true, request_id: acceptedId, status }),
+      getAction: async () => {
+        reads++;
+        return Response.json(record({ status: "succeeded", result: { source: "actual status RPC" } }));
+      },
+    });
+    assert.equal(reads, 1, "unverified/terminal receipts still require canonical status");
+    assert.equal(body.result.structuredContent.action.status, "succeeded");
+    assert.deepEqual(body.result.structuredContent.action.result, { source: "actual status RPC" });
+  }
+});
+
+test("accepted action recovers one transient status 503 without enqueueing twice", async () => {
+  let dispatched = 0, reads = 0;
+  const { body } = await call("computer_screen_info", {
+    createAction: async () => {
+      dispatched++;
+      return Response.json({ ok: true, request_id: acceptedId, status: "queued" }, { status: 202 });
+    },
+    getAction: async () => {
+      reads++;
+      return reads === 1
+        ? Response.json({ error: "private credentials" }, { status: 503 })
+        : Response.json(record({ status: "succeeded", result: { ok: true } }));
+    },
+  }, { wait_for_completion_ms: 1000 });
+  assert.equal(dispatched, 1);
+  assert.equal(reads, 2);
+  assert.equal(body.result.isError, false);
+  assert.equal(body.result.structuredContent.request_id, acceptedId);
+  assert.equal(body.result.structuredContent.action.status, "succeeded");
+  assert.equal(JSON.stringify(body).includes("private credentials"), false);
+});
+
+test("one transient exception is recoverable, but repeated failure preserves request ID and caps reads", async () => {
+  for (const recover of [true, false]) {
+    let reads = 0, enqueues = 0;
+    const { body } = await call("computer_screen_info", {
+      createAction: async () => {
+        enqueues++;
+        return Response.json({ ok: true, request_id: acceptedId, status: "queued" }, { status: 202 });
+      },
+      getAction: async () => {
+        reads++;
+        if (reads === 1 || !recover) throw new Error("postgres://private-token/unknown");
+        return Response.json(record({ status: "succeeded" }));
+      },
+    }, { wait_for_completion_ms: 1000 });
+    assert.equal(reads, 2);
+    assert.equal(enqueues, 1);
+    assert.equal(body.result.structuredContent.request_id, acceptedId);
+    if (recover) {
+      assert.equal(body.result.structuredContent.action.status, "succeeded");
+    } else {
+      assert.equal(body.result.structuredContent.monitoring_error, "action_status_unavailable");
+      assert.equal(body.result.structuredContent.pending, true);
+      assert.equal(body.result.isError, false);
+    }
+    assert.equal(JSON.stringify(body).includes("postgres://private-token"), false);
+  }
+});
+
+test("status denials and rate limits do not trigger automatic retry under load", async () => {
+  for (const status of [401, 403, 404, 429]) {
+    let reads = 0, enqueues = 0;
+    const { body } = await call("computer_screen_info", {
+      createAction: async () => {
+        enqueues++;
+        return Response.json({ ok: true, request_id: acceptedId, status: "queued" }, { status: 202 });
+      },
+      getAction: async () => {
+        reads++;
+        return Response.json({ error: "private SQL error" }, { status });
+      },
+    }, { wait_for_completion_ms: 1000 });
+    assert.equal(enqueues, 1);
+    assert.equal(reads, 1);
+    assert.equal(body.result.structuredContent.request_id, acceptedId);
+    assert.equal(body.result.structuredContent.upstream_status, status);
+    assert.equal(body.result.structuredContent.error, status === 429 ? undefined
+      : status === 404 ? "action_status_not_visible" : "action_status_access_denied");
+  }
+});

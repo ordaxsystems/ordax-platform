@@ -792,15 +792,29 @@ function pendingActionMessage(status: unknown): string {
 async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers): Promise<JsonObject> {
   const deadline = Date.now() + timeoutMs;
   let pollRound = 0;
+  let transientRetryUsed = false;
+  // A single bounded retry may recover a temporary Hyperdrive read failure
+  // without creating a second action. Respect the original wait deadline and
+  // never retry auth denials, 404, rate limits or a zero-wait request.
+  const retryRead = async (): Promise<boolean> => {
+    if (transientRetryUsed || deadline - Date.now() < 250) return false;
+    transientRetryUsed = true;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return true;
+  };
   while (true) {
     const statusRequest = cloneWithAuth(source, new URL(`/v3/product/actions/${requestId}`, source.url).toString(), "GET");
     let statusResponse: Response;
     try { statusResponse = await handlers.getAction(statusRequest, requestId); }
-    catch { return actionMonitoringUnavailable(requestId); }
+    catch {
+      if (await retryRead()) continue;
+      return actionMonitoringUnavailable(requestId);
+    }
     if (!statusResponse.ok) {
       const status = statusResponse.status;
-      // A temporary outage/rate limit while reading does not undo the
-      // durable, previously accepted enqueue. Fail closed for auth denials.
+      // A temporary database or gateway failure after a committed enqueue
+      // is not an action failure. Do not retry 429 (server backpressure).
+      if ((status === 408 || status >= 500) && await retryRead()) continue;
       if (status === 408 || status === 429 || status >= 500) {
         return actionMonitoringUnavailable(requestId, status);
       }
@@ -987,6 +1001,17 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   const requestId = typeof createdPayload.request_id === "string" ? createdPayload.request_id : "";
   if (createdPayload.ok !== true || !/^[A-Za-z0-9:_-]{1,128}$/.test(requestId)) {
     return textToolResult({ ok: false, error: "product_request_id_missing" }, true);
+  }
+  if (waitMs === 0 && createdPayload.status === "queued") {
+    // PostgreSQL has already committed the queue receipt, including the exact
+    // request ID. A zero-wait caller needs no second SQL query just to
+    // rediscover that same queued state. All other/unknown states still use
+    // the canonical status read, never a guessed completion result.
+    return textToolResult({
+      ok: true, pending: true, request_id: requestId,
+      action: { name: spec.action, status: "queued" },
+      message: pendingActionMessage("queued"),
+    });
   }
   const finalPayload = await waitForAction(source, requestId, waitMs, handlers);
   const action = finalPayload.action;
