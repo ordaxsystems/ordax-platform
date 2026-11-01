@@ -598,6 +598,8 @@ export async function enqueueProductAction(
     payload: JsonObject;
     idempotencyKey: string;
     expiresAt: string;
+    /** Request-owned execution context; advisory wake cannot delay a committed ACK. */
+    scheduleWake?: (wake: Promise<void>) => void;
   },
   createClient: typeof openPostgresSession = openPostgresSession,
 ): Promise<ProductActionEnqueueResult> {
@@ -644,7 +646,21 @@ export async function enqueueProductAction(
   // Even a replayed accepted enqueue is safe: the device must still claim
   // the actual lease through PostgreSQL. A missing DO never changes the RPC.
   if (recorded.ok && recorded.request_id) {
-    await notifyProductDeviceWake(env, input.deviceId);
+    const wake = notifyProductDeviceWake(env, input.deviceId);
+    if (input.scheduleWake) {
+      try {
+        // Cloudflare's waitUntil owns this advisory side effect after the
+        // HTTP response. A stalled Durable Object cannot delay the already
+        // committed PostgreSQL receipt or manufacture a second enqueue.
+        input.scheduleWake(wake);
+      } catch {
+        // Non-Worker callers preserve the original awaited wake semantics.
+        // A broken scheduler must not discard an advisory signal silently.
+        await wake;
+      }
+    } else {
+      await wake;
+    }
   }
   return recorded;
 }

@@ -42,6 +42,8 @@ type Dependencies = Readonly<{
   resolveProject?: typeof resolveOwnerProjectScope;
   listTargets?: typeof listCanonicalProductTargets;
   enqueue?: typeof enqueueProductAction;
+  /** Supplied only by Worker waitUntil; no model or HTTP input controls it. */
+  scheduleWake?: (wake: Promise<void>) => void;
   now?: () => number;
   operationId?: () => string;
 }>;
@@ -324,6 +326,7 @@ export function createAttestedProjectActionHandler(
         payload,
         idempotencyKey: `mcp-project-${accessMode}-${opId}`,
         expiresAt: new Date(now() + QUEUE_TTL_MS).toISOString(),
+        ...(deps.scheduleWake ? { scheduleWake: deps.scheduleWake } : {}),
       });
 
       if (result.ok === false) {

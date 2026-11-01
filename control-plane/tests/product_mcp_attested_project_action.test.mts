@@ -202,3 +202,33 @@ test("project-scoped retries reuse their PostgreSQL key after a lost response", 
   assert.equal((await handler(actionRequest("terminal.exec", { argv: ["python"] }), null)).status, 400);
   assert.equal(keys.length, 2);
 });
+
+test("attested project action forwards the Worker wake scheduler without altering SQL project scope", async () => {
+  const scheduleWake = (_wake: Promise<void>) => {};
+  let received: any = null;
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject,
+    listTargets: async () => catalog(grantGroup("terminal.exec", "write")),
+    enqueue: async (_env, input) => {
+      received = input;
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    scheduleWake,
+  });
+  assert.equal((await handler(actionRequest("terminal.exec", { argv: ["node", "--version"] }))).status, 202);
+  assert.equal(received.scheduleWake, scheduleWake);
+  assert.equal(received.spaceId, SPACE);
+  assert.equal(received.projectId, PROJECT);
+  assert.equal(Object.hasOwn(received.payload, "scheduleWake"), false);
+  const noContext = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject,
+    listTargets: async () => catalog(grantGroup("terminal.exec", "write")),
+    enqueue: async (_env, input) => {
+      assert.equal(Object.hasOwn(input, "scheduleWake"), false);
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+  });
+  assert.equal((await noContext(actionRequest("terminal.exec", { argv: ["node", "--version"] }))).status, 202);
+});
