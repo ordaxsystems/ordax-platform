@@ -165,7 +165,7 @@ export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
 ]);
 // Compatibility export for callers/tests that previously consumed the read-only name.
 export const PRODUCT_MCP_DIRECT_READ_TOOLS = PRODUCT_MCP_DIRECT_TOOLS;
-type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction" | "recordUsage">;
+type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction" | "recordUsage" | "usageFingerprintKey">;
 function respond(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 }
@@ -434,7 +434,7 @@ export function createCanonicalProductMcpGateway(
                   : createAttestedDeviceActionHandler(env, trusted, wakeDependencies),
         };
       }
-      return handleOrdaxMcp(request, handlers, allowedTools);
+      return handleOrdaxMcp(request, handlers, allowedTools, context);
     }
     return respond({ ok: false, error: "not_found" }, 404);
   };
