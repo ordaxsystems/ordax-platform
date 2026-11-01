@@ -37,7 +37,7 @@ class OpenAiPluginAnnotationEvidenceTests(unittest.TestCase):
         source = (root / "control-plane/cloudflare/src/mcp_http.ts").read_text(encoding="utf-8")
         tools_start = source.index("const TOOLS: ToolSpec[] = [")
         tools_block = source[tools_start:source.index("];", tools_start)]
-        published = set(re.findall(r'name:\\s*"([^"]+)"', tools_block))
+        published = set(re.findall(r'name:\s*"([^"]+)"', tools_block))
         manifest = json.loads((root / "plugins/ordax-chatgpt/plugin.json").read_text(encoding="utf-8"))
         positive = manifest["extensions"]["com.openai"]["review"]["test_cases"]["positive"]
         self.assertGreater(len(positive), 0)
