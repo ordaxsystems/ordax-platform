@@ -220,6 +220,23 @@ Esse refresh:
 
 Mudanças incompatíveis precisam de contrato/versionamento interno e migração explícita.
 
+## Integridade do transporte de ações longas
+
+O Runtime usa o mesmo transporte Product autenticado por dispositivo:
+`/v3/device/transport/claim`, `/lease` e `/progress`. As operações
+de claim e renovação aceitam `lease_seconds` somente como número JSON inteiro
+de 30 a 300; campo omitido conserva o valor padrão de 120 segundos. Strings
+numéricas, booleanos e `null` não são convertidos automaticamente.
+
+No progresso, `stage` é texto obrigatório limitado, `message` é
+texto opcional (ou `null`), e `progress_percent` é inteiro JSON de 0 a 100
+(ou omitido/`null` para indeterminado). Texto vazio ou booleano não vira
+percentual zero/um, e objetos não viram `[object Object]` na trilha de
+execução. A validação acontece **após autenticação do dispositivo** e antes
+da gravação pelo PostgreSQL; não cria estado de fila paralelo, concede
+capabilities, reexecuta ações nem substitui recibos/leases canônicos.
+A mudança de código não é publicação ou homologação física do Runtime.
+
 ## Computer Control
 
 Computer Control é composto por tools pequenas e tipadas. Não deve existir uma única ação genérica capaz de contornar as políticas das demais.
