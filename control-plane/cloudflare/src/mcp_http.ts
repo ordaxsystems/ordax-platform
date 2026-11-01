@@ -1004,6 +1004,9 @@ async function recordSuccessfulToolCall(
   }
 }
 
+/** Shared upper bound for both MCP pre-routing and JSON-RPC parsing. */
+export const MAX_MCP_REQUEST_BYTES = 1024 * 1024;
+
 export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandlers, allowedTools?: ReadonlySet<string>): Promise<Response> {
   if (request.method === "GET") return new Response(null, { status: 405, headers: { allow: "POST" } });
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "GET, POST" } });
@@ -1021,7 +1024,7 @@ export async function handleOrdaxMcp(request: Request, handlers: OrdaxMcpHandler
 
   let message: JsonObject;
   try {
-    const raw = await readBoundedJsonObject(request, 1024 * 1024);
+    const raw = await readBoundedJsonObject(request, MAX_MCP_REQUEST_BYTES);
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("invalid");
     message = raw as JsonObject;
   } catch {
