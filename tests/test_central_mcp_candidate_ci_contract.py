@@ -51,15 +51,18 @@ class CentralMcpCandidateGateTests(unittest.TestCase):
                         )
 
     def test_owner_sql_e2e_is_executed_in_both_non_deploy_candidate_jobs(self):
+        # The single canonical runner discovers all Product tests, including
+        # these Owner scopes. Do not return to long per-workflow test lists.
+        runner = (ROOT / "scripts/cloudflare/run_mcp_candidate_tests.sh").read_text("utf-8")
+        self.assertIn("node --test control-plane/tests/*.test.mts", runner)
+        for name in REQUIRED_TESTS:
+            self.assertTrue((ROOT / "control-plane/tests" / name).is_file(), name)
         for workflow in WORKFLOWS:
             source = workflow.read_text(encoding="utf-8")
             jobs = source.split("\njobs:\n", 1)[1]
             with self.subTest(workflow=workflow.name):
-                for name in REQUIRED_TESTS:
-                    self.assertIn(
-                        f"control-plane/tests/{name} ", jobs.replace("\n", " ") + " ",
-                        f"{workflow.name} never executes Owner regression: {name}"
-                    )
+                self.assertIn("run: bash scripts/cloudflare/run_mcp_candidate_tests.sh", jobs)
+                self.assertNotIn("run: node --test", jobs)
                 self.assertIn("deploy --dry-run", jobs)
                 self.assertNotIn("wrangler deploy --env production", jobs)
                 self.assertIn("persist-credentials: false", jobs)

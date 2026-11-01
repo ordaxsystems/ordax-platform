@@ -19,6 +19,9 @@ on:
       - "control-plane/supabase/migrations/**"
       - "control-plane/cloudflare/src/product_mcp_discovery_store.ts"
       - "control-plane/cloudflare/src/product_mcp_attested_device_action.ts"
+      - "control-plane/cloudflare/src/product_device_wake.ts"
+      - "control-plane/cloudflare/src/product_owner_project_scope.ts"
+      - "control-plane/cloudflare/src/product_mcp_attested_project_action.ts"
       - "control-plane/cloudflare/src/product_action_scope.ts"
       - "control-plane/cloudflare/src/product_auth.ts"
       - "control-plane/cloudflare/src/product_device_setup.ts"
@@ -28,6 +31,7 @@ on:
       - "control-plane/cloudflare/src/product_central_device_session.ts"
       - "control-plane/cloudflare/src/product_mcp_reads.ts"
       - "control-plane/cloudflare/src/product_postgres_store.ts"
+      - "control-plane/cloudflare/src/data_postgres_driver.ts"
       - "control-plane/cloudflare/src/mcp_http.ts"
       - "control-plane/tests/product_mcp_entry.test.mts"
       - "control-plane/tests/product_mcp_usage_meter_sql.test.mts"
@@ -36,6 +40,12 @@ on:
       - "control-plane/tests/product_mcp_discovery_store.test.mts"
       - "control-plane/tests/product_mcp_trusted_client_ingress.test.mts"
       - "control-plane/tests/product_mcp_attested_device_action.test.mts"
+      - "control-plane/tests/product_postgres_diagnostics.test.mts"
+      - "control-plane/tests/product_device_wake.test.mts"
+      - "control-plane/tests/product_postgres_enqueue_concurrent_retry.test.mts"
+      - "control-plane/tests/product_postcommit_wake.test.mts"
+      - "control-plane/tests/product_mcp_action_status.test.mts"
+      - "control-plane/tests/product_mcp_attested_project_action.test.mts"
       - "control-plane/tests/product_device_setup_route.test.mts"
       - "control-plane/tests/product_device_transport.test.mts"
       - "control-plane/tests/product_owner_grant_admin.test.mts"
@@ -45,6 +55,8 @@ on:
       - "scripts/cloudflare/check_mcp_release.py"
       - "tests/test_canonical_mcp_release.py"
       - ".github/workflows/ordax-mcp-validation-deploy.yml"
+      - "tests/test_mcp_candidate_suite_ssot.py"
+      - "scripts/cloudflare/run_mcp_candidate_tests.sh"
 
 permissions:
   contents: read
@@ -94,7 +106,7 @@ jobs:
         run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
 
       - name: Re-run canonical interactive MCP contract before dry-run
-        run: node --test control-plane/tests/product_mcp_discovery_store.test.mts control-plane/tests/product_mcp_entry.test.mts control-plane/tests/product_mcp_trusted_client_ingress.test.mts control-plane/tests/product_mcp_attested_device_action.test.mts control-plane/tests/product_device_setup_route.test.mts control-plane/tests/product_device_transport.test.mts control-plane/tests/product_owner_grant_admin.test.mts control-plane/tests/product_mcp_discovery.test.mts control-plane/tests/product_mcp_failure_responses.test.mts control-plane/tests/product_mcp_usage_meter_sql.test.mts control-plane/tests/product_mcp_usage_self_read.test.mts control-plane/tests/product_oauth_readiness.test.mts control-plane/tests/product_postgres_readiness.test.mts
+        run: bash scripts/cloudflare/run_mcp_candidate_tests.sh
 
       - name: Build exact candidate and prove no legacy authority
         working-directory: control-plane/cloudflare
