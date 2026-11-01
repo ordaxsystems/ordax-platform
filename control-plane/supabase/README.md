@@ -596,6 +596,25 @@ The canonical grant-group migration deliberately has no `legacy` backfill. It
 requires the empty foundation state that exists before public rollout and fails
 closed if data is unexpectedly present.
 
+### OAuth MCP discovery does not rotate an unchanged grant
+
+The signed `ordax_targets` read still calls PostgreSQL
+`ordax_ensure_product_mcp_target_discovery_v1` on every request. Applied
+migration `20261101204500_product_mcp_target_discovery_idempotent_v1.sql`
+(ledger `20261101203933`) preserves that live consent and Owner-eligibility
+check while eliminating the former revoke-and-reinsert on every read.
+PostgreSQL serializes an Owner/OAuth-client auto-ensure and reuses only a
+**single exact** active, unbounded, Owner-approved, device-scoped
+`mcp-discovery/product.target.read/read` grant. Missing, stale or extra
+active grants are reconciled exclusively by the existing authorized grant
+replacement RPC. No Worker cache, parallel grant ledger, broader capability
+or second authority may bypass these checks.
+
+The migration was applied once to the canonical `ordax-platform` Supabase
+project; its exact Git blob and real ledger version are pinned in
+`migration-registry.json`. New changes must use a separate migration,
+never edit or replay this applied source.
+
 ## Presence and scale
 
 Realtime coordination owns hot connection state. Ordinary heartbeats must not
