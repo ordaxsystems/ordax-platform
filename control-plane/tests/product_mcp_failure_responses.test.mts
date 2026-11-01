@@ -87,7 +87,7 @@ test("unknown status, missing action and mismatched request stop observation wit
       if (name === "ordax_action_status") {
         assert.equal(body.result.isError, true);
         assert.deepEqual(body.result.structuredContent, {
-          ok: false, pending: false, request_id: acceptedId, error: "action_status_invalid_response",
+          ok: false, monitoring_state: "unknown", request_id: acceptedId, error: "action_status_invalid_response",
         });
       } else {
         // An ACK is already durable. A malformed status read gives no proof
@@ -120,8 +120,10 @@ test("accepted action retains continuation ID across HTTP and thrown status fail
       assert.equal(body.result.structuredContent.request_id, acceptedId);
       if (name === "ordax_action_status") {
         assert.equal(body.result.isError, true);
-        assert.equal(body.result.structuredContent.pending, false);
+        assert.equal(Object.hasOwn(body.result.structuredContent, "pending"), false);
+        assert.equal(body.result.structuredContent.monitoring_state, "unknown");
         assert.equal(body.result.structuredContent.error, "action_status_unavailable");
+        assert.match(body.result.structuredContent.message, /Do not resubmit/);
       } else {
         assert.equal(body.result.isError, false);
         assert.equal(body.result.structuredContent.ok, true);
@@ -135,12 +137,36 @@ test("accepted action retains continuation ID across HTTP and thrown status fail
   }
 });
 
+test("an accepted action remains uncertain after a 401, 403 or 404 status lookup", async () => {
+  for (const status of [401, 403, 404]) {
+    let enqueues = 0;
+    const { body } = await call("git_status", {
+      createAction: async () => {
+        enqueues++;
+        return Response.json({ ok: true, request_id: acceptedId });
+      },
+      getAction: async () => Response.json({ error: "secret internal status" }, { status }),
+    });
+    const result = body.result.structuredContent;
+    assert.equal(enqueues, 1);
+    assert.equal(body.result.isError, true);
+    assert.equal(result.ok, false);
+    assert.equal(result.request_id, acceptedId);
+    assert.equal(Object.hasOwn(result, "pending"), false);
+    assert.equal(result.monitoring_state, "unknown");
+    assert.equal(result.upstream_status, status);
+    assert.equal(result.error, "action_status_unavailable");
+    assert.match(result.message, /Do not resubmit/);
+    assert.doesNotMatch(JSON.stringify(result), /secret/);
+  }
+});
+
 test("failed envelope takes precedence over pending or a superficially successful action", async () => {
   const payload = { ...record({ status: "succeeded" }), ok: false, pending: true, request_id: acceptedId, error: "product_owner_auth_ineligible" };
   const { body } = await call("ordax_action_status", { getAction: async () => Response.json(payload) });
   assert.equal(body.result.isError, true);
   assert.deepEqual(body.result.structuredContent, {
-    ok: false, pending: false, request_id: acceptedId, error: "product_owner_auth_ineligible",
+    ok: false, monitoring_state: "unknown", request_id: acceptedId, error: "product_owner_auth_ineligible",
   });
 });
 

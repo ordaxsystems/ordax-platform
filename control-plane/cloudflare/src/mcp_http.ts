@@ -543,7 +543,7 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
 }
 
 function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObject {
-  const invalid = { ok: false, pending: false, error: "action_status_invalid_response",
+  const invalid = { ok: false, monitoring_state: "unknown", error: "action_status_invalid_response",
     ...(requestId ? { request_id: requestId } : {}) };
   if (payload.ok !== true) return { ...invalid,
     error: publicErrorCode(payload.error, "action_status_invalid_response") };
@@ -741,6 +741,22 @@ function actionMonitoringUnavailable(requestId: string, upstreamStatus?: number)
   };
 }
 
+/**
+ * An existing request ID is not evidence of its current execution state.
+ * Never describe an unavailable status lookup as pending=false: this can
+ * cause clients to submit the same non-idempotent action again.
+ */
+function unverifiedActionStatus(requestId: string, upstreamStatus?: number): JsonObject {
+  return {
+    ok: false,
+    request_id: requestId,
+    error: "action_status_unavailable",
+    monitoring_state: "unknown",
+    ...(upstreamStatus === undefined ? {} : { upstream_status: upstreamStatus }),
+    message: "Action status could not be verified. Do not resubmit the action; retry ordax_action_status with the same request_id.",
+  };
+}
+
 function pendingActionMessage(status: unknown): string {
   if (status === "queued") return "Action is queued and has not started; check ordax_action_status with this request_id.";
   if (status === "leased") return "Action has been leased to the device; check ordax_action_status with this request_id.";
@@ -763,8 +779,7 @@ async function waitForAction(source: Request, requestId: string, timeoutMs: numb
       if (status === 408 || status === 429 || status >= 500) {
         return actionMonitoringUnavailable(requestId, status);
       }
-      return { ok: false, pending: false, request_id: requestId,
-        upstream_status: status, error: "action_status_unavailable" };
+      return unverifiedActionStatus(requestId, status);
     }
     const projected = sanitizeActionPayload(await bodyJson(statusResponse), requestId);
     if (projected.ok !== true) return actionMonitoringUnavailable(requestId);
@@ -833,10 +848,10 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
     if (!/^[A-Za-z0-9:_-]{1,128}$/.test(requestId)) return textToolResult({ ok: false, error: "product_request_id_invalid" }, true);
     let response: Response;
     try { response = await handlers.getAction(cloneWithAuth(source, new URL(`/v3/product/actions/${requestId}`, source.url).toString(), "GET"), requestId); }
-    catch { return textToolResult({ ok: false, pending: false, request_id: requestId, error: "action_status_unavailable" }, true); }
+    catch { return textToolResult(unverifiedActionStatus(requestId), true); }
     const payload = await bodyJson(response);
     const projected = response.ok ? sanitizeActionPayload(payload, requestId)
-      : { ok: false, pending: false, request_id: requestId, error: "action_status_unavailable" };
+      : unverifiedActionStatus(requestId, response.status);
     return textToolResult(projected, projected.ok !== true);
   }
 
