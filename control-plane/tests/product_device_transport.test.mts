@@ -6,6 +6,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   canonicalDeviceHeartbeatDigest,
+  canonicalDeviceLeaseSeconds,
+  canonicalDeviceActionProgress,
   isProductReportJsonbSafe,
   handleProductDeviceTransport,
 } from "../cloudflare/src/product_device_transport.ts";
@@ -185,4 +187,45 @@ test("PostgreSQL report JSONB rejects NUL recursively without rejecting text esc
   assert.equal(isProductReportJsonbSafe({ nested: [{ [nul]: "value" }] }), false);
   assert.equal(isProductReportJsonbSafe({ nested: [null, "safe", "\\u0000"] }), true);
   assert.equal(isProductReportJsonbSafe({ stdout: "C:\\\\Users\\\\Work" }), true);
+});
+
+test("device claim and lease use one strict numeric duration contract without JSON coercion", () => {
+  assert.equal(canonicalDeviceLeaseSeconds(undefined), 120, "omitted duration retains canonical default");
+  for (const [input, expected] of [[30, 30], [120, 120], [300, 300]] as const) {
+    assert.equal(canonicalDeviceLeaseSeconds(input), expected);
+  }
+  for (const input of [null, "", "120", "300", "0", false, true, {}, [], [120],
+    0, 29, 301, -1, 30.5, Infinity, -Infinity, NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(canonicalDeviceLeaseSeconds(input), null,
+      "malformed claim/lease value must fail before PostgreSQL: " + JSON.stringify(input));
+  }
+  const source = fs.readFileSync(SRC, "utf8");
+  assert.equal((source.match(/canonicalDeviceLeaseSeconds\(body!?\.lease_seconds\)/g) ?? []).length, 2,
+    "claim and renew must share one numeric parser instead of copy/pasted coercions");
+  assert.doesNotMatch(source, /Number\(body!?\.lease_seconds\)/);
+});
+
+test("device progress rejects malformed percentages and messages instead of recording forged telemetry", () => {
+  assert.deepEqual(canonicalDeviceActionProgress({
+    stage: " building ", message: "Compiling", progress_percent: 0,
+  }), { stage: "building", message: "Compiling", percent: 0 });
+  assert.deepEqual(canonicalDeviceActionProgress({
+    stage: "running", message: null, progress_percent: 100,
+  }), { stage: "running", message: null, percent: 100 });
+  assert.deepEqual(canonicalDeviceActionProgress({ stage: "running" }),
+    { stage: "running", message: null, percent: null },
+    "omitted optional telemetry remains absent, never silently zero");
+  for (const malformed of [
+    null, {}, { stage: "" }, { stage: " " }, { stage: "x".repeat(97) },
+    ...[true, false, "1", "", {}, [], [12], 101, -1, 0.5, Infinity, NaN].map(value =>
+      ({ stage: "running", progress_percent: value })),
+    ...[true, false, 123, 0, {}, [], ["message"], "x".repeat(513)].map(value =>
+      ({ stage: "running", message: value })),
+  ]) {
+    assert.equal(canonicalDeviceActionProgress(malformed as any), null,
+      "malformed progress must not be written: " + JSON.stringify(malformed).slice(0, 180));
+  }
+  const source = fs.readFileSync(SRC, "utf8");
+  assert.match(source, /const progress = canonicalDeviceActionProgress\(body\)/);
+  assert.doesNotMatch(source, /Number\(body\.progress_percent\)|String\(body\.message\)/);
 });
