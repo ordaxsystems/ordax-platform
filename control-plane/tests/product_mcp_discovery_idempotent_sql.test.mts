@@ -23,7 +23,7 @@ test("target-discovery RPC reuses exact active grants, repairs drift and revokes
     // Local-only authority fixture: the production ensure RPC is tested
     // unchanged; only its existing lower-level grant writer is simulated.
     await db.exec(`
-      create schema auth;
+      create schema auth; create schema private;
       create role anon;
       create role authenticated;
       create role service_role;
@@ -56,6 +56,18 @@ test("target-discovery RPC reuses exact active grants, repairs drift and revokes
       create table public.discovery_authorize_calls(
         owner_user_id uuid not null, device_id uuid not null, client_id uuid not null
       );
+      create table public.test_owner_eligibility(
+        owner_user_id uuid primary key, eligible boolean not null
+      );
+      create or replace function private.ordax_trusted_actor_auth_eligible_v1(
+        p_owner_user_id uuid
+      ) returns boolean language sql stable security definer set search_path = ''
+      as $owner$
+        select coalesce((
+          select e.eligible from public.test_owner_eligibility e
+          where e.owner_user_id = p_owner_user_id
+        ),false);
+      $owner$;
       create or replace function public.ordax_authorize_product_mcp_target_discovery_v1(
         p_owner_user_id uuid, p_device_id uuid, p_oauth_client_id uuid
       ) returns jsonb
@@ -87,6 +99,7 @@ test("target-discovery RPC reuses exact active grants, repairs drift and revokes
       $writer$;
     `);
     await db.exec(migration);
+    await db.query("insert into public.test_owner_eligibility values($1,true)", [owner]);
     for (const oauthId of [client, otherClient]) {
       await db.query("insert into auth.oauth_clients values($1,null,'public')", [oauthId]);
     }
@@ -164,6 +177,22 @@ test("target-discovery RPC reuses exact active grants, repairs drift and revokes
     assert.equal(unconsented.ok, false);
     assert.equal(unconsented.error, "product_mcp_oauth_consent_required");
     assert.equal(await calls(), 4);
+
+    // A reused read grant is never a way to bypass a newly disabled Owner.
+    // The old writer checked this via replace_remote_grant_group on every
+    // call; the optimized ensure must preserve the same fail-closed decision.
+    await db.query(
+      "update auth.oauth_consents set revoked_at = null where user_id = $1 and client_id = $2",
+      [owner, client],
+    );
+    await db.query(
+      "update public.test_owner_eligibility set eligible=false where owner_user_id=$1",
+      [owner],
+    );
+    const disabledOwner = await ensure();
+    assert.equal(disabledOwner.ok, false);
+    assert.equal(disabledOwner.error, "product_owner_auth_ineligible");
+    assert.equal(await calls(), 4, "suspended Owner must not rotate or reuse grants");
   } finally {
     await db.close();
   }
@@ -174,6 +203,7 @@ test("canonical auto-discovery keeps one PostgreSQL owner/client lock and exact 
     "pg_catalog.pg_advisory_xact_lock",
     "p_owner_user_id::text || '|' || p_oauth_client_id::text",
     "consent.revoked_at is null",
+    "private.ordax_trusted_actor_auth_eligible_v1(p_owner_user_id)",
     "c.deleted_at is null",
     "c.client_type::text = 'public'",
     "g.profile_key = 'mcp-discovery'",
