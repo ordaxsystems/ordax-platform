@@ -54,6 +54,16 @@ begin
     return pg_catalog.jsonb_build_object('ok', false, 'error', 'product_mcp_oauth_consent_required');
   end if;
 
+  -- The prior discovery writer called replace_remote_grant_group_v1 for
+  -- every device, which checked current account eligibility on every read.
+  -- Reusing a persisted read-only grant must NEVER bypass that guard when
+  -- an Owner account is disabled, banned, deleted or otherwise ineligible.
+  if not private.ordax_trusted_actor_auth_eligible_v1(p_owner_user_id) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'product_owner_auth_ineligible'
+    );
+  end if;
+
   for v_device in
     select d.device_id
       from public.ordax_product_devices d
