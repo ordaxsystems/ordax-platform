@@ -223,3 +223,72 @@ test("Owner workspace revocation only accepts exact opaque resource and consente
   assert.match(store,/ordax_revoke_project_workspace_resource_v1/);
   assert.ok(!source.includes("issueProjectWorkspaceResource"));
 });
+
+test("Owner grant request never turns missing or blank scope/expiry into global permanent authority", async () => {
+  await withIssuer(async () => {
+    const firstParty = await token({ client_id: null });
+    const device = "11111111-1111-4111-8111-111111111111";
+    const space = "22222222-2222-4222-8222-222222222222";
+    const project = "33333333-3333-4333-8333-333333333333";
+    const validExpiry = "2026-12-01T12:00:00.000Z";
+    const canonicalDeviceGrant = {
+      client_id: client, device_id: device, profile_key: OBSERVE_COMPUTER_CONTROL_MODE,
+      space_id: null, project_id: null, valid_until: null,
+    };
+    const calls: Array<Record<string, unknown>> = [];
+    const deps = { replaceGrantGroup: async (_env: any, input: any) => {
+      calls.push(input);
+      return { ok: true };
+    } };
+    const post = async (body: Record<string, unknown>) => handleProductOwnerGrantAdmin(
+      new Request("https://mcp.ordax.com.br/v3/owner/remote-grant-groups", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer " + firstParty,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }),
+      env, deps,
+    );
+
+    // The old parser silently converted *all* three missing/blank values to
+    // null, unintentionally authorizing a global or unlimited-lifetime grant.
+    for (const key of ["space_id", "project_id", "valid_until"] as const) {
+      const omitted = { ...canonicalDeviceGrant };
+      delete (omitted as any)[key];
+      const missing = await post(omitted);
+      assert.equal(missing.status, 400, "missing " + key);
+      assert.deepEqual(await missing.json(), { ok: false, error: "owner_grant_invalid" });
+
+      const blank = await post({ ...canonicalDeviceGrant, [key]: "" });
+      assert.equal(blank.status, 400, "blank " + key);
+      assert.deepEqual(await blank.json(), { ok: false, error: "owner_grant_invalid" });
+    }
+    assert.equal(calls.length, 0, "invalid requests never reach the grant writer");
+
+    // JSON null is the only intentional unscoped/indefinite value. Nothing
+    // in the HTTP handler invents or transforms a grant without the Owner.
+    const explicit = await post(canonicalDeviceGrant);
+    assert.equal(explicit.status, 200);
+    assert.equal((await explicit.json()).ok, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].ownerUserId, "11111111-1111-4111-8111-111111111111");
+    assert.equal(calls[0].clientId, client);
+    assert.equal(calls[0].spaceId, null);
+    assert.equal(calls[0].projectId, null);
+    assert.equal(calls[0].validUntil, null);
+
+    // An explicitly scoped and time-limited grant remains supported, without
+    // losing the Space, project or expiration at the PostgreSQL boundary.
+    const projectGrant = await post({
+      client_id: client, device_id: device, profile_key: "project-native-process",
+      space_id: space, project_id: project, valid_until: validExpiry,
+    });
+    assert.equal(projectGrant.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].spaceId, space);
+    assert.equal(calls[1].projectId, project);
+    assert.equal(calls[1].validUntil, validExpiry);
+  });
+});
