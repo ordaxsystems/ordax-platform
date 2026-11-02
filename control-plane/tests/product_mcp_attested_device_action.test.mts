@@ -727,3 +727,21 @@ test("Native OrdaX app activation is distinct from Windows and requires a real O
   assert.equal((await handler(actionRequest(action,{appId:"system"}))).status,202);
   assert.equal(dispatched,1);
 });
+
+test("Native read-grant cannot be inherited from Windows observation profile",()=>{
+  const read="ordax.surface.status";
+  assert.equal(catalogAllowsAttestedDeviceAction(
+    catalog(grantGroup("ordax-surface-read",read,"read")),DEVICE,read),true);
+  assert.equal(catalogAllowsAttestedDeviceAction(
+    catalog(grantGroup("ordax-surface-control",read,"read")),DEVICE,read),true);
+  for(const wrongProfile of ["computer-observe","full-computer-control",
+    "device-native-terminal","ordax-surface-read-extra"]){
+    assert.equal(catalogAllowsAttestedDeviceAction(
+      catalog(grantGroup(wrongProfile,read,"read")),DEVICE,read),false,wrongProfile);
+  }
+  assert.equal(catalogAllowsAttestedDeviceAction(
+    catalog(grantGroup("ordax-surface-read",read,"write")),DEVICE,read),false);
+  assert.equal(catalogAllowsAttestedDeviceAction(
+    catalog(grantGroup("ordax-surface-read","ordax.surface.open","write")),
+    DEVICE,"ordax.surface.open"),false);
+});
