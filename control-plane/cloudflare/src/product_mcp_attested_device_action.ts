@@ -27,6 +27,7 @@ import {
   OBSERVE_COMPUTER_CONTROL_MODE,
   PROCESS_COMPUTER_CONTROL_MODE,
   OWNER_DEVICE_COMPUTER_GRANT_PROFILES,
+  NATIVE_SURFACE_DEVICE_ACTIONS,
 } from "./product_action_scope.ts";
 import { productCapabilityAccessMode } from "./product_owner_grant_profiles.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
@@ -76,6 +77,7 @@ const ATTESTED_TERMINAL_ACTIONS = new Set(["computer.terminal_exec"]);
 const ATTESTED_DEVICE_PROCESS_ACTIONS = new Set(["computer.process_start", "computer.process_status", "computer.process_list", "computer.process_logs", "computer.process_write_stdin", "computer.process_stop"]);
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   "orchestrator.app_read",
+  ...NATIVE_SURFACE_DEVICE_ACTIONS,
   ...OBSERVE_ACTIONS,
   ...INTERACTIVE_ACTIONS,
   ...ATTESTED_FILESYSTEM_READ_ACTIONS,
@@ -106,6 +108,8 @@ function validAttestedDevice(value: AttestedMcpDevice | null): value is Attested
 
 function requiredProfile(action: string): string | null {
   if (action === "orchestrator.app_read") return "orchestrator-app-read";
+  if (action === "ordax.surface.status") return "ordax-surface-read";
+  if (action === "ordax.surface.open") return "ordax-surface-control";
   // Observation remains the least-privilege answer for the five capabilities
   // shared with the broader interactive profile.
   if (action === "computer.terminal_exec") return "device-native-terminal";
@@ -163,7 +167,9 @@ function validButton(value: unknown): boolean {
 export function validAttestedDeviceActionArguments(action: string, value: unknown): value is Json {
   if (!ATTESTED_MCP_DEVICE_ACTIONS.has(action) || !isRecord(value)) return false;
   const keys = Object.keys(value);
-  if (action === "orchestrator.app_read") return keys.length === 0;
+  if (action === "orchestrator.app_read" || action === "ordax.surface.status") return keys.length === 0;
+  if (action === "ordax.surface.open") return keysOnly(value, ["appId"])
+    && ["account", "settings", "system", "store"].includes(value.appId as string);
 
   if (["computer.access_status", "computer.active_window", "computer.screen_info"].includes(action)) {
     return keys.length === 0;
@@ -417,7 +423,12 @@ export function catalogAllowsAttestedDeviceAction(
       && (typeof expires !== "string" || !Number.isFinite(Date.parse(expires)))) return false;
     if (typeof expires === "string" && Date.parse(expires) <= Date.now()) continue;
     if (action === "orchestrator.app_read" && rawGroup.profile_key !== profile) continue;
-    if (rawGroup.profile_key !== profile && rawGroup.profile_key !== FULL_COMPUTER_CONTROL_MODE
+    // OrdaX Native authority cannot be inherited from Windows full-computer-control.
+    if (NATIVE_SURFACE_DEVICE_ACTIONS.has(action)
+      && !(rawGroup.profile_key === profile
+        || (action === "ordax.surface.status" && rawGroup.profile_key === "ordax-surface-control"))) continue;
+    if (!NATIVE_SURFACE_DEVICE_ACTIONS.has(action)
+      && rawGroup.profile_key !== profile && rawGroup.profile_key !== FULL_COMPUTER_CONTROL_MODE
       && !(profile === TEXT_EDIT_COMPUTER_CONTROL_MODE
         && rawGroup.profile_key === FILESYSTEM_COMPUTER_CONTROL_MODE)) continue;
 

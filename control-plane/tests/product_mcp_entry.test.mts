@@ -235,7 +235,7 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
     "computer_drag", "computer_clipboard_write", "computer_launch_app",
     "computer_scroll", "computer_type", "computer_hotkey",
-    "computer_access_status", "orchestrator_lab_status", "computer_file_stat", "computer_directory_list", "computer_text_read",
+    "computer_access_status", "ordax_surface_status", "ordax_surface_open", "orchestrator_lab_status", "computer_file_stat", "computer_directory_list", "computer_text_read",
     "computer_search", "computer_processes", "computer_terminate_process",
     "computer_text_write", "computer_text_patch",
     "computer_directory_create", "computer_path_move", "computer_path_remove",
@@ -252,6 +252,10 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   }
   assert.equal((byName.get("continuity_update") as any).annotations.readOnlyHint, false);
   assert.equal((byName.get("handoff_create") as any).annotations.readOnlyHint, false);
+  assert.equal((byName.get("ordax_surface_status") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("ordax_surface_open") as any).annotations.readOnlyHint, false);
+  assert.equal((byName.get("ordax_surface_open") as any).annotations.destructiveHint, false);
+  assert.deepEqual((byName.get("ordax_surface_open") as any).inputSchema.required, ["device_id", "appId"]);
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_screenshot") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_clipboard_read") as any).annotations.readOnlyHint, true);

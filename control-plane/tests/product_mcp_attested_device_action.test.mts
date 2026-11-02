@@ -698,3 +698,32 @@ test("attested device action forwards only the trusted Worker wake scheduler", a
   });
   assert.equal((await noContext(actionRequest("computer.screen_info"))).status, 202);
 });
+
+test("Native OrdaX app activation is distinct from Windows and requires a real Owner grant",async()=>{
+  const action="ordax.surface.open";
+  assert.equal(validAttestedDeviceActionArguments("ordax.surface.status",{}),true);
+  assert.equal(validAttestedDeviceActionArguments("ordax.surface.status",{extra:1}),false);
+  for(const appId of ["account","settings","system","store"])
+    assert.equal(validAttestedDeviceActionArguments(action,{appId}),true);
+  for(const invalid of [{},{appId:"Windows"},{appId:"files"},{appId:"system",command:"terminal"}])
+    assert.equal(validAttestedDeviceActionArguments(action,invalid),false);
+  for(const profile of ["full-computer-control","computer-observe","ordax-surface-read"]){
+    assert.equal(catalogAllowsAttestedDeviceAction(catalog(grantGroup(profile,action,"write")),DEVICE,action),false,profile);
+  }
+  assert.equal(catalogAllowsAttestedDeviceAction(catalog(grantGroup("ordax-surface-control",action,"write")),DEVICE,action),true);
+  assert.equal(catalogAllowsAttestedDeviceAction(catalog(grantGroup("ordax-surface-control","ordax.surface.status","read")),DEVICE,"ordax.surface.status"),true);
+  let dispatched=0;
+  const handler=createAttestedDeviceActionHandler(ENV,TRUSTED,{
+    authenticate:identity,
+    listTargets:async()=>catalog(grantGroup("ordax-surface-control",action,"write")),
+    enqueue:async(_env,input)=>{
+      dispatched++;
+      assert.equal(input.capability,action);
+      assert.equal(input.projectId,null);
+      assert.equal(input.accessMode,"write");
+      return {ok:true,replayed:false,request_id:REQUEST,effect_id:EFFECT,status:"queued"};
+    },
+  });
+  assert.equal((await handler(actionRequest(action,{appId:"system"}))).status,202);
+  assert.equal(dispatched,1);
+});

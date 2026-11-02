@@ -34,6 +34,11 @@ export const APP_INTELLIGENCE_DEVICE_ACTIONS = new Set<string>([
   "intelligence.app_detail",
 ]);
 
+export const NATIVE_SURFACE_DEVICE_ACTIONS = new Set<string>([
+  "ordax.surface.status",
+  "ordax.surface.open",
+]);
+
 export const COMPUTER_DEVICE_ACTIONS = new Set<string>([
   "computer.access_status",
   "computer.active_window",
@@ -74,6 +79,7 @@ export const DEVICE_SCOPED_ACTIONS = new Set<string>([
   "orchestrator.app_read",
   ...COMPUTER_DEVICE_ACTIONS,
   ...APP_INTELLIGENCE_DEVICE_ACTIONS,
+  ...NATIVE_SURFACE_DEVICE_ACTIONS,
   ...REPOSITORY_CATALOG_DEVICE_ACTIONS,
 ]);
 
