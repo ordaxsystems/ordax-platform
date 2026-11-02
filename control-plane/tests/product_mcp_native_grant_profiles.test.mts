@@ -41,3 +41,21 @@ test("workspace snapshot grant is project-scoped and read-only", () => {
     item => item.capability === "workspace.project_snapshot",
   ), false);
 });
+
+test("OrdaX Native grants are not Windows Computer Control grants",()=>{
+  const read=ownerMcpGrantProfile("ordax-surface-read");
+  const control=ownerMcpGrantProfile("ordax-surface-control");
+  assert.deepEqual(read,{
+    scope:"device",capabilities:[{capability:"ordax.surface.status",accessMode:"read"}],
+  });
+  assert.deepEqual(control,{
+    scope:"device",capabilities:[
+      {capability:"ordax.surface.open",accessMode:"write"},
+      {capability:"ordax.surface.status",accessMode:"read"},
+    ],
+  });
+  for(const name of ["full-computer-control","computer-observe","device-native-terminal"]){
+    assert.equal(ownerMcpGrantProfile(name)?.capabilities.some(x=>x.capability.startsWith("ordax.surface.")),false,name);
+  }
+  assert.equal(productCapabilityAccessMode("ordax.surface.open"),"write");
+});

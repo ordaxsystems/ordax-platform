@@ -78,6 +78,8 @@ This document is reviewer-facing evidence for the OpenAI plugin submission. The 
 | `computer_type` | false | true | true | Desktop typing can change local or external application state, so it requires an explicit grant and is conservatively destructive/open-world. |
 | `computer_hotkey` | false | true | true | A validated desktop hotkey can trigger local or external application actions, so it is conservatively destructive/open-world. |
 | `computer_access_status` | true | false | false | Reads the effective non-secret local computer-access policy, including allowed roots and resolved allowed applications, without changing device state. |
+| `ordax_surface_status` | true | false | false | Reads only the active Native OrdaX application reported by the authenticated Surface of the Owner-granted Product Device; it does not inspect the Windows desktop, alter UI state or contact external destinations. |
+| `ordax_surface_open` | false | false | false | Requests opening one app through the existing OrdaX Native appActivation port under the independent ordax.surface.open Owner grant; it neither controls Windows nor overwrites user data, and success requires a new authenticated visible-Surface receipt. |
 | `computer_file_stat` | true | false | false | Reads bounded metadata for one locally allowed computer path. |
 | `computer_directory_list` | true | false | false | Lists filesystem entries only inside roots allowed by the local ORDAX computer-access policy. |
 | `computer_text_read` | true | false | false | Reads bounded UTF-8 text only from a locally allowed computer path. |
