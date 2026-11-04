@@ -339,6 +339,10 @@ const RPC_SPECS = {
     keys: ["p_owner_user_id", "p_device_id"],
     casts: ["uuid", "uuid"],
   },
+  ordax_retire_owner_product_device_v1: {
+    keys: ["p_owner_user_id", "p_device_id"],
+    casts: ["uuid", "uuid"],
+  },
   ordax_replace_owner_mcp_grant_group_v1: {
     keys: [
       "p_owner_user_id", "p_space_id", "p_project_id", "p_device_id",
@@ -1130,6 +1134,19 @@ export async function listOwnerMcpDevices(
     throw new ProductPostgresError("owner_devices_invalid", 400);
   return callRpc<JsonObject>(env, "ordax_owner_mcp_devices_v1", {
     p_owner_user_id: ownerUserId,
+  });
+}
+
+/** Retire only the signed Owner's exact offline DEV device.
+ * The PostgreSQL authority atomically revokes device credentials and grants.
+ */
+export async function retireOwnerProductDevice(
+  env: ProductPostgresEnv, ownerUserId: string, deviceId: string,
+): Promise<JsonObject> {
+  if (!isCanonicalUuid(ownerUserId) || !isCanonicalUuid(deviceId))
+    throw new ProductPostgresError("owner_device_retire_invalid", 400);
+  return callRpc<JsonObject>(env, "ordax_retire_owner_product_device_v1", {
+    p_owner_user_id: ownerUserId, p_device_id: deviceId,
   });
 }
 

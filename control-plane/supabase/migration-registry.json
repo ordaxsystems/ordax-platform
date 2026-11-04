@@ -1077,6 +1077,18 @@
         "blob_sha": "f98e481b0fcc4b286147d1e676e5c053574c0f2a"
       },
       "ledger_name": "central_attested_session_reconnect_v1"
+    },
+    {
+      "name": "20261104040000_owner_product_device_retirement_v1",
+      "applied_version": "20261104072233",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261104040000_owner_product_device_retirement_v1.sql",
+        "blob_sha": "75fbfbdbba17b1791403b331b1b6a456bca53400"
+      },
+      "ledger_name": "owner_product_device_retirement_v1"
     }
   ]
 }

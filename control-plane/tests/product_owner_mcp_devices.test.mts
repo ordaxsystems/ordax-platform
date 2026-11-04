@@ -100,3 +100,68 @@ test("Owner inventory source uses only existing identity and presence, no shadow
     assert.match(sql,new RegExp("revoke all on function[\\s\\S]*?from[\\s\\S]*?"+role));
   assert.doesNotMatch(sql,/create table|alter table|grant execute[^;]+to service_role/);
 });
+
+test("DEV retirement refuses live/unknown devices and unauthorized calls, then retires only the exact Owner device", async () => {
+  const retireUrl=endpoint+"/"+device+"?confirm="+device;
+  assert.equal(isProductTrustedClientPath(endpoint.replace("https://mcp.ordax.com.br","")+"/"+device),true);
+  assert.equal(isProductTrustedClientPath("/v3/owner/devices/other"),false);
+  let calls=0;
+  const deps={retireDevice:async (_env:unknown,ownerId:string,deviceId:string)=>{
+    calls++;
+    assert.equal(ownerId,"11111111-1111-4111-8111-111111111111");
+    assert.equal(deviceId,device);
+    return {ok:true,retired:true,device_id:device,already_retired:false,grants_revoked:0};
+  }} as any;
+  const noAuth=await handleProductOwnerGrantAdmin(new Request(retireUrl,{method:"DELETE"}),{
+    ...env,OWNER_DEVICE_RETIRE_ENABLED:"enabled",
+  } as any,deps);
+  assert.equal(noAuth.status,401);
+  assert.equal(calls,0);
+  await withIssuer(async()=>{
+    const signed=await token({client_id:null});
+    const signedDelegated=await token();
+    const cfg={...env,OWNER_DEVICE_RETIRE_ENABLED:"enabled"} as any;
+    const req=(url:string,method="DELETE",bearer=signed)=>new Request(url,{
+      method,headers:{authorization:"Bearer "+bearer},
+    });
+    const noRollout=await handleProductOwnerGrantAdmin(req(retireUrl),env,deps);
+    assert.equal(noRollout.status,404);
+    const delegated=await handleProductOwnerGrantAdmin(req(retireUrl,"DELETE",signedDelegated),cfg,deps);
+    assert.equal(delegated.status,403);
+    const noMutationGet=await handleProductOwnerGrantAdmin(req(retireUrl,"GET"),cfg,deps);
+    assert.equal(noMutationGet.status,405);
+    for(const invalid of [
+      endpoint+"/"+device,
+      endpoint+"/"+device+"?confirm=retire",
+      endpoint+"/"+device+"?confirm="+device+"&extra=1",
+      endpoint+"/"+device+"?confirm="+device+"&confirm="+device,
+      endpoint+"/other?confirm=other",
+    ]){
+      const rejected=await handleProductOwnerGrantAdmin(req(invalid),cfg,deps);
+      assert.equal(rejected.status,400,invalid);
+    }
+    assert.equal(calls,0);
+    const success=await handleProductOwnerGrantAdmin(req(retireUrl),cfg,deps);
+    assert.equal(success.status,200);
+    assert.equal((await success.json()).device_id,device);
+    assert.equal(calls,1);
+  });
+});
+
+test("DEV retirement SQL is offline-only, owner-scoped, credential-revoking and never deletes user files",()=>{
+  const sql=readFileSync(path.resolve(here,
+    "../supabase/migrations/20261104040000_owner_product_device_retirement_v1.sql"),"utf8");
+  assert.match(sql,/private\.ordax_trusted_actor_auth_eligible_v1/);
+  assert.match(sql,/d\.state='active'|v_device\.state<>'active'/);
+  assert.match(sql,/v_device\.channel<>'development'/);
+  assert.match(sql,/private\.ordax_product_presence_online_v1/);
+  assert.match(sql,/owner_device_still_online/);
+  assert.match(sql,/owner_device_active_actions/);
+  assert.match(sql,/update private\.ordax_product_device_credentials/);
+  assert.match(sql,/update public\.ordax_remote_capability_grants/);
+  assert.match(sql,/set state='revoked'/);
+  assert.match(sql,/d\.owner_user_id=p_owner_user_id and d\.state='active'/);
+  assert.match(sql,/to ordax_edge_executor/);
+  assert.match(sql,/from public,anon,authenticated,service_role/);
+  assert.doesNotMatch(sql,/delete from public\.ordax_product_devices/i);
+});
