@@ -4,6 +4,13 @@ on:
   pull_request:
   push:
     branches: [main]
+    # Documentation-only commits cannot change the Worker or connector bytes.
+    # Do not waste the full CI or trigger downstream Cloudflare deployment.
+    # Mixed documentation+code changes still run all existing checks.
+    paths-ignore:
+      - 'AGENTS.md'
+      - 'README.md'
+      - 'docs/**/*.md'
 
 permissions:
   contents: read
