@@ -158,7 +158,19 @@ test("attested device argument allowlist covers observation, interactive and pro
   }), true);
   assert.equal(validAttestedDeviceActionArguments("computer.launch_app", { application: "notepad.exe", args: [] }), true);
   assert.equal(validAttestedDeviceActionArguments("computer.scroll", { amount: -3, horizontal: false }), true);
-  assert.equal(validAttestedDeviceActionArguments("computer.type", { text: "hello" }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.type", {
+    text: "hello", handle: "0x5F01DC", expected_pid: 15172,
+  }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.type", { text: "hello" }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.type", {
+    text: "x", handle: "0x5F01DC", expected_pid: 15172, mode: "foreground",
+  }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.type", {
+    text: "x", handle: "0x5F01DC", expected_pid: 15172, mode: "background",
+  }), true);
+  assert.equal(validAttestedDeviceActionArguments("computer.type", {
+    text: "x", handle: "0x5F01DC", expected_pid: 15172, extra: 1,
+  }), false);
   assert.equal(validAttestedDeviceActionArguments("computer.hotkey", { keys: ["CTRL", "L"] }), true);
   assert.equal(validAttestedDeviceActionArguments("computer.clipboard_read", { max_bytes: 4096 }), true);
   assert.equal(validAttestedDeviceActionArguments("computer.file_stat", { path: "C:\\work\\file.txt" }), true);
