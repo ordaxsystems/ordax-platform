@@ -101,6 +101,8 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     await db.exec(extract(read("20261022154600_central_session_runtime_heartbeat_preflight_v1.sql"),
       "public.ordax_open_central_device_session_v1"));
     await db.exec(proposal);
+    // Upgrade must retain the existing Owner + Device confirmation model.
+    await db.exec(read("20261104024500_central_attested_session_reconnect_v1.sql"));
 
     await db.query("insert into auth.users values($1)",[owner]);
     await db.query("insert into auth.oauth_clients values($1,null),($2,null)",[client,otherClient]);
@@ -154,6 +156,37 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     assert.equal((await open()).device_id,desktop,
       "previous attested binding prevails over subsequent multiple grants");
     assert.equal((await list()).count,0);
+
+    // After 30 minutes, the SAME Owner-selected and Device-confirmed
+    // conversation must re-attest the SAME computer, not reopen Owner OAuth.
+    await db.query("update private.ordax_central_conversation_bindings set expires_at=now()-interval '1 second' where session_sha256=$1",[hash]);
+    const resumedTicket=await open();
+    assert.equal(resumedTicket.status,"pending","expired attested session needs device credential, not Owner login");
+    assert.equal(resumedTicket.device_id,desktop,"never select an unrelated granted PC");
+    assert.notEqual(resumedTicket.challenge_id,waiting.challenge_id,"fresh device attestation");
+    assert.equal((await list()).count,0,"no new Owner selection");
+    assert.equal((await poll()).challenge_id,resumedTicket.challenge_id);
+    assert.equal((await confirm(notebook,tokenNote,resumedTicket.challenge_id)).ok,false,
+      "other device credential is never allowed to refresh a binding");
+    const rebound=await confirm(desktop,tokenDesk,resumedTicket.challenge_id);
+    assert.equal(rebound.ok,true);
+    assert.equal(rebound.request_id,confirmed.request_id,"reuse the exact immutable conversation binding");
+    assert.equal((await resolve()).device_id,desktop);
+
+    // A revoked OAuth consent must NEVER be revived by a prior confirmed
+    // conversation, even when its device grant remains active.
+    await db.query("update private.ordax_central_conversation_bindings set expires_at=now()-interval '1 second' where session_sha256=$1",[hash]);
+    await db.exec("update auth.oauth_consents set revoked_at=now()");
+    assert.equal((await open()).error,"owner_central_client_not_consented");
+    await db.exec("update auth.oauth_consents set revoked_at=null");
+    await db.query("update public.ordax_device_presence set online=false where device_id=$1",[desktop]);
+    assert.equal((await open()).error,"central_device_offline","offline device cannot renew");
+    await db.query("update public.ordax_device_presence set online=true,last_seen_at=now(),capability_digest=null where device_id=$1",[desktop]);
+    assert.equal((await open()).error,"central_device_runtime_not_ready","discovery-only agent cannot renew");
+    await db.query("update public.ordax_device_presence set capability_digest=$2 where device_id=$1",[desktop,"f".repeat(64)]);
+    const renewedTicket=await open();
+    assert.equal(renewedTicket.status,"pending");
+    assert.equal((await confirm(desktop,tokenDesk,renewedTicket.challenge_id)).ok,true);
 
     await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",
       [grantDesk]);
@@ -226,10 +259,14 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",[grantDesk]);
     assert.equal((await confirm(desktop,tokenDesk,waiting4.challenge_id)).error,
       "central_device_grant_revoked","grant still checked AFTER Owner decision");
-    const sig="public.ordax_owner_select_central_device_v1(uuid,text,uuid,uuid)";
-    for(const role of ["anon","authenticated","service_role"]) {
-      assert.equal((await db.query("select has_function_privilege($1,$2,'EXECUTE') as allowed",[role,sig])).rows[0].allowed,false,role);
+    for(const sig of [
+      "public.ordax_owner_select_central_device_v1(uuid,text,uuid,uuid)",
+      "public.ordax_open_central_device_session_v1(uuid,text,text)",
+    ]) {
+      for(const role of ["anon","authenticated","service_role"]) {
+        assert.equal((await db.query("select has_function_privilege($1,$2,'EXECUTE') as allowed",[role,sig])).rows[0].allowed,false,role+" cannot call "+sig);
+      }
+      assert.equal((await db.query("select has_function_privilege('ordax_edge_executor',$1,'EXECUTE') as allowed",[sig])).rows[0].allowed,true);
     }
-    assert.equal((await db.query("select has_function_privilege('ordax_edge_executor',$1,'EXECUTE') as allowed",[sig])).rows[0].allowed,true);
   }finally{await db.close();}
 });

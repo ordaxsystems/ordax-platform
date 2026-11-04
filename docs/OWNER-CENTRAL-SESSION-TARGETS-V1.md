@@ -75,3 +75,34 @@ corridas de escolha e tickets expirados. O teste
 `owner_central_device_selection_route.test.mts` cobre JWT, schema estrito
 e flags. A CI é fonte de verdade para o head específico; não tratar docs
 ou CI como deploy no Supabase.
+
+## Reconexão de conversa já atestada (migração candidata, 04/11/2026)
+
+O prazo de 30 minutos da associação **não é o prazo do grant**. A migração
+`20261104024500_central_attested_session_reconnect_v1.sql` corrige uma
+situação específica: a **mesma** conversa, identificada pelo mesmo hash de
+sessão do provedor e mesmo Owner+client_id, já foi escolhida pelo Owner e
+confirmada anteriormente pela credencial do Runtime, mas seu vínculo expirou.
+
+Se houver vários dispositivos com grants válidos, `open` agora consulta a
+associação imutável já confirmada e cria somente um **novo desafio pendente
+para o mesmo dispositivo**, desde que o consentimento OAuth e o grant atual
+continuem válidos e a presença/digest do Runtime estejam prontos.
+`confirm` continua exigindo a credencial Native do dispositivo e mantém o
+mesmo identificador de associação. Nenhum grant é concedido, nenhuma tabela
+de preferência é criada e outro dispositivo autorizado **não** pode assumir
+a conversa por estar online. O Runtime ou OAuth revogado falha fechado.
+
+**Não confundir com preferência padrão global.** Uma conversa nova, com
+outro marcador de sessão, continua solicitando seleção Owner quando existem
+vários destinos. A correção elimina a cerimônia Owner repetida por expiração
+**dentro da mesma conversa**, sem presumir uma preferência de roteamento
+entre conversas que o proprietário não cadastrou explicitamente.
+
+Provas: `central_owner_device_selection_sql.test.mts` executa a migração
+posterior à seleção original no PGlite, simula expiração, verifica novo
+desafio de atestação, rejeita credencial de outro PC e bloqueia OAuth revogado,
+grant revogado, dispositivo offline e digest ausente. Revalida as ACLs
+de `ordax_edge_executor` e a ausência de acesso de papéis públicos.
+**Sem implantação e E2E reais do MCP, o comportamento em produção permanece
+o anterior.**
