@@ -64,7 +64,7 @@ type Env = ProductAuthEnv & ProductPostgresEnv;
 
 // ChatGPT keeps the only public MCP identity on mcp.ordax.com.br. The
 // workers.dev hostname is a separate, path-restricted network ingress for the
-// installed Runtime and Studio when the branded custom domain is unreachable
+// installed OrdaX MCP Runtime when the branded custom domain is unreachable
 // from a device network. It reuses the same Worker, OAuth checks, PostgreSQL
 // authority and handlers; it is not a second MCP server or fallback authority.
 export const PRODUCT_TRUSTED_CLIENT_HOSTNAME = "ordax-mcp.ordaxsystems.workers.dev";
