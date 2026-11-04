@@ -356,7 +356,12 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
       && (value.horizontal === undefined || typeof value.horizontal === "boolean");
   }
   if (action === "computer.type") {
-    return keysOnly(value, ["text"]) && boundedString(value.text, 65_536, true);
+    return keysOnly(value, ["text", "handle", "expected_pid", "mode"])
+      && boundedString(value.text, 256, true) && value.text.length <= 256
+      && !/[\\x00-\\x1f\\uD800-\\uDFFF]/u.test(value.text)
+      && typeof value.handle === "string" && /^0x[0-9a-fA-F]{1,16}$/.test(value.handle)
+      && boundedInteger(value.expected_pid, 1, 4_294_967_295)
+      && (value.mode === undefined || value.mode === "background");
   }
   if (action === "computer.hotkey") {
     return keysOnly(value, ["keys"])
