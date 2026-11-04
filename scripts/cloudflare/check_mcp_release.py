@@ -47,11 +47,16 @@ TRUSTED_CLIENT_INGRESS={
     "public_mcp_exposed":False,
     "authority":"same_worker_postgresql_oauth",
     "allowed_exact_paths":[
+        "/v3/product/usage",
         "/v3/product/session",
-        "/v3/product/device/setup",
+        "/v3/device/setup",
+        "/v3/product/device/presence",
         "/v3/product/device/central-session",
-        "/v3/owner/devices",
+        "/v3/owner/project-scope",
+        "/v3/owner/central-session-selections",
+        "/v3/owner/central-session-targets",
         "/v3/owner/remote-authority",
+        "/v3/owner/devices",
         "/v3/owner/remote-grant-groups",
     ],
     "allowed_path_prefixes":[
