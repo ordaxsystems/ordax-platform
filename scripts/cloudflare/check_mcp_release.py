@@ -50,6 +50,7 @@ TRUSTED_CLIENT_INGRESS={
         "/v3/product/session",
         "/v3/product/device/setup",
         "/v3/product/device/central-session",
+        "/v3/owner/devices",
         "/v3/owner/remote-authority",
         "/v3/owner/remote-grant-groups",
     ],
@@ -78,6 +79,10 @@ def validate(foundation:dict,config:dict)->bool:
         or release.get("workers_dev") is not False
         or config.get("preview_urls") is not False):
         raise McpReleaseError("mcp_public_surface_must_remain_custom_domain_only")
+    # Windows is the independently installed OrdaX MCP Runtime, not Studio.
+    windows=(foundation.get("connection_modes") or {}).get("direct_user_chatgpt_mcp") or {}
+    if windows.get("windows_delivery")!="ordax_mcp_runtime":
+        raise McpReleaseError("mcp_windows_delivery_not_canonical")
     trusted_ingress=release.get("trusted_client_ingress")
     if trusted_ingress!=TRUSTED_CLIENT_INGRESS or config.get("workers_dev") is not True:
         raise McpReleaseError("mcp_trusted_client_ingress_contract_invalid")
