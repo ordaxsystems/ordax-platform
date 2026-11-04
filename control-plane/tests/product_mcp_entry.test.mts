@@ -232,7 +232,7 @@ test("Trusted ingress manifest is the exact route inventory owned by the MCP rou
   ];
   assert.deepEqual(allowed.allowed_exact_paths,exact);
   assert.deepEqual(allowed.allowed_path_prefixes,[
-    "/v3/device/transport/", "/v3/owner/remote-grant-groups/",
+    "/v3/device/transport/", "/v3/owner/remote-grant-groups/", "/v3/owner/devices/",
   ]);
   for (const path of exact) assert.equal(isProductTrustedClientPath(path),true,path);
   for (const prefix of allowed.allowed_path_prefixes) {
