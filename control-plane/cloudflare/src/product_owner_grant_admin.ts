@@ -2,6 +2,7 @@ import { authenticateProductRequest, authorizeProductOwnerIdentity, type Product
 import {
   approveProjectWorkspaceResource,
   listOwnerMcpRemoteAuthority,
+  listOwnerMcpDevices,
   replaceOwnerMcpGrantGroup,
   revokeOwnerMcpGrantGroup,
   revokeProjectWorkspaceResource,
@@ -25,6 +26,7 @@ type Env = ProductAuthEnv & ProductPostgresEnv & {
 };
 type Json = Record<string, unknown>;
 const ROOT = "/v3/owner/remote-authority";
+export const PRODUCT_OWNER_MCP_DEVICES_PATH = "/v3/owner/devices";
 export const PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH = "/v3/owner/central-session-targets";
 export const PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH = "/v3/owner/central-session-selections";
 const GROUPS = "/v3/owner/remote-grant-groups";
@@ -92,10 +94,12 @@ export async function handleProductOwnerGrantAdmin(
     listSelections?: typeof listOwnerCentralSelections;
     selectDevice?: typeof selectOwnerCentralDevice;
     replaceGrantGroup?: typeof replaceOwnerMcpGrantGroup;
+    listDevices?: typeof listOwnerMcpDevices;
   } = {},
 ): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname !== ROOT && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
+  if (url.pathname !== ROOT && url.pathname !== PRODUCT_OWNER_MCP_DEVICES_PATH
+      && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
       && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
       && !url.pathname.startsWith(GROUPS) && !url.pathname.startsWith(WORKSPACE_RESOURCES))
     return json({ ok: false, error: "not_found" }, 404);
@@ -190,6 +194,28 @@ export async function handleProductOwnerGrantAdmin(
         ownerUserId: ownerId, ...input,
       });
       return json({ ok: true, revoked });
+    }
+
+    if (url.pathname === PRODUCT_OWNER_MCP_DEVICES_PATH) {
+      if (request.method !== "GET") return json({ ok: false, error: "method_not_allowed" }, 405);
+      // No client-selected device, owner id, scope or paging overrides.
+      if (url.search !== "") return json({ ok: false, error: "owner_devices_invalid" }, 400);
+      const result = await (deps.listDevices ?? listOwnerMcpDevices)(env, ownerId);
+      if (result.ok === false) return json(result, 403);
+      const rows = result.devices;
+      if (result.ok !== true || result.schema !== "ordax.owner-mcp-devices/1"
+          || !Array.isArray(rows) || rows.length > 200
+          || result.count !== rows.length || new Set(rows.map(d => d?.device_id)).size !== rows.length
+          || !rows.every(d => d && typeof d === "object" && isCanonicalUuid(d.device_id)
+              && typeof d.name === "string" && d.name.length >= 1 && d.name.length <= 120
+              && typeof d.kind === "string" && typeof d.channel === "string"
+              && typeof d.state === "string" && typeof d.online === "boolean"
+              && typeof d.runtime_ready === "boolean"
+              && (d.last_seen_at === null || (typeof d.last_seen_at === "string"
+                && Number.isFinite(Date.parse(d.last_seen_at)))))) {
+        return json({ ok: false, error: "owner_devices_response_invalid" }, 502);
+      }
+      return json(result);
     }
 
     if (request.method === "GET" && url.pathname === ROOT) {

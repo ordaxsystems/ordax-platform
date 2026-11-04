@@ -1053,6 +1053,30 @@
         "blob_sha": "1284df355b6c85b2768c41d74d8416ead05290ce"
       },
       "ledger_name": "product_mcp_target_discovery_idempotent_v1"
+    },
+    {
+      "name": "20261104005500_owner_mcp_device_inventory_v1",
+      "applied_version": "20261104021951",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261104005500_owner_mcp_device_inventory_v1.sql",
+        "blob_sha": "fcd3820259248fe2f5357deecb9ca2a6a609f7bf"
+      },
+      "ledger_name": "owner_mcp_device_inventory_v1"
+    },
+    {
+      "name": "20261104024500_central_attested_session_reconnect_v1",
+      "applied_version": "20261104022016",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261104024500_central_attested_session_reconnect_v1.sql",
+        "blob_sha": "f98e481b0fcc4b286147d1e676e5c053574c0f2a"
+      },
+      "ledger_name": "central_attested_session_reconnect_v1"
     }
   ]
 }
