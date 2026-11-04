@@ -81,8 +81,10 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
     || pathname === PRODUCT_OWNER_MCP_DEVICES_PATH
     || pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
-    || pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")
-    || pathname.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX + "/");
+    || (pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")
+      && pathname.length > PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH.length + 1)
+    || (pathname.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX + "/")
+      && pathname.length > PRODUCT_DEVICE_TRANSPORT_PREFIX.length + 1);
 }
 
 export const PRODUCT_MCP_CORE_READ_TOOLS: ReadonlySet<string> = new Set([
