@@ -81,7 +81,7 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
     || pathname === PRODUCT_OWNER_MCP_DEVICES_PATH
     || (pathname.startsWith(PRODUCT_OWNER_MCP_DEVICES_PATH + "/")
-      && pathname.length > PRODUCT_OWNER_MCP_DEVICES_PATH.length + 1)
+      && isCanonicalUuid(pathname.slice((PRODUCT_OWNER_MCP_DEVICES_PATH + "/").length)))
     || pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
     || (pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")
       && pathname.length > PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH.length + 1)
