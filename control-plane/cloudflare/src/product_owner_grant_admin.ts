@@ -3,6 +3,7 @@ import {
   approveProjectWorkspaceResource,
   listOwnerMcpRemoteAuthority,
   listOwnerMcpDevices,
+  retireOwnerProductDevice,
   replaceOwnerMcpGrantGroup,
   revokeOwnerMcpGrantGroup,
   revokeProjectWorkspaceResource,
@@ -23,6 +24,7 @@ import { canonicalOwnerWorkspaceApproval } from "./project_workspace_issue_contr
 type Env = ProductAuthEnv & ProductPostgresEnv & {
   CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED?: string;
   CENTRAL_OWNER_SELECTION_ENABLED?: string;
+  OWNER_DEVICE_RETIRE_ENABLED?: string;
 };
 type Json = Record<string, unknown>;
 const ROOT = "/v3/owner/remote-authority";
@@ -95,12 +97,14 @@ export async function handleProductOwnerGrantAdmin(
     selectDevice?: typeof selectOwnerCentralDevice;
     replaceGrantGroup?: typeof replaceOwnerMcpGrantGroup;
     listDevices?: typeof listOwnerMcpDevices;
+    retireDevice?: typeof retireOwnerProductDevice;
   } = {},
 ): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname !== ROOT && url.pathname !== PRODUCT_OWNER_MCP_DEVICES_PATH
       && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
       && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
+      && !url.pathname.startsWith(PRODUCT_OWNER_MCP_DEVICES_PATH + "/")
       && !url.pathname.startsWith(GROUPS) && !url.pathname.startsWith(WORKSPACE_RESOURCES))
     return json({ ok: false, error: "not_found" }, 404);
 
@@ -194,6 +198,32 @@ export async function handleProductOwnerGrantAdmin(
         ownerUserId: ownerId, ...input,
       });
       return json({ ok: true, revoked });
+    }
+
+    if (url.pathname.startsWith(PRODUCT_OWNER_MCP_DEVICES_PATH + "/")) {
+      // Retirement is a separately approved DEV-only Owner action, never a
+      // side effect of inventory, discovery or ChatGPT device selection.
+      if (env.OWNER_DEVICE_RETIRE_ENABLED !== "enabled")
+        return json({ ok:false, error:"not_found" }, 404);
+      if (request.method !== "DELETE")
+        return json({ ok:false, error:"method_not_allowed" }, 405);
+      const deviceId = url.pathname.slice((PRODUCT_OWNER_MCP_DEVICES_PATH + "/").length);
+      if (!isCanonicalUuid(deviceId) || !hasExactQueryParameters(url, ["confirm"])
+          || url.searchParams.get("confirm") !== deviceId || request.body !== null)
+        return json({ ok:false, error:"owner_device_retire_invalid" }, 400);
+      const result = await (deps.retireDevice ?? retireOwnerProductDevice)(env,ownerId,deviceId);
+      if (result.ok === true && result.retired === true && result.device_id === deviceId)
+        return json(result);
+      if (result.ok !== false || typeof result.error !== "string")
+        return json({ok:false,error:"owner_device_retire_response_invalid"},502);
+      const status:Record<string,number> = {
+        owner_device_not_found:404,
+        owner_auth_ineligible:403,
+        owner_device_retire_forbidden:403,
+        owner_device_still_online:409,
+        owner_device_active_actions:409,
+      };
+      return json({ok:false,error:result.error},status[result.error] ?? 403);
     }
 
     if (url.pathname === PRODUCT_OWNER_MCP_DEVICES_PATH) {
