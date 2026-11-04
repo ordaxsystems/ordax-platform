@@ -2,6 +2,38 @@
 
 Canonical remote platform repository for OrdaX: provider-neutral Control Plane, OrdaX MCP, PostgreSQL/Supabase integration, Cloudflare edge foundation and provider connectors.
 
+## Estado de continuidade MCP / Aura — 04/11/2026
+
+**DEV Windows concluído:** a
+[issue #291](https://github.com/ordaxsystems/ordax-platform/issues/291)
+foi fechada em 04/11 com ações e recibos reais via ChatGPT MCP
+no Windows físico; cinco credenciais/devices DEV obsoletos foram
+revogados, e dois dispositivos atuais foram preservados.
+[PR #336](https://github.com/ordaxsystems/ordax-platform/pull/336)
+está integrada. **Não refazer** cleanup/inscrição/grants
+como um projeto ainda aberto. Não confundir esse E2E Windows
+com homologação da Aura, do OrdaX Desktop Native ou de toda
+a superfície de ferramentas.
+
+**Lacuna transversal ativa, outro owner:** a Aura lê a
+Store `CURRENT` do OS; `ordax-runtime/intelligence.app_catalog`
+pode consultar um registro empacotado **não sincronizado**
+com instalações atuais. A reconciliação autenticada Native
+pertence a [OS #2400](https://github.com/ordaxsystems/ordax-os/pull/2400)
+e aos owners OS/Runtime. A Platform só expõe grants e
+Device/Owner reais; não manter inventário de apps duplicado
+nem traduzir `authority=none` em concessão OAuth.
+[OS #2405](https://github.com/ordaxsystems/ordax-os/pull/2405)
+é uma release separada de Conta/Owner, gated em
+Supabase/Vercel/Worker. Não publicar Worker ou habilitar
+flags por esse handoff.
+
+**Leitura atual para agentes:**
+[`ordax-os/INTELLIGENCE-HANDOFF.md`](https://github.com/ordaxsystems/ordax-os/blob/main/INTELLIGENCE-HANDOFF.md).
+Os números de tools descritos abaixo são **catálogos de
+um corte** e nunca correspondem automaticamente ao conjunto
+habilitado em cada Device ou visível na conexão existente.
+
 ## ChatGPT integration
 
 The user-facing integration with ChatGPT is the **OrdaX custom MCP server** (**OrdaX MCP**), not a separate OrdaX “plugin” product.
