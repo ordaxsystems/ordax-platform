@@ -50,6 +50,7 @@ import {
 import {
   handleProductOwnerGrantAdmin,
   PRODUCT_OWNER_REMOTE_AUTHORITY_PATH,
+  PRODUCT_OWNER_MCP_DEVICES_PATH,
   PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH,
   PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH,
   PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH,
@@ -78,6 +79,7 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
     || pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
+    || pathname === PRODUCT_OWNER_MCP_DEVICES_PATH
     || pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
     || pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")
     || pathname.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX + "/");
@@ -369,6 +371,7 @@ export function createCanonicalProductMcpGateway(
     if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
         || url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
         || url.pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
+        || url.pathname === PRODUCT_OWNER_MCP_DEVICES_PATH
         || url.pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
         || url.pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")) {
       return handleProductOwnerGrantAdmin(request, env);

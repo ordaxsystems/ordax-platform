@@ -1119,6 +1119,20 @@ export async function revokeRemoteGrantGroup(
   });
 }
 
+/** Bounded Owner inventory: device metadata only, no grants or credentials.
+ * Grant detail and revocation continue through the existing Owner RPCs.
+ */
+export async function listOwnerMcpDevices(
+  env: ProductPostgresEnv,
+  ownerUserId: string,
+): Promise<JsonObject> {
+  if (!isCanonicalUuid(ownerUserId))
+    throw new ProductPostgresError("owner_devices_invalid", 400);
+  return callRpc<JsonObject>(env, "ordax_owner_mcp_devices_v1", {
+    p_owner_user_id: ownerUserId,
+  });
+}
+
 export async function listOwnerMcpRemoteAuthority(
   env: ProductPostgresEnv,
   ownerUserId: string,
