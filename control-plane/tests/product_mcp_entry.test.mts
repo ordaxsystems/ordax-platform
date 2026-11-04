@@ -213,6 +213,23 @@ test("Windows Owner project-scope read is admitted on trusted Worker ingress wit
   assert.equal(forbidden.status, 404);
 });
 
+test("Owner MCP device inventory is exact on the trusted Runtime ingress and still requires OAuth", async () => {
+  const { isProductTrustedClientPath } = await import("../cloudflare/src/product_mcp_entry.ts");
+  assert.equal(isProductTrustedClientPath("/v3/owner/devices"), true);
+  for (const path of [
+    "/v3/owner/devices/", "/v3/owner/devices/another",
+    "/v3/owner/studio", "/mcp", "/v3/owner/devices/delete",
+  ]) assert.equal(isProductTrustedClientPath(path), false, path);
+  const gateway = createCanonicalProductMcpGateway(ENV);
+  const url = "https://ordax-mcp.ordaxsystems.workers.dev/v3/owner/devices";
+  const response = await gateway(new Request(url));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { ok: false, error: "product_auth_required" });
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const forbidden = await gateway(new Request(url + "/another"));
+  assert.equal(forbidden.status, 404);
+});
+
 test("MCP discovery advertises core, computer control and promoted safe computer reads", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
