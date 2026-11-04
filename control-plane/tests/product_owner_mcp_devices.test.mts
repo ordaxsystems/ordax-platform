@@ -150,7 +150,7 @@ test("DEV retirement refuses live/unknown devices and unauthorized calls, then r
 
 test("DEV retirement SQL is offline-only, owner-scoped, credential-revoking and never deletes user files",()=>{
   const sql=readFileSync(path.resolve(here,
-    "../supabase/candidates/20261104040000_owner_product_device_retirement_v1.sql"),"utf8");
+    "../supabase/migrations/20261104040000_owner_product_device_retirement_v1.sql"),"utf8");
   assert.match(sql,/private\.ordax_trusted_actor_auth_eligible_v1/);
   assert.match(sql,/d\.state='active'|v_device\.state<>'active'/);
   assert.match(sql,/v_device\.channel<>'development'/);
