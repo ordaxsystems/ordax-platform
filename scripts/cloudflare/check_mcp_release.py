@@ -62,6 +62,7 @@ TRUSTED_CLIENT_INGRESS={
     "allowed_path_prefixes":[
         "/v3/device/transport/",
         "/v3/owner/remote-grant-groups/",
+        "/v3/owner/devices/",
     ],
 }
 
