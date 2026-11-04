@@ -118,7 +118,7 @@
       "conversation_owner": "user_chatgpt_account",
       "model_relay": false,
       "mcp_contract": "ordax",
-      "windows_delivery": "studio_plus_runtime",
+      "windows_delivery": "ordax_mcp_runtime",
       "ordax_os_delivery": "native_runtime",
       "current_validation_endpoint": "https://mcp.ordax.com.br/mcp",
       "device_tunnel_transport": "product_mcp_postgres_device_transport",
@@ -158,10 +158,16 @@
       "public_mcp_exposed": false,
       "authority": "same_worker_postgresql_oauth",
       "allowed_exact_paths": [
+        "/v3/product/usage",
         "/v3/product/session",
-        "/v3/product/device/setup",
+        "/v3/device/setup",
+        "/v3/product/device/presence",
         "/v3/product/device/central-session",
+        "/v3/owner/project-scope",
+        "/v3/owner/central-session-selections",
+        "/v3/owner/central-session-targets",
         "/v3/owner/remote-authority",
+        "/v3/owner/devices",
         "/v3/owner/remote-grant-groups"
       ],
       "allowed_path_prefixes": [

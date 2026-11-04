@@ -64,7 +64,7 @@ type Env = ProductAuthEnv & ProductPostgresEnv;
 
 // ChatGPT keeps the only public MCP identity on mcp.ordax.com.br. The
 // workers.dev hostname is a separate, path-restricted network ingress for the
-// installed Runtime and Studio when the branded custom domain is unreachable
+// installed OrdaX MCP Runtime when the branded custom domain is unreachable
 // from a device network. It reuses the same Worker, OAuth checks, PostgreSQL
 // authority and handlers; it is not a second MCP server or fallback authority.
 export const PRODUCT_TRUSTED_CLIENT_HOSTNAME = "ordax-mcp.ordaxsystems.workers.dev";
@@ -81,8 +81,10 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
     || pathname === PRODUCT_OWNER_MCP_DEVICES_PATH
     || pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
-    || pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")
-    || pathname.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX + "/");
+    || (pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")
+      && pathname.length > PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH.length + 1)
+    || (pathname.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX + "/")
+      && pathname.length > PRODUCT_DEVICE_TRANSPORT_PREFIX.length + 1);
 }
 
 export const PRODUCT_MCP_CORE_READ_TOOLS: ReadonlySet<string> = new Set([

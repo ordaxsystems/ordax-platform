@@ -87,6 +87,11 @@ class McpReleaseContract(unittest.TestCase):
         self.assertTrue(self.config["workers_dev"])
         self.assertFalse(self.config["preview_urls"])
         self.assertEqual(release["trusted_client_ingress"],TRUSTED_CLIENT_INGRESS)
+        self.assertIn("/v3/owner/devices",TRUSTED_CLIENT_INGRESS["allowed_exact_paths"])
+        self.assertEqual(
+            self.foundation["connection_modes"]["direct_user_chatgpt_mcp"]["windows_delivery"],
+            "ordax_mcp_runtime",
+        )
         self.assertFalse(release["trusted_client_ingress"]["public_mcp_exposed"])
         self.assertEqual(release["trusted_client_ingress"]["authority"],"same_worker_postgresql_oauth")
         self.assertNotIn("device_machine_ingress",release)

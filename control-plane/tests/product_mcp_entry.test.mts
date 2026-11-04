@@ -213,6 +213,55 @@ test("Windows Owner project-scope read is admitted on trusted Worker ingress wit
   assert.equal(forbidden.status, 404);
 });
 
+test("Trusted ingress manifest is the exact route inventory owned by the MCP router", async () => {
+  const { isProductTrustedClientPath } = await import("../cloudflare/src/product_mcp_entry.ts");
+  const manifest = JSON.parse(await readFile(new URL("../cloudflare/production-foundation.json", import.meta.url),"utf8"));
+  const allowed = manifest.mcp_release.trusted_client_ingress;
+  const exact = [
+    "/v3/product/usage",
+    "/v3/product/session",
+    "/v3/device/setup",
+    "/v3/product/device/presence",
+    "/v3/product/device/central-session",
+    "/v3/owner/project-scope",
+    "/v3/owner/central-session-selections",
+    "/v3/owner/central-session-targets",
+    "/v3/owner/remote-authority",
+    "/v3/owner/devices",
+    "/v3/owner/remote-grant-groups"
+  ];
+  assert.deepEqual(allowed.allowed_exact_paths,exact);
+  assert.deepEqual(allowed.allowed_path_prefixes,[
+    "/v3/device/transport/", "/v3/owner/remote-grant-groups/",
+  ]);
+  for (const path of exact) assert.equal(isProductTrustedClientPath(path),true,path);
+  for (const prefix of allowed.allowed_path_prefixes) {
+    assert.equal(isProductTrustedClientPath(prefix + "11111111-1111-4111-8111-111111111111"),true,prefix);
+    assert.equal(isProductTrustedClientPath(prefix),false,prefix);
+  }
+  for (const path of [
+    "/mcp","/health","/ready","/v3/product/device/setup",
+    "/v3/owner/studio","/v3/owner/devices/all","/v3/owner/unknown",
+  ]) assert.equal(isProductTrustedClientPath(path),false,path);
+});
+
+test("Owner MCP device inventory is exact on the trusted Runtime ingress and still requires OAuth", async () => {
+  const { isProductTrustedClientPath } = await import("../cloudflare/src/product_mcp_entry.ts");
+  assert.equal(isProductTrustedClientPath("/v3/owner/devices"), true);
+  for (const path of [
+    "/v3/owner/devices/", "/v3/owner/devices/another",
+    "/v3/owner/studio", "/mcp", "/v3/owner/devices/delete",
+  ]) assert.equal(isProductTrustedClientPath(path), false, path);
+  const gateway = createCanonicalProductMcpGateway(ENV);
+  const url = "https://ordax-mcp.ordaxsystems.workers.dev/v3/owner/devices";
+  const response = await gateway(new Request(url));
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { ok: false, error: "product_auth_required" });
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const forbidden = await gateway(new Request(url + "/another"));
+  assert.equal(forbidden.status, 404);
+});
+
 test("MCP discovery advertises core, computer control and promoted safe computer reads", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
