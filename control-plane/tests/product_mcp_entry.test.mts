@@ -632,18 +632,18 @@ test("pending device challenge does not enqueue any action or expand grants", as
   assert.equal(body.result.isError, true);
   assert.equal(body.result.structuredContent.error, "central_session_pending");
   assert.equal(opens, 1);
-  assert.equal(checks, 13);
-  assert.equal(waits, 12);
+  assert.equal(checks, 7);
+  assert.equal(waits, 6);
   assert.equal(calls.targets, 0);
   assert.equal(calls.getAction, 0);
 });
 
-test("first device operation waits through installed 20-second Runtime cadence", async () => {
+test("first device operation accepts native five-second cadence without the legacy long wait", async () => {
   let checks = 0, opens = 0, waits = 0;
   const confirmed = await resolveOrBootstrapAttestedSession(request("computer_directory_list"), ENV, {
     resolve: async () => {
       checks++;
-      return checks < 12 ? { ok: false, error: "central_session_unbound" } :
+      return checks < 4 ? { ok: false, error: "central_session_unbound" } :
         { ok: true, ownerUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           clientId: "product-client-123", deviceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" };
     },
@@ -652,8 +652,8 @@ test("first device operation waits through installed 20-second Runtime cadence",
   });
   assert.equal(confirmed.ok, true);
   assert.equal(opens, 1);
-  assert.equal(waits, 11);
-  assert.equal(checks, 12);
+  assert.equal(waits, 3);
+  assert.equal(checks, 4);
 });
 
 

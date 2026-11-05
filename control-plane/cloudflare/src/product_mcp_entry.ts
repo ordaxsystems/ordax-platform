@@ -212,9 +212,9 @@ type SessionRecoveryDependencies = Readonly<{
   wait?: (milliseconds: number) => Promise<void>;
 }>;
 
-// The installed Runtime 1.30.3 polls challenges every 20 seconds. Keep one
-// bounded legacy compatibility window until managed Runtime upgrades converge
-// on the existing five-second heartbeat. Device confirmation is still required.
+// The current native Runtime polls Central challenges every five seconds.
+// The twelve-second bound covers two polls plus scheduling margin. A Runtime
+// confirmation remains mandatory before an action can be authorized.
 // Public, bounded remediation codes. They explain why a trusted session was
 // not established, but never grant a device or dispatch an action.
 const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
@@ -227,7 +227,7 @@ const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
   "central_session_revoked",
   "central_session_target_mismatch",
 ]);
-const SESSION_CONFIRMATION_ATTEMPTS = 12;
+const SESSION_CONFIRMATION_ATTEMPTS = 6;
 const SESSION_CONFIRMATION_INTERVAL_MS = 2000;
 function waitForSessionConfirmation(milliseconds: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -258,7 +258,7 @@ export async function resolveOrBootstrapAttestedSession(
     return result;
   }
   // MCP may request a ticket, but only a separately signed Owner can choose
-  // the target; do not poll for 24 seconds or infer a PC from MCP arguments.
+  // the target; do not infer a PC from MCP arguments or wait on Owner consent.
   if ((payload as Record<string, unknown>).status === "awaiting_owner") {
     const challengeId = (payload as Record<string, unknown>).challenge_id;
     // A challenge UUID is only an Owner-visible correlation reference, never
