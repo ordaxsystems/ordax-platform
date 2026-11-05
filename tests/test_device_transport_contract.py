@@ -27,7 +27,7 @@ class DeviceTransportContractTests(unittest.TestCase):
             block,
         )
         self.assertIn("runtimeKind: runtimeKind as RuntimeKind", block)
-        self.assertIn("const capabilityDigest = await canonicalDeviceHeartbeatDigest(body)", block)
+        self.assertIn("const capabilityDigest = canonicalDeviceHeartbeatDigest(body)", block)
         self.assertIn("recordProductPresence(env,", block)
         self.assertNotIn("createProductGrant", block)
         self.assertNotIn("dispatch", block)

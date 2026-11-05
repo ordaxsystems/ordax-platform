@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -133,54 +133,45 @@ test("device transport source has no D1, operator bearer, websocket queue, pairi
 test("device heartbeat persists one canonical digest, never a capability array", () => {
   const source = fs.readFileSync(SRC, "utf8");
   assert.equal(source.includes('body.capabilities_digest'), true);
-  assert.equal(source.includes('readBoundedJsonObject(request, LEGACY_HEARTBEAT_MAX_BODY_BYTES)'), true);
-  assert.equal(source.includes('48 * 1024'), true);
-  assert.equal(source.includes('LEGACY_HEARTBEAT_MAX_CAPABILITIES = 1024'), true);
-  assert.equal(source.includes('LEGACY_HEARTBEAT_MAX_NAME_CODEPOINTS = 160'), true);
+  assert.equal(source.includes('readBoundedJsonObject(request, 1024)'), true);
+  assert.equal(source.includes('48 * 1024'), false);
+  assert.equal(source.includes('LEGACY_HEARTBEAT_MAX_CAPABILITIES'), false);
+  assert.equal(source.includes('LEGACY_HEARTBEAT_MAX_NAME_CODEPOINTS'), false);
   assert.equal(source.includes('capabilityDigest,'), true);
   assert.equal(source.includes('capabilities: values'), false);
   assert.equal(source.includes('env.DB'), false);
 });
 
-test("legacy installed Runtime heartbeat hashes sorted unique action names exactly like connector SSOT", async () => {
-  const input = { status: "online", agent_version: "1.30.3", capabilities: ["b", "a", "a"] };
-  const expected = createHash("sha256").update('["a","b"]', "utf8").digest("hex");
-  assert.equal(await canonicalDeviceHeartbeatDigest(input), expected);
-  assert.equal(
-    await canonicalDeviceHeartbeatDigest({ capabilities_digest: expected.toUpperCase() }),
-    expected,
-  );
-  const unicode = ["🐈", "é", "z", "é"];
-  const canonicalUnicode = JSON.stringify(["z", "é", "🐈"]);
-  assert.equal(await canonicalDeviceHeartbeatDigest({ capabilities: unicode }),
-    createHash("sha256").update(canonicalUnicode, "utf8").digest("hex"));
-  assert.equal(await canonicalDeviceHeartbeatDigest({ capabilities: [] }),
-    createHash("sha256").update("[]", "utf8").digest("hex"));
+test("canonical heartbeat accepts only digest-based Native and desktop payloads", () => {
+  const digest = "ab".repeat(32);
+  assert.equal(canonicalDeviceHeartbeatDigest({
+    status: "online", agent_version: "1.31.0", capabilities_digest: digest,
+  }), digest);
+  assert.equal(canonicalDeviceHeartbeatDigest({
+    status: "busy", agent_version: "1.31.0", runtime_kind: "ordax-os",
+    capabilities_digest: digest.toUpperCase(),
+  }), digest);
 });
 
-test("heartbeat bridge rejects mixed schemas, untrusted authority metadata and oversized legacy inputs", async () => {
-  const valid = "a".repeat(64);
+test("retired capability arrays, mixed schemas and forged authority fields fail closed", () => {
+  const digest = "a".repeat(64);
   const variants = [
     {},
-    { capabilities_digest: valid, capabilities: ["x"] },
+    { status: "online", agent_version: "1.30.3", capabilities: ["a", "b"] },
+    { capabilities: [] },
+    { capabilities_digest: digest, capabilities: ["x"] },
     { capabilities_digest: "x" },
     { capabilities_digest: 5 },
     { capabilities_digest: [] },
-    { capabilities: "computer.text_read" },
-    { capabilities: [null] },
-    { capabilities: [{}] },
-    { capabilities: [""] },
-    { capabilities: ["x".repeat(161)] },
-    { capabilities: Array.from({ length: 1025 }, () => "x") },
-    { status: "online", agent_version: "1.30.3", capabilities: ["x"], device_id: "spoof" },
-    { status: "online", agent_version: "1.30.3", capabilities: ["x"], owner_user_id: "spoof" },
-    { status: "online", agent_version: "1.30.3", capabilities: ["x"], grant: { allow: true } },
+    { capabilities_digest: digest, device_id: "spoof" },
+    { capabilities_digest: digest, owner_user_id: "spoof" },
+    { capabilities_digest: digest, grant: { allow: true } },
+    { capabilities_digest: digest, runtime_kind: "desktop-agent", extra: true },
   ];
   for (const body of variants) {
-    assert.equal(await canonicalDeviceHeartbeatDigest(body), null, JSON.stringify(body).slice(0, 150));
+    assert.equal(canonicalDeviceHeartbeatDigest(body), null, JSON.stringify(body).slice(0, 150));
   }
 });
-
 test("PostgreSQL report JSONB rejects NUL recursively without rejecting text escaped for display", () => {
   const nul = String.fromCharCode(0);
   assert.equal(isProductReportJsonbSafe({ ok: true, data: { stdout: "line" + nul + "tail" } }), false);
