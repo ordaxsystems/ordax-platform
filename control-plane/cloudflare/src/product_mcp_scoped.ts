@@ -79,7 +79,7 @@ export function scopeRelayMcp(handlers: OrdaxMcpHandlers, resolver: Resolver, ve
       return json({ok:true,targets:[{device_id:scope.deviceId,
         device_name:typeof item.device_name === "string" ? item.device_name.slice(0,128) : scope.deviceId,
         online:typeof item.online === "boolean" ? item.online : null,
-        grants:[],grant_groups:[]}]});
+        grant_groups:[]}]});
     },
     async createAction(request) {
       const scope = await scopeFor(request);

@@ -73,6 +73,8 @@ test("3 signed Product OAuth clients can read only their device's accepted MCP r
       const listed=target.body.result.structuredContent.targets;
       assert.equal(listed.length,1);
       assert.equal(listed[0].device_id,p.device);
+      assert.equal(Object.hasOwn(listed[0],"grants"),false);
+      assert.deepEqual(listed[0].grant_groups,[]);
       for(const other of people.filter(x=>x!==p)){
         assert.ok(!JSON.stringify(listed).includes(other.device));
         assert.ok(!JSON.stringify(listed).includes(other.privateResult));

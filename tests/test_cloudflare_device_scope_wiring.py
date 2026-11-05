@@ -62,7 +62,8 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
         for handler in ("createOwnerDeviceComputerGrant", "listOwnerDeviceComputerGrants", "revokeOwnerDeviceComputerGrant"):
             self.assertNotIn(handler, self.worker)
             self.assertNotIn(handler, self.mcp)
-        self.assertIn('"/v3/product/device-computer-grants"', self.worker)
+        self.assertEqual(self.worker.count('"device-computer-grants"'), 1)
+        self.assertIn('path.startsWith("/v3/product/" + segment)', self.worker)
         self.assertIn('error: "legacy_product_grants_retired"', self.worker)
 
     def test_cloudflare_mcp_device_actions_do_not_require_project(self) -> None:
