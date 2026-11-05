@@ -171,8 +171,6 @@ export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_PROJECT_NATIVE_TOOLS,
   ...ATTESTED_SPECIAL_TOOLS,
 ]);
-// Compatibility export for callers/tests that previously consumed the read-only name.
-export const PRODUCT_MCP_DIRECT_READ_TOOLS = PRODUCT_MCP_DIRECT_TOOLS;
 type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction" | "recordUsage" | "usageFingerprintKey">;
 function respond(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
