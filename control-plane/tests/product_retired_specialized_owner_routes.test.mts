@@ -6,8 +6,8 @@ const entry = readFileSync(new URL("../cloudflare/src/index.ts", import.meta.url
 
 test("legacy Product owner grant endpoints fail closed without D1 handlers", () => {
   for (const segment of ["device-computer-grants", "device-intelligence-grants", "project-capability-grants"]) {
-    assert.ok(entry.includes(`"/v3/product/${segment}"`));
-    assert.ok(entry.includes(`"${segment}"`));
+    assert.equal(entry.split(String.fromCharCode(34) + segment + String.fromCharCode(34)).length - 1, 1, "retired route has one owner");
+    assert.ok(entry.includes("path.startsWith(\"/v3/product/\" + segment)"));
   }
   assert.match(entry, /error: "legacy_product_grants_retired" \}, 410/);
   for (const handler of [

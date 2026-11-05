@@ -190,13 +190,9 @@ export default {
     const legacy = path === "/v3/device/ws"
       || path === "/v3/device/recover-report" || path === "/v3/devices" || path === "/v3/jobs"
       || path.startsWith("/v3/jobs/") || path.startsWith("/v3/artifacts/")
-      || path.startsWith("/v3/product-grants") || path.startsWith("/v3/product/device-links")
-      || path.startsWith("/v3/product/device-intelligence-grants")
-      || path.startsWith("/v3/product/device-computer-grants")
-      || path.startsWith("/v3/product/project-capability-grants")
+      || path.startsWith("/v3/product-grants")
       || path === "/v3/product/actions" || path === "/v3/product/audit"
-      || path === "/oauth/consent" || path === "/.well-known/oauth-protected-resource"
-      || path === "/v3/device/product-pairings";
+      || path === "/oauth/consent";
     if (legacy) return json({ok:false,error:"legacy_endpoint_retired"},410);
     return json({ok:false,error:"not_found"},404);
   },

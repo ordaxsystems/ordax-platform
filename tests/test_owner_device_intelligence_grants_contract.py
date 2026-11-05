@@ -17,7 +17,8 @@ class IntelligenceAuthorizationRetirementTests(unittest.TestCase):
 
     def test_old_d1_grant_writers_are_absent_from_entrypoint(self):
         worker = WORKER.read_text(encoding="utf-8")
-        self.assertIn('"/v3/product/device-intelligence-grants"', worker)
+        self.assertEqual(worker.count('"device-intelligence-grants"'), 1)
+        self.assertIn('path.startsWith("/v3/product/" + segment)', worker)
         self.assertIn('error: "legacy_product_grants_retired"', worker)
         for handler in ("createOwnerDeviceIntelligenceGrant", "listOwnerDeviceIntelligenceGrants", "revokeOwnerDeviceIntelligenceGrant"):
             self.assertNotIn(handler, worker)
