@@ -40,12 +40,14 @@ test("canonical target identity, offline presence and authorized grant groups re
   assert.ok(!JSON.stringify(result).includes("internal")); assert.ok(!JSON.stringify(result).includes("never"));
 });
 
-test("legacy presence stays unknown and timestamps do not manufacture connectivity", async () => {
+test("retired D1 target fields cannot restore obsolete grants, names or fake connectivity", async () => {
   const { body } = await listTargets([{ device_id: "legacy", name: "Legado", last_seen_at: "2026-10-09T12:00:00Z", grants: [{ space_id: "space", actions: ["git.status"], projects: ["demo"] }] }]);
   const target = body.result.structuredContent.targets[0];
-  assert.equal(target.name, "Legado"); assert.equal(target.online, null);
-  assert.deepEqual(target.grants, [{ space_id: "space", actions: ["git.status"], projects: ["demo"] }]);
+  assert.equal(target.name, "ORDAX device"); assert.equal(target.online, null);
+  assert.equal(Object.hasOwn(target, "grants"), false);
   assert.deepEqual(target.grant_groups, []);
+  assert.ok(!JSON.stringify(body).includes("git.status"));
+  assert.ok(!JSON.stringify(body).includes("Legado"));
 });
 
 test("invalid presence, scope data and unbounded groups cannot become capabilities", async () => {
@@ -62,16 +64,16 @@ test("invalid presence, scope data and unbounded groups cannot become capabiliti
 test("mixed desktop and mobile discovery exposes metadata without executing or granting file access", async () => {
   const { body } = await listTargets([
     { device_id: "owned-mobile", device_name: "Telefone", device_kind: "mobile", online: true,
-      grants: [], grant_groups: [], files: ["private-phone-file"], camera: true, execute: true },
+      grant_groups: [], files: ["private-phone-file"], camera: true, execute: true },
     { device_id: "owned-desktop", device_name: "Estação", device_kind: "desktop", online: false,
-      grants: [], grant_groups: [] },
+      grant_groups: [] },
   ]);
   const targets = body.result.structuredContent.targets;
   assert.equal(targets.length, 2);
   assert.equal(targets[0].device_id, "owned-mobile");
   assert.equal(targets[0].device_kind, "mobile");
   assert.equal(targets[0].online, true);
-  assert.deepEqual(targets[0].grants, []);
+  assert.equal(Object.hasOwn(targets[0], "grants"), false);
   assert.deepEqual(targets[0].grant_groups, []);
   assert.equal(targets[1].device_kind, "desktop");
   assert.equal(targets[1].online, false);
@@ -124,8 +126,8 @@ test("routing never promotes discovery, expired, project or incomplete grants",a
   const partial=(await listTargets([{device_id:desktop,grant_groups:Array(128).fill(discovery)}]))
     .body.result.structuredContent;
   assert.equal("client_device_routing" in partial,false);
-  const legacy=(await listTargets([{device_id:desktop,grants:[]}])).body.result.structuredContent;
-  assert.equal("client_device_routing" in legacy,false);
+  const missingGroups=(await listTargets([{device_id:desktop}])).body.result.structuredContent;
+  assert.equal("client_device_routing" in missingGroups,false);
 });
 
 test("multiple action targets remain ambiguous, never automatically selected",async()=>{

@@ -461,18 +461,6 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
     const target = raw as JsonObject;
     if (typeof target.device_id !== "string" || !/^[a-zA-Z0-9:_-]{1,128}$/.test(target.device_id)) return [];
-    const rawGrants = Array.isArray(target.grants) ? target.grants : [];
-    const grants = rawGrants.flatMap((rawGrant) => {
-      if (!rawGrant || typeof rawGrant !== "object" || Array.isArray(rawGrant)) return [];
-      const grant = rawGrant as JsonObject;
-      return [{
-        space_id: typeof grant.space_id === "string" ? grant.space_id : null,
-        actions: Array.isArray(grant.actions) ? grant.actions.filter((item) => typeof item === "string") : [],
-        projects: Array.isArray(grant.projects) ? grant.projects.filter((item) => typeof item === "string") : [],
-      }];
-    });
-    // Canonical PostgreSQL targets use device_name/grant_groups; legacy D1
-    // uses name/grants. Both are descriptive projections of authorized rows.
     const rawGroups = Array.isArray(target.grant_groups) ? target.grant_groups : [];
     const grantGroups = rawGroups.slice(0, 128).flatMap((rawGroup) => {
       if (!rawGroup || typeof rawGroup !== "object" || Array.isArray(rawGroup)) return [];
@@ -493,7 +481,7 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
         capabilities,
       }];
     });
-    const name = boundedText(target.device_name) ?? boundedText(target.name) ?? "ORDAX device";
+    const name = boundedText(target.device_name) ?? "ORDAX device";
     return [{
       device_id: typeof target.device_id === "string" ? target.device_id : "",
       name,
@@ -503,7 +491,6 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
       device_kind: boundedText(target.device_kind),
       channel: boundedText(target.channel),
       link_id: typeof target.link_id === "string" ? target.link_id : null,
-      grants,
       grant_groups: grantGroups,
     }];
   });
