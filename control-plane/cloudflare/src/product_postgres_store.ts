@@ -416,19 +416,6 @@ const RPC_SPECS = {
     keys: ["p_device_id", "p_token_sha256"],
     casts: ["uuid", "text"],
   },
-  ordax_import_legacy_product_device_v1: {
-    keys: [
-      "p_device_id",
-      "p_owner_user_id",
-      "p_display_name",
-      "p_device_kind",
-      "p_channel",
-      "p_token_sha256",
-      "p_machine_binding_sha256",
-      "p_last_seen_at",
-    ],
-    casts: ["uuid", "uuid", "text", "text", "text", "text", "text", "timestamptz"],
-  },
 } as const;
 
 type RpcName = keyof typeof RPC_SPECS;
@@ -1067,31 +1054,6 @@ export async function authenticateProductDevice(
   return callRpc<boolean>(env, "ordax_authenticate_product_device_v1", {
     p_device_id: input.deviceId,
     p_token_sha256: input.tokenSha256,
-  });
-}
-
-export async function importLegacyProductDevice(
-  env: ProductPostgresEnv,
-  input: {
-    deviceId: string;
-    ownerUserId: string;
-    displayName: string;
-    deviceKind: "desktop" | "laptop" | "mobile" | "server" | "other";
-    channel: "stable" | "development";
-    tokenSha256: string;
-    machineBindingSha256: string;
-    lastSeenAt: string | null;
-  },
-): Promise<JsonObject> {
-  return callRpc<JsonObject>(env, "ordax_import_legacy_product_device_v1", {
-    p_device_id: input.deviceId,
-    p_owner_user_id: input.ownerUserId,
-    p_display_name: input.displayName,
-    p_device_kind: input.deviceKind,
-    p_channel: input.channel,
-    p_token_sha256: input.tokenSha256,
-    p_machine_binding_sha256: input.machineBindingSha256,
-    p_last_seen_at: input.lastSeenAt,
   });
 }
 

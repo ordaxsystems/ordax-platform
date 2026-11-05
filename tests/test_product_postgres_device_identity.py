@@ -54,22 +54,11 @@ class ProductPostgresDeviceIdentityTests(unittest.TestCase):
             "ordax_enroll_product_device_v1",
             "ordax_identify_product_device_v1",
             "ordax_authenticate_product_device_v1",
-            "ordax_import_legacy_product_device_v1",
         ):
             self.assertIn(f"create or replace function public.{rpc}", self.sql.lower())
             self.assertIn(f"grant execute on function public.{rpc}", self.sql.lower())
         self.assertIn("from public, anon, authenticated", self.sql.lower())
         self.assertIn("to service_role;", self.sql.lower())
-
-    def test_legacy_import_preserves_device_uuid(self) -> None:
-        lowered = self.sql.lower()
-        self.assertIn("p_device_id uuid", lowered)
-        self.assertIn(
-            "p_device_id, p_owner_user_id, p_device_id::text",
-            lowered,
-        )
-        self.assertIn("'device_id', p_device_id", lowered)
-        self.assertNotIn("p_legacy_device_id := extensions.gen_random_uuid()", lowered)
 
     def test_enrollment_is_owner_bound_and_rate_limited(self) -> None:
         lowered = self.sql.lower()
@@ -79,7 +68,7 @@ class ProductPostgresDeviceIdentityTests(unittest.TestCase):
         self.assertIn("v_next_count > 10", lowered)
         self.assertIn("pg_advisory_xact_lock", lowered)
 
-    def test_legacy_product_setup_uses_only_canonical_postgres_identity(self) -> None:
+    def test_product_setup_uses_only_canonical_postgres_identity(self) -> None:
         worker = (
             ROOT / "control-plane/cloudflare/src/index.ts"
         ).read_text(encoding="utf-8")
@@ -153,16 +142,16 @@ class ProductPostgresDeviceIdentityTests(unittest.TestCase):
             "enrollProductDevice",
             "identifyProductDevice",
             "authenticateProductDevice",
-            "importLegacyProductDevice",
         ):
             self.assertIn(f"function {method}", self.adapter)
         for rpc in (
             "ordax_enroll_product_device_v1",
             "ordax_identify_product_device_v1",
             "ordax_authenticate_product_device_v1",
-            "ordax_import_legacy_product_device_v1",
         ):
             self.assertIn(rpc, self.adapter)
+        self.assertNotIn("importLegacyProductDevice", self.adapter)
+        self.assertNotIn("ordax_import_legacy_product_device_v1", self.adapter)
         lowered = self.adapter.lower()
         self.assertIn("tokensha256", lowered)
         self.assertIn("machinebindingsha256", lowered)
