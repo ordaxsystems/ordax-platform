@@ -166,57 +166,25 @@ async function wireJob(job: ProductRemoteJob): Promise<Json> {
   };
 }
 
-// Transitional wire compatibility: installed Runtime 1.30.3 sends the bounded
-// list while current Runtime sends the precomputed digest. Both represent the
-// same canonical digest; PostgreSQL still persists *only* the hash. Remove this
-// list branch after managed Runtime upgrades are proven in production.
-const LEGACY_HEARTBEAT_MAX_CAPABILITIES = 1024;
-const LEGACY_HEARTBEAT_MAX_NAME_CODEPOINTS = 160;
-const LEGACY_HEARTBEAT_MAX_BODY_BYTES = 48 * 1024;
-
-function compareCapabilityCodepoints(left: string, right: string): number {
-  const a = Array.from(left, char => char.codePointAt(0)!);
-  const b = Array.from(right, char => char.codePointAt(0)!);
-  for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
-    if (a[index] !== b[index]) return a[index] - b[index];
-  }
-  return a.length - b.length;
+// Native and Desktop Runtimes publish one bounded capability digest.
+// Reject old capability lists, unknown authority fields and schema ambiguity.
+export function canonicalDeviceHeartbeatDigest(body: Json): string | null {
+  if (Object.keys(body).some(key => key !== "status" && key !== "agent_version"
+      && key !== "capabilities_digest" && key !== "runtime_kind")) return null;
+  const digest = typeof body.capabilities_digest === "string"
+    ? body.capabilities_digest.trim().toLowerCase() : "";
+  return HEX64.test(digest) ? digest : null;
 }
-
-export async function canonicalDeviceHeartbeatDigest(body: Json): Promise<string | null> {
-  const modern = Object.prototype.hasOwnProperty.call(body, "capabilities_digest");
-  const legacy = Object.prototype.hasOwnProperty.call(body, "capabilities");
-  // Never trust an ambiguous schema or an empty/missing authority field.
-  if (modern === legacy) return null;
-  if (modern) {
-    const digest = typeof body.capabilities_digest === "string"
-      ? body.capabilities_digest.trim().toLowerCase() : "";
-    return HEX64.test(digest) ? digest : null;
-  }
-  // Only installed, authenticated devices reach this code path. A legacy
-  // heartbeat grants no new action, project, Space or user authority.
-  if (Object.keys(body).some(key =>
-    key !== "status" && key !== "agent_version" && key !== "capabilities")) return null;
-  const values = body.capabilities;
-  if (!Array.isArray(values) || values.length > LEGACY_HEARTBEAT_MAX_CAPABILITIES
-      || values.some(item => typeof item !== "string" || item.length === 0
-        || Array.from(item).length > LEGACY_HEARTBEAT_MAX_NAME_CODEPOINTS)) return null;
-  const normalized = [...new Set(values as string[])].sort(compareCapabilityCodepoints);
-  // Same SSOT as ordax_connector.capabilities.capability_digest:
-  // sorted unique strings, compact UTF-8 JSON, SHA-256.
-  return sha256Hex(JSON.stringify(normalized));
-}
-
 async function heartbeat(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
-  // Canonical agents send a 64-byte digest. The higher body ceiling exists
-  // solely for the bounded legacy format, not for new device capabilities.
-  const body = await readBoundedJsonObject(request, LEGACY_HEARTBEAT_MAX_BODY_BYTES);
+  // Canonical agents send only a bounded digest and provenance fields.
+  // Old capability arrays and oversized payloads are rejected.
+  const body = await readBoundedJsonObject(request, 1024);
   if (!body) return respond({ ok: false, error: "heartbeat_invalid" }, 400);
   const status = body.status;
   const agentVersion = typeof body.agent_version === "string" ? body.agent_version.trim() : "";
-  const capabilityDigest = await canonicalDeviceHeartbeatDigest(body);
-  // Older desktop Runtime heartbeats intentionally omit provenance and remain
-  // "desktop-agent". A Native OS Runtime must declare its actual kind; this
+  const capabilityDigest = canonicalDeviceHeartbeatDigest(body);
+  // The active Windows desktop-agent omits runtime_kind and remains
+  // "desktop-agent". Native OS Runtimes must declare their actual kind; this
   // metadata is never a capability grant or an attested action session.
   const runtimeKind = body.runtime_kind === undefined ? "desktop-agent" : body.runtime_kind;
   if ((status !== "online" && status !== "busy" && status !== "offline")
