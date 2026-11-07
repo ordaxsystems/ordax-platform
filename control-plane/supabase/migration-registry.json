@@ -1089,6 +1089,18 @@
         "blob_sha": "75fbfbdbba17b1791403b331b1b6a456bca53400"
       },
       "ledger_name": "owner_product_device_retirement_v1"
+    },
+    {
+      "name": "20261107133613_forge_read_authorization_v1",
+      "applied_version": "20261107165039",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261107133613_forge_read_authorization_v1.sql",
+        "blob_sha": "284479d5aa965f898ba99cc33917937e5f232bc2"
+      },
+      "ledger_name": "forge_read_authorization_v1"
     }
   ]
 }

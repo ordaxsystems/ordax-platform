@@ -18,7 +18,7 @@ test('device route resolves only a fenced action; model identity fields never re
     calls.push({sql,args});
     if(sql.includes('ordax_authenticate_product_device_v1'))
       return {rows:[{result:authenticated}]};
-    assert.match(sql,/select public\.ordax_orchestrator_read_authorization_v1/);
+    assert.match(sql,/select public\.ordax_forge_read_authorization_v1/);
     return {rows:[{result:permitted?{ok:true,authorization:{fixture:true}}:
       {ok:false,error:'orchestrator_authorization_required'}}]};
   });
@@ -44,10 +44,10 @@ test('device route resolves only a fenced action; model identity fields never re
 });
 
 test('Lab read profile is independent from every Computer Control profile',()=>{
-  assert.deepEqual(OWNER_MCP_GRANT_PROFILES['orchestrator-app-read'],{
-    scope:'device',capabilities:[{capability:'orchestrator.app_read',accessMode:'read'}]});
+  assert.deepEqual(OWNER_MCP_GRANT_PROFILES['forge-app-read'],{
+    scope:'device',capabilities:[{capability:'forge.app_read',accessMode:'read'}]});
   for(const [name,profile] of Object.entries(OWNER_MCP_GRANT_PROFILES)){
-    if(name==='orchestrator-app-read')continue;
-    assert.equal(profile.capabilities.some(c=>c.capability==='orchestrator.app_read'),false,name);
+    if(name==='forge-app-read')continue;
+    assert.equal(profile.capabilities.some(c=>c.capability==='forge.app_read'),false,name);
   }
 });

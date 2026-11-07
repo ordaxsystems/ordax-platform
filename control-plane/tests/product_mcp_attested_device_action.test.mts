@@ -595,7 +595,7 @@ test("Owner clipboard and guarded process control enqueue exact write authority"
 });
 
 test("Orchestrator status enqueues only a dedicated read grant with no model identity or path", async () => {
-  const action = "orchestrator.app_read";
+  const action = "forge.app_read";
   assert.equal(validAttestedDeviceActionArguments(action, {}), true);
   for (const args of [{ path: "C:/fake" }, { grant_id: OWNER }, { operation: "tasks.create" }]) {
     assert.equal(validAttestedDeviceActionArguments(action, args), false);
@@ -603,7 +603,7 @@ test("Orchestrator status enqueues only a dedicated read grant with no model ide
   let calls = 0;
   const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
     authenticate: identity,
-    listTargets: async () => catalog(grantGroup("orchestrator-app-read", action, "read")),
+    listTargets: async () => catalog(grantGroup("forge-app-read", action, "read")),
     enqueue: async (_env, input) => {
       calls++;
       assert.equal(input.capability, action);

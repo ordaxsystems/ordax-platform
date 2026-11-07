@@ -76,7 +76,7 @@ const ATTESTED_PROCESS_MUTATION_ACTIONS = new Set(["computer.terminate_process"]
 const ATTESTED_TERMINAL_ACTIONS = new Set(["computer.terminal_exec"]);
 const ATTESTED_DEVICE_PROCESS_ACTIONS = new Set(["computer.process_start", "computer.process_status", "computer.process_list", "computer.process_logs", "computer.process_write_stdin", "computer.process_stop"]);
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
-  "orchestrator.app_read",
+  "forge.app_read",
   ...NATIVE_SURFACE_DEVICE_ACTIONS,
   ...OBSERVE_ACTIONS,
   ...INTERACTIVE_ACTIONS,
@@ -107,7 +107,7 @@ function validAttestedDevice(value: AttestedMcpDevice | null): value is Attested
 }
 
 function requiredProfile(action: string): string | null {
-  if (action === "orchestrator.app_read") return "orchestrator-app-read";
+  if (action === "forge.app_read") return "forge-app-read";
   if (action === "ordax.surface.status") return "ordax-surface-read";
   if (action === "ordax.surface.open") return "ordax-surface-control";
   // Observation remains the least-privilege answer for the five capabilities
@@ -167,7 +167,7 @@ function validButton(value: unknown): boolean {
 export function validAttestedDeviceActionArguments(action: string, value: unknown): value is Json {
   if (!ATTESTED_MCP_DEVICE_ACTIONS.has(action) || !isRecord(value)) return false;
   const keys = Object.keys(value);
-  if (action === "orchestrator.app_read" || action === "ordax.surface.status") return keys.length === 0;
+  if (action === "forge.app_read" || action === "ordax.surface.status") return keys.length === 0;
   if (action === "ordax.surface.open") return keysOnly(value, ["appId"])
     && ["account", "settings", "system", "store"].includes(value.appId as string);
 
@@ -427,7 +427,7 @@ export function catalogAllowsAttestedDeviceAction(
     if (expires !== undefined && expires !== null
       && (typeof expires !== "string" || !Number.isFinite(Date.parse(expires)))) return false;
     if (typeof expires === "string" && Date.parse(expires) <= Date.now()) continue;
-    if (action === "orchestrator.app_read" && rawGroup.profile_key !== profile) continue;
+    if (action === "forge.app_read" && rawGroup.profile_key !== profile) continue;
     // OrdaX Native authority cannot be inherited from Windows full-computer-control.
     if (NATIVE_SURFACE_DEVICE_ACTIONS.has(action)
       && !(rawGroup.profile_key === profile
