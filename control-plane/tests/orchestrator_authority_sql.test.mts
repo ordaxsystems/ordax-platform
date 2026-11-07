@@ -6,7 +6,7 @@ import {randomUUID} from 'node:crypto';
 const require=createRequire(new URL('../cloudflare/package.json',import.meta.url));
 const {PGlite}=require('@electric-sql/pglite');
 const migrations=new URL('../supabase/migrations/',import.meta.url);
-const migration='20261021183531_orchestrator_read_authorization_v1.sql';
+const migration='20261107133613_forge_read_authorization_v1.sql';
 const read=(name:string)=>fs.readFileSync(new URL(name,migrations),'utf8');
 
 test('actual PostgreSQL resolver fences live App reads, grant/consent revocation and role access',async()=>{
@@ -48,17 +48,17 @@ test('actual PostgreSQL resolver fences live App reads, grant/consent revocation
     await db.query("insert into public.ordax_product_devices values ($1,$2,'active')",[device,owner]);
     await db.query(`insert into public.ordax_remote_capability_grants(grant_id,owner_user_id,device_id,
       client_kind,client_id,capability,access_mode,state,scope_kind,profile_key)
-      values ($1,$2,$3,'product-mcp',$4,'orchestrator.app_read','read','active','device','orchestrator-app-read')`,[grant,owner,device,client]);
+      values ($1,$2,$3,'product-mcp',$4,'forge.app_read','read','active','device','forge-app-read')`,[grant,owner,device,client]);
     await db.query(`insert into private.ordax_product_action_requests values
       ($1,$2,$3,$4,$5,1,$6,'fixture-boot','running',now()+interval '2 minutes',now()+interval '10 minutes',
-       'orchestrator.app_read','read','product-mcp',$7,null,null,$8,$9)`,[request,device,effect,attempt,lease,agent,client,owner,grant]);
+       'forge.app_read','read','product-mcp',$7,null,null,$8,$9)`,[request,device,effect,attempt,lease,agent,client,owner,grant]);
     const args=[device,request,effect,attempt,lease,1,agent,'fixture-boot'];
-    const sql='select public.ordax_orchestrator_read_authorization_v1($1,$2,$3,$4,$5,$6,$7,$8) as result';
+    const sql='select public.ordax_forge_read_authorization_v1($1,$2,$3,$4,$5,$6,$7,$8) as result';
     const call=async(values=args)=>(await db.query(sql,values)).rows[0].result;
     const result=await call();
     assert.equal(result.ok,true);assert.equal(result.authorization.subject_id,owner);
     assert.equal(result.authorization.client_id,client);assert.equal(result.authorization.grant_id,grant);
-    assert.equal(result.authorization.app_id,'br.com.ordax.orchestrator.lab');
+    assert.equal(result.authorization.app_id,'br.com.ordax.forge');
     assert.ok(result.authorization.expires_at_ms>Date.now());
     assert.ok(result.authorization.expires_at_ms<=Date.now()+120000);
     for(let index=0;index<args.length;index++){
@@ -88,13 +88,13 @@ test('actual PostgreSQL resolver fences live App reads, grant/consent revocation
       await db.exec('begin');await db.exec(mutation);
       assert.equal((await call()).ok,false,mutation);await db.exec('rollback');
     }
-    const signature='public.ordax_orchestrator_read_authorization_v1(uuid,uuid,uuid,uuid,uuid,bigint,uuid,text)';
+    const signature='public.ordax_forge_read_authorization_v1(uuid,uuid,uuid,uuid,uuid,bigint,uuid,text)';
     for(const role of ['anon','authenticated','service_role']){
       const r=await db.query('select has_function_privilege($1,$2,\'EXECUTE\') as allowed',[role,signature]);
       assert.equal(r.rows[0].allowed,false,role);
     }
     await db.exec('set role ordax_edge_executor');
     assert.equal((await call()).ok,true);await db.exec('reset role');
-    await db.exec(fs.readFileSync(new URL('../supabase/tests/orchestrator_read_authorization_postflight.sql',import.meta.url),'utf8'));
+    await db.exec(fs.readFileSync(new URL('../supabase/tests/forge_read_authorization_postflight.sql',import.meta.url),'utf8'));
   } finally {await db.close();}
 });

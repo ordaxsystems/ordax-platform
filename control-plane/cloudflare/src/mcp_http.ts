@@ -142,7 +142,7 @@ const TOOLS: ToolSpec[] = [
   { name: "computer_access_status", description: "Read the local ORDAX computer-access policy and allowed filesystem roots.", action: "computer.access_status", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "ordax_surface_status", description: "Read the currently visible Native OrdaX Surface application from the OrdaX Product Device, not from Windows.", action: "ordax.surface.status", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "ordax_surface_open", description: "Open an installed OrdaX Native system app through the internal OS channel. Returns success only after the Surface confirms the visible app, never by Windows mouse or window control.", action: "ordax.surface.open", properties: { device_id: DEVICE, appId: { type: "string", enum: ["account", "settings", "system", "store"] }, wait_for_completion_ms: WAIT }, required: ["device_id", "appId"] },
-  { name: "orchestrator_lab_status", description: "Read verified OrdaX Orchestrator Lab status directly through its private service. Requires the dedicated orchestrator-app-read grant and a verified Lab installation. Does not send provider messages.", action: "orchestrator.app_read", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "forge_status", description: "Read verified OrdaX Forge status directly through its private service. Requires the dedicated forge-app-read grant and a verified Lab installation. Does not send provider messages.", action: "forge.app_read", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_file_stat", description: "Inspect a file or directory allowed by the local computer-access policy.", action: "computer.file_stat", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "computer_directory_list", description: "List a directory tree allowed by the local computer-access policy.", action: "computer.directory_list", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, max_depth: { type: "integer", minimum: 1, maximum: 12 }, max_entries: { type: "integer", minimum: 1, maximum: 5000 }, include_hidden: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "computer_text_read", description: "Read bounded UTF-8 text from an allowed computer path.", action: "computer.text_read", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, start_line: { type: "integer", minimum: 1 }, end_line: { type: "integer", minimum: 1 }, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
@@ -168,7 +168,7 @@ const TOOLS: ToolSpec[] = [
 ];
 
 const READ_ONLY_TOOLS = new Set([
-  "orchestrator_lab_status",
+  "forge_status",
   "ordax_session",
   "ordax_profile",
   "ordax_targets",

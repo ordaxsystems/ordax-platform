@@ -144,7 +144,7 @@ const ATTESTED_DEVICE_NATIVE_EXECUTION_TOOLS: ReadonlySet<string> = new Set([
 const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   "ordax_surface_status",
   "ordax_surface_open",
-  "orchestrator_lab_status",
+  "forge_status",
   ...ATTESTED_DEVICE_OBSERVE_TOOLS,
   ...ATTESTED_DEVICE_INTERACTIVE_TOOLS,
   ...ATTESTED_DEVICE_FILESYSTEM_READ_TOOLS,

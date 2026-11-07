@@ -217,7 +217,7 @@ const RPC_SPECS = {
       "p_device_id", "p_resource_id"],
     casts: ["uuid", "uuid", "uuid", "text", "text", "uuid", "text"],
   },
-  ordax_orchestrator_read_authorization_v1: {
+  ordax_forge_read_authorization_v1: {
     keys: ["p_device_id", "p_request_id", "p_effect_id", "p_attempt_id",
       "p_lease_id", "p_execution_epoch", "p_agent_instance_id", "p_boot_id"],
     casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text"],
@@ -800,7 +800,7 @@ export async function resolveOrchestratorReadAuthorization(
   env: ProductPostgresEnv,
   input: Parameters<typeof startProductAction>[1],
 ): Promise<JsonObject> {
-  return callRpc<JsonObject>(env, "ordax_orchestrator_read_authorization_v1", {
+  return callRpc<JsonObject>(env, "ordax_forge_read_authorization_v1", {
     p_device_id: input.deviceId, p_request_id: input.requestId,
     p_effect_id: input.effectId, p_attempt_id: input.attemptId,
     p_lease_id: input.leaseId, p_execution_epoch: input.executionEpoch,

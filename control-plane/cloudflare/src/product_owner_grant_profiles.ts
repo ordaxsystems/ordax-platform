@@ -50,7 +50,7 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
   "ordax-surface-control": profile("device", NATIVE_SURFACE_DEVICE_ACTIONS),
   "repository-catalog-read": profile("device", REPOSITORY_CATALOG_DEVICE_ACTIONS),
   "project-continuity": profile("project", PROJECT_CONTINUITY_ACTIONS),
-  "orchestrator-app-read": profile("device", ["orchestrator.app_read"]),
+  "forge-app-read": profile("device", ["forge.app_read"]),
   // Project snapshots are a separate least-privilege Product grant. Runtime
   // still requires a live resource binding before it can read any local root.
   "project-workspace-read": profile("project", ["workspace.project_snapshot"]),
