@@ -16,73 +16,29 @@ A nomenclatura de produto é **Servidor MCP personalizado do OrdaX** ou, de form
 
 A configuração e o fluxo de atualização estão em [CHATGPT-CUSTOM-MCP-SERVER.md](CHATGPT-CUSTOM-MCP-SERVER.md).
 
-## Estado observado — 18/10/2026
+## Estado e fontes canônicas — 12/11/2026
 
-A fonte de verdade `control-plane/cloudflare/production-foundation.json#mcp_release` registra:
+O contrato oficial continua em `control-plane/cloudflare/production-foundation.json#mcp_release`, com PostgreSQL/Hyperdrive, OAuth 2.1, domínio `mcp.ordax.com.br` e um único Worker `ordax-mcp`. `supports_remote_actions=true` não significa `deployment_ready=true`: o guard de produção exige provas autenticadas de grants, atestação e ações reais.
 
-- `supports_remote_actions=true`;
-- `validation_mode=attested-interactive-candidate`;
-- `validation_deployment_ready=true`;
-- autoridade PostgreSQL;
-- `workers.dev=false` para o serviço oficial;
-- domínio canônico `mcp.ordax.com.br`;
-- OAuth canônico já com evidência de consentimento do cliente ChatGPT.
+### Inventário de ferramentas: não duplicar
 
-O MCP publicado e autenticado, observado no ChatGPT em 18/10/2026, reporta **30 tools**. O candidato da PR #212 propõe **37 tools** após upgrade compatível do Runtime e autorização explícita. A superfície já inclui sessão, perfil, targets, status, observação do desktop e Computer Control tipado. Portanto, os documentos não devem mais afirmar que o MCP atual é “read-only canary”.
+O inventário de ferramentas **não é mantido neste documento**. A fonte de verdade é `control-plane/cloudflare/src/mcp_http.ts` (`tools/list`), filtrada pelo roteamento atestado em `product_mcp_entry.ts`. A ferramenta `ordax_session` anuncia revisão, contagem e, na revisão candidata, `mcp_tool_names` derivados do mesmo inventário. O cliente GPT pode receber um subconjunto: somente a comparação por nomes permite distinguir uma revisão antiga de filtragem pelo host.
 
-Isso ainda **não equivale a release irrestrita de controle remoto**. O SSOT mantém os seguintes blockers de readiness para a promoção final:
+Na verificação autenticada de 12/11/2026, a versão pública reportou **51 ferramentas** e esta conversa recebeu **44**. Esse dado é uma observação temporal, não uma lista fixa ou garantia de atualização. A versão do Worker ainda não incorporava as PRs #346/#347; publicar código novo exige o gate completo e atualizar a conexão não concede grants.
+
+### Permissões e prova de execução
+
+Em 12/11/2026, `computer.terminal_exec` foi executado no `DESKTOP-4UFL03B` pelo MCP público: comando inofensivo, `status=succeeded`, saída correta e código 0. Isso demonstra somente aquele caminho autenticado até o Runtime; **não comprova** transferência de arquivos, revogação, funcionamento multidispositivo nem os sete recibos independentes exigidos pelo gate de produção.
+
+Os grants Owner são snapshots explícitos, não aliases dinâmicos de perfil. Quando um perfil (`full-computer-control`, por exemplo) recebe novas ações `computer.transfer_*`, os grants anteriores não as herdam. A projeção de `ordax_targets` pode indicar a divergência com `profile_alignment` calculado diretamente do catálogo canônico `OWNER_MCP_GRANT_PROFILES`; esse aviso nunca autoriza, executa ou altera um grant. O proprietário deve revisar e conceder novamente o perfil pelo fluxo Owner existente.
+
+O manifesto ainda registra os bloqueios de promoção:
 
 - `interactive_computer_grant_not_authorized`;
 - `attested_interactive_end_to_end_not_verified`;
 - `canonical_remote_actions_release_not_verified`.
 
-Em outras palavras: as tools podem estar publicadas no catálogo enquanto um target específico continua sem grants de interação. Catálogo, autorização e execução são estados diferentes.
-
-## Superfície publicada
-
-As 30 tools atualmente observadas no MCP de produção são:
-
-### Identidade e descoberta
-
-- `ordax_session`
-- `ordax_profile`
-- `ordax_targets`
-- `ordax_action_status`
-
-### Observação e política local
-
-- `computer_windows`
-- `computer_active_window`
-- `computer_screenshot`
-- `computer_screen_info`
-- `computer_access_status`
-- `computer_processes`
-
-### Sistema de arquivos, leitura e edição tipadas
-
-- `computer_file_stat`
-- `computer_directory_list`
-- `computer_text_read`
-- `computer_search`
-- `computer_text_write`
-- `computer_text_patch`
-- `computer_directory_create`
-- `computer_path_move`
-- `computer_path_remove`
-
-### Interação tipada
-
-- `computer_focus_window`
-- `computer_click`
-- `computer_mouse_move`
-- `computer_drag`
-- `computer_launch_app`
-- `computer_scroll`
-- `computer_type`
-- `computer_hotkey`
-- `computer_clipboard_read`
-- `computer_clipboard_write`
-- `computer_terminate_process`
+Não basta criar um artefato de CI ou obter um único recibo de terminal para remover esses bloqueios. A promoção exige provas reais específicas do gate e consentimento Owner, sem duplicação de Worker, armazenamento ou política.
 
 **Candidato de integração (ainda não promovido):** `terminal_exec`, `process_status`, `process_list`, `process_logs`, `process_start`, `process_write_stdin` e `process_stop` são ações de projeto, não herdam `full-computer-control`; exigem a prova canônica do Git origin, a associação Space/projeto, o perfil Owner `project-native-terminal` ou `project-native-process` e Runtime com suporte à atestação. Essa fronteira reutiliza o executor `terminal.exec`/supervisor `process.*` existente. O candidato não cria outro daemon, MCP ou banco de grants. Um terminal não deve ser simulado por `computer_type`.
 
