@@ -457,6 +457,32 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.equal(json.result.structuredContent.authenticated, true);
   assert.equal(json.result.structuredContent.mcp_tool_count, PRODUCT_MCP_DIRECT_TOOLS.size);
   assert.match(json.result.structuredContent.mcp_tool_surface_revision, /^catalog-v1-[0-9a-f]{64}$/);
+  // The authenticated diagnostics must reflect tools/list, not a parallel
+  // hand-maintained inventory that can drift when actions are introduced.
+  const listing = await gateway(new Request(MCP_URL, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+  }));
+  const listed = await listing.json() as any;
+  const names = listed.result.tools.map((tool: { name: string }) => tool.name);
+  assert.deepEqual(json.result.structuredContent.mcp_tool_names, names);
+  assert.equal(new Set(names).size, names.length);
+  for (const tool of ["computer_transfer_begin", "computer_transfer_chunk", "computer_transfer_status",
+    "computer_transfer_commit", "computer_transfer_abort"]) {
+    assert.ok(names.includes(tool), tool);
+  }
+  assert.ok(!names.includes("project_create"));
+});
+
+test("restricted MCP projection reports only allowed names in session diagnostics", async () => {
+  const { handlers } = fakeHandlers();
+  const allowed = new Set(["ordax_session", "ordax_targets"]);
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch, allowed);
+  const response = await gateway(request("ordax_session"));
+  const json = await response.json() as any;
+  assert.deepEqual(json.result.structuredContent.mcp_tool_names, ["ordax_session", "ordax_targets"]);
+  assert.equal(json.result.structuredContent.mcp_tool_count, 2);
+  assert.equal(json.result.structuredContent.mcp_tool_names.includes("computer_transfer_commit"), false);
 });
 
 test("advertised MCP projection includes device terminal and supervised processes", async () => {

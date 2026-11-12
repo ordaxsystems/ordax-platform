@@ -86,6 +86,60 @@ test("MCP status rejects non-UUID request identifiers before status SQL", async 
   assert.equal(enqueues, 0);
 });
 
+test("standalone action status long-polls the original ID without a second enqueue", async () => {
+  let polls = 0;
+  let enqueues = 0;
+  const { body } = await call("ordax_action_status", {
+    createAction: async () => { enqueues++; throw Error("status must not enqueue"); },
+    getAction: async () => {
+      polls++;
+      return Response.json(record({ status: polls < 2 ? "queued" : "succeeded" }));
+    },
+  }, { wait_for_completion_ms: 1000 });
+  assert.equal(body.result.structuredContent.pending, false);
+  assert.equal(body.result.structuredContent.action.status, "succeeded");
+  assert.equal(body.result.structuredContent.request_id, acceptedId);
+  assert.equal(enqueues, 0);
+  assert.equal(polls, 2);
+});
+
+test("status wait validates bounds and never dispatches for invalid values", async () => {
+  let reads = 0;
+  let enqueues = 0;
+  for (const invalid of [null, "100", true, false, {}, [], -1, 20001, 0.25]) {
+    const { body } = await call("ordax_action_status", {
+      createAction: async () => { enqueues++; throw Error("no enqueue"); },
+      getAction: async () => { reads++; throw Error("no reads"); },
+    }, { wait_for_completion_ms: invalid });
+    assert.deepEqual(body.result.structuredContent, {
+      ok: false, error: "wait_for_completion_invalid", action_dispatched: false,
+    });
+  }
+  assert.equal(enqueues, 0);
+  assert.equal(reads, 0);
+});
+
+test("standalone long-poll never claims an unreadable ID is accepted", async () => {
+  let enqueues = 0;
+  for (const [http, expected] of [
+    [403, "action_status_access_denied"],
+    [404, "action_status_not_visible"],
+    [503, "action_status_unavailable"],
+  ] as const) {
+    const { body } = await call("ordax_action_status", {
+      createAction: async () => { enqueues++; throw Error("never re-enqueue"); },
+      getAction: async () => new Response(null, { status: http }),
+    }, { wait_for_completion_ms: 1 });
+    const result = body.result.structuredContent;
+    assert.equal(result.ok, false, String(http));
+    assert.equal(result.error, expected, String(http));
+    assert.equal(result.monitoring_state, "unknown", String(http));
+    assert.equal("pending" in result, false, String(http));
+    assert.equal(result.request_id, acceptedId);
+  }
+  assert.equal(enqueues, 0);
+});
+
 test("invalid JSON-RPC ids cannot dispatch or lose action correlation", async () => {
   let sessions = 0;
   let dispatched = 0;
