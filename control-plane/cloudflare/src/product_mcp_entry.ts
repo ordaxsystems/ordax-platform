@@ -119,6 +119,11 @@ const ATTESTED_DEVICE_FILESYSTEM_READ_TOOLS: ReadonlySet<string> = new Set([
 const ATTESTED_DEVICE_TEXT_EDIT_TOOLS: ReadonlySet<string> = new Set([
   "computer_text_write",
   "computer_text_patch",
+  "computer_transfer_begin",
+  "computer_transfer_chunk",
+  "computer_transfer_status",
+  "computer_transfer_commit",
+  "computer_transfer_abort",
 ]);
 const ATTESTED_DEVICE_FILESYSTEM_MUTATION_TOOLS: ReadonlySet<string> = new Set([
   "computer_directory_create",

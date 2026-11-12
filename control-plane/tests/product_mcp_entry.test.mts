@@ -286,6 +286,8 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_scroll", "computer_type", "computer_hotkey",
     "computer_access_status", "ordax_surface_status", "ordax_surface_open", "forge_status", "computer_file_stat", "computer_directory_list", "computer_text_read",
     "computer_search", "computer_processes", "computer_terminate_process",
+    "computer_transfer_begin", "computer_transfer_chunk", "computer_transfer_status",
+    "computer_transfer_commit", "computer_transfer_abort",
     "computer_text_write", "computer_text_patch",
     "computer_directory_create", "computer_path_move", "computer_path_remove",
   ]);
