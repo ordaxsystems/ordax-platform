@@ -54,6 +54,12 @@ Não basta criar um artefato de CI ou obter um único recibo de terminal para re
 
 A publicação de uma tool só torna seu contrato descobrível pelo cliente. A execução continua condicionada a OAuth, target, grant, sessão atestada, Runtime online, política local e validação dos argumentos.
 
+## Tarefas longas sem bloquear o MCP
+
+`computer_terminal_exec` e `terminal_exec` são comandos **foreground** no executor canônico, que atende a fila Product serialmente. O tempo padrão passa a **60 segundos**; quem solicitar um timeout explícito maior continua autorizado a fazê-lo, mas ocupa o executor até encerrar. Compilações, servidores e outras tarefas demoradas devem utilizar o supervisor existente (`computer_process_start` ou `process_start`), com acompanhamento por `*_process_status` e `*_process_logs`. Não há segundo daemon, fila, autoridade ou cópia do processo.
+
+A capacidade legada `ordax.product.read.invoke` foi retirada do Runtime: o contrato vigente usa operações Product tipadas e, quando aplicável, `ordax.product.invoke` com auditoria e autorização próprias. Comandos já aceitos não devem ser enfileirados novamente só porque a verificação de status demorou. Essa regra não altera nem afrouxa grants Owner.
+
 ## Atualização do servidor no ChatGPT
 
 A URL pública é estável e não deve mudar a cada release:

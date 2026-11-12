@@ -321,6 +321,15 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal((byName.get("computer_path_remove") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_clipboard_write") as any).annotations.destructiveHint, false);
   assert.equal((byName.get("computer_terminate_process") as any).annotations.destructiveHint, true);
+  for (const name of ["computer_terminal_exec", "terminal_exec"]) {
+    const terminal = byName.get(name) as any;
+    assert.equal(terminal.inputSchema.properties.timeout_seconds.default, 60);
+    assert.match(terminal.description, /60-second default/);
+    assert.match(terminal.description, /process_start/);
+  }
+  for (const name of ["computer_process_start", "process_start"]) {
+    assert.match((byName.get(name) as any).description, /supervised (?:device )?process/);
+  }
   assert.equal((byName.get("computer_terminal_exec") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_process_start") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_process_status") as any).annotations.readOnlyHint, true);
