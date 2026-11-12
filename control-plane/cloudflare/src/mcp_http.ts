@@ -68,10 +68,10 @@ const REPLACEMENTS = {
 };
 
 const TOOLS: ToolSpec[] = [
-  { name: "ordax_session", description: "Inspect authenticated ORDAX Product connection and its effective, signed, non-secret OAuth client_id for exact Owner grant selection. This does not grant device authority." },
+  { name: "ordax_session", description: "Inspect the authenticated ORDAX Product session, the signed non-secret OAuth client_id for exact Owner grant selection, and the canonical MCP tool catalog (names, count, revision). Compare mcp_tool_names with the tools available to this conversation; if different, refresh the MCP connection. This does not grant device authority." },
   { name: "ordax_profile", description: "Return the authenticated OrdaX account subject id for connector identity display. Compatibility tool: not an OS Profile, Profile Pack, Space or preferences." },
   { name: "ordax_targets", description: "List authorized ORDAX devices, reported presence, Spaces and grants. Offline devices require their Runtime to reconnect for local work; unknown presence is not proof of connectivity. This does not discover cloud executors or synchronize repository files." },
-  { name: "ordax_action_status", description: "Read the status/result of a previously queued ORDAX action.", properties: { request_id: STRING }, required: ["request_id"] },
+  { name: "ordax_action_status", description: "Read the status/result of an existing ORDAX request_id. Keep the original ID and poll until terminal; never re-enqueue a potentially non-idempotent command just because status is queued or temporarily unavailable. Optional wait_for_completion_ms long-polls up to 20 seconds without re-executing.", properties: { request_id: STRING, wait_for_completion_ms: { ...WAIT, default: 0, description: "Optional verified status long-poll, 0-20000 milliseconds; default 0 for immediate read." } }, required: ["request_id"] },
   { name: "app_intelligence_catalog", description: "Read the compact version-bound App Intelligence catalog from the connected ORDAX device. Use this only to discover which app semantics are available; it grants no execution authority.", action: "intelligence.app_catalog", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "app_intelligence_detail", description: "Read declarative instructions, intents, parameters and examples for one exact app_id from the connected ORDAX device. This never grants permission to execute the app.", action: "intelligence.app_detail", properties: { device_id: DEVICE, space_id: SPACE, app_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "app_id"] },
   { name: "repository_catalog", description: "List canonical Git repositories registered on an ORDAX device. Use repository.repository_full_name from this result to select a durable project for continuity tools.", action: "workspace.repository_catalog", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
@@ -102,7 +102,7 @@ const TOOLS: ToolSpec[] = [
   { name: "git_status", description: "Read bounded Git status for a granted project.", action: "git.status", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "git_diff", description: "Read a bounded Git diff for a granted project.", action: "git.diff", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, paths: { type: "array", items: STRING, maxItems: 50 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "git_command", description: "Run an approved Git subcommand against a granted project. Repository hooks may execute, but credential/config inspection is blocked and authenticated remote URLs are redacted.", action: "git.command", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, args: { type: "array", items: STRING, minItems: 1, maxItems: 128 }, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "args"] },
-  { name: "computer_terminal_exec", description: "Execute a bounded native terminal command on the authorized computer without requiring a project. Requires explicit Owner device-native-terminal or full-computer-control grant.", action: "computer.terminal_exec", properties: { device_id: DEVICE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, env: ENV_OBJECT, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "computer_terminal_exec", description: "Execute a bounded native terminal command on the authorized computer. Use argv for an explicit executable, e.g. PowerShell via [powershell.exe,-NoProfile,-Command,script]. When command+shell=true is used, Windows runs COMSPEC (normally CMD), not PowerShell. Requires the existing Owner terminal or full-computer-control grant.", action: "computer.terminal_exec", properties: { device_id: DEVICE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, env: ENV_OBJECT, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "terminal_exec", description: "Execute a foreground command with the local OS user's permissions. Requires an explicit terminal.exec grant.", action: "terminal.exec", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, env: ENV_OBJECT, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "computer_process_status", description: "Inspect an ORDAX-owned device process.", action: "computer.process_status", properties: { device_id: DEVICE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id"] },
   { name: "computer_process_list", description: "List supervised device processes.", action: "computer.process_list", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
@@ -342,6 +342,11 @@ const TOOL_TITLES: Record<string, string> = {
   git_command: "Run Git command",
   terminal_exec: "Run project command",
   computer_terminal_exec: "Execute device command",
+  computer_transfer_begin: "Begin verified file transfer",
+  computer_transfer_chunk: "Send verified file chunk",
+  computer_transfer_status: "Check file transfer progress",
+  computer_transfer_commit: "Commit verified file",
+  computer_transfer_abort: "Cancel file transfer",
   computer_process_status: "Inspect device process",
   computer_process_list: "List device processes",
   computer_process_logs: "Read device process logs",
@@ -831,22 +836,27 @@ async function readActionStatusWithRecovery(
   }
 }
 
-async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers): Promise<JsonObject> {
+async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers, acceptedReceipt = true): Promise<JsonObject> {
   const deadline = Date.now() + timeoutMs;
+  // Creation already proved a persisted receipt; a standalone status query
+  // does not. Never promote an unreadable arbitrary ID to "accepted/pending".
+  const unreadable = (status?: number): JsonObject => acceptedReceipt
+    ? actionMonitoringUnavailable(requestId, status)
+    : unverifiedActionStatus(requestId, status);
   let pollRound = 0;
   const retryRead = boundedTransientActionStatusRetry(deadline);
   while (true) {
     const statusResponse = await readActionStatusWithRecovery(source, requestId, handlers, retryRead);
-    if (!statusResponse) return actionMonitoringUnavailable(requestId);
+    if (!statusResponse) return unreadable();
     if (!statusResponse.ok) {
       const status = statusResponse.status;
       if (status === 408 || status === 429 || status >= 500) {
-        return actionMonitoringUnavailable(requestId, status);
+        return unreadable(status);
       }
       return unverifiedActionStatus(requestId, status);
     }
     const projected = sanitizeActionPayload(await bodyJson(statusResponse), requestId);
-    if (projected.ok !== true) return actionMonitoringUnavailable(requestId);
+    if (projected.ok !== true) return unreadable();
     if (projected.pending === false) return projected;
     if (Date.now() >= deadline) {
       // Preserve the last attested state (queued/leased/running) rather than
@@ -890,7 +900,7 @@ async function verifiedMcpRetryDigest(
   return Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, "0")).join("");
 }
 
-async function callTool(source: Request, name: string, args: JsonObject, handlers: OrdaxMcpHandlers, advertisedToolCount: number, retryDigest: string | null): Promise<JsonObject> {
+async function callTool(source: Request, name: string, args: JsonObject, handlers: OrdaxMcpHandlers, allowedTools: ReadonlySet<string> | undefined, retryDigest: string | null): Promise<JsonObject> {
   if (name === "ordax_session") {
     const response = await handlers.session(cloneWithAuth(source, new URL("/v3/product/session", source.url).toString(), "GET"));
     const payload = await bodyJson(response);
@@ -904,6 +914,8 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       ? session as JsonObject : null;
     const signedClientId = authenticated && identity?.client_kind === "product-mcp"
       && isCanonicalUuid(identity.client_id) ? identity.client_id.toLowerCase() : null;
+    // Derived from the same filtered catalog as tools/list, never a second inventory.
+    const toolNames = toolDefinitions(allowedTools).map((tool) => String(tool.name));
     return textToolResult(
       authenticated
         ? {
@@ -911,14 +923,15 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
             authenticated: true,
             ...(signedClientId ? { client_id: signedClientId, client_kind: "product-mcp" } : {}),
             mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
-            mcp_tool_count: advertisedToolCount,
+            mcp_tool_count: toolNames.length,
+            mcp_tool_names: toolNames,
           }
         : {
             ok: false,
             authenticated: false,
             error: "authentication_required",
             mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
-            mcp_tool_count: advertisedToolCount,
+            mcp_tool_count: toolNames.length,
           },
       !authenticated,
     );
@@ -945,6 +958,17 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
     const requestId = typeof args.request_id === "string" ? args.request_id : "";
     if (!requestId) return textToolResult({ ok: false, error: "request_id_required" }, true);
     if (!isCanonicalUuid(requestId)) return textToolResult({ ok: false, error: "product_request_id_invalid" }, true);
+    const rawWait = args.wait_for_completion_ms;
+    if (Object.hasOwn(args, "wait_for_completion_ms")
+      && (typeof rawWait !== "number" || !Number.isSafeInteger(rawWait)
+        || rawWait < 0 || rawWait > 20000)) {
+      return textToolResult({ ok: false, error: "wait_for_completion_invalid",
+        action_dispatched: false }, true);
+    }
+    if (typeof rawWait === "number" && rawWait > 0) {
+      const projected = await waitForAction(source, requestId, rawWait, handlers, false);
+      return textToolResult(projected, projected.ok !== true);
+    }
     // A direct status lookup is read-only: recover one transient 408/5xx or
     // connection exception, but never enqueue a new action or mask 401/403/404
     // and 429 as a healthy read. The request ID and OAuth client stay exact.
@@ -1196,7 +1220,7 @@ export async function handleOrdaxMcp(
     if (!specFor(name) || (allowedTools && !allowedTools.has(name))) return rpcError(id, -32601, "Tool not found", { tool: name });
     try {
       const retryDigest = await verifiedMcpRetryDigest(sessionPayload, id, params);
-      const result = await callTool(request, name, args, handlers, toolDefinitions(allowedTools).length, retryDigest);
+      const result = await callTool(request, name, args, handlers, allowedTools, retryDigest);
       if (result.isError !== true && handlers.recordUsage) {
         // Shadow-only accounting is not an execution dependency. A slow usage
         // write must not delay a successful MCP answer or cause a duplicate
