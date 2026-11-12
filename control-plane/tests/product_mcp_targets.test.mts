@@ -104,6 +104,13 @@ test("client-scoped target routing reports only non-discovery device grants, nev
   assert.equal(result.client_device_routing.reported_online,false);
   assert.equal(result.client_device_routing.attested,false);
   assert.equal(result.client_device_routing.dispatch_authorized,false);
+  assert.deepEqual(result.targets[0].connection_diagnostic, {
+    state: "device_action_grant_required", attested: false, dispatch_proven: false,
+    owner_action: "authorize_in_ordax_owner_permissions",
+  });
+  assert.deepEqual(result.targets[1].connection_diagnostic, {
+    state: "reported_offline", attested: false, dispatch_proven: false,
+  });
   assert.ok(!JSON.stringify(result).includes("authorized_device_id"));
 });
 
@@ -124,11 +131,54 @@ test("routing never promotes discovery, expired, project or incomplete grants",a
     state:"no_device_action_grant",owner_action:"authorize_in_ordax_owner_permissions",
     basis:"current_oauth_client_target_catalog",attested:false,dispatch_authorized:false
   });
+  assert.equal(onlyDiscovery.targets[0].connection_diagnostic.state,"device_action_grant_required");
   const partial=(await listTargets([{device_id:desktop,grant_groups:Array(128).fill(discovery)}]))
     .body.result.structuredContent;
   assert.equal("client_device_routing" in partial,false);
   const missingGroups=(await listTargets([{device_id:desktop}])).body.result.structuredContent;
   assert.equal("client_device_routing" in missingGroups,false);
+});
+
+test("routing never promotes malformed or omitted grant scopes, expiry or truncated capability lists", async () => {
+  const device_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const complete = {
+    profile_key: "device-native-terminal", space_id: null, project_id: null,
+    valid_until: null,
+    capabilities: [{ capability: "computer.terminal_exec", access_mode: "write" }],
+  };
+  const invalid = [
+    { ...complete, valid_until: "invalid-expiry" },
+    { ...complete, valid_until: undefined },
+    { ...complete, space_id: undefined },
+    { ...complete, project_id: undefined },
+    { ...complete, capabilities: Array(129).fill(complete.capabilities[0]) },
+  ];
+  for (const grant of invalid) {
+    const { body } = await listTargets([{ device_id, online: true, grant_groups: [grant] }]);
+    const result = body.result.structuredContent;
+    assert.equal("client_device_routing" in result, false);
+    assert.equal("connection_diagnostic" in result.targets[0], false);
+    assert.equal(result.targets[0].device_id, device_id);
+  }
+});
+
+test("an online aligned grant remains unverified, not presumed ready", async () => {
+  const canonical = OWNER_MCP_GRANT_PROFILES["full-computer-control"];
+  const { body } = await listTargets([{
+    device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", online: true,
+    grant_groups: [{
+      profile_key: "full-computer-control", space_id: null, project_id: null,
+      valid_until: null,
+      capabilities: canonical.capabilities.map(item => ({
+        capability: item.capability, access_mode: item.accessMode,
+      })),
+    }],
+  }]);
+  const target = body.result.structuredContent.targets[0];
+  assert.deepEqual(target.connection_diagnostic, {
+    state: "online_grant_unverified", attested: false, dispatch_proven: false,
+  });
+  assert.equal("profile_alignment" in target.grant_groups[0], false);
 });
 
 test("existing full-control Owner grant exposes newly missing transfer rights without automatic expansion", async () => {
@@ -150,6 +200,10 @@ test("existing full-control Owner grant exposes newly missing transfer rights wi
   assert.equal(group.profile_alignment.owner_action, "reauthorize_existing_profile_in_ordax_owner");
   assert.equal(group.profile_alignment.authorization_required, true);
   assert.equal(group.profile_alignment.attested, false);
+  assert.deepEqual(body.result.structuredContent.targets[0].connection_diagnostic, {
+    state: "online_partial_grant_unverified", attested: false, dispatch_proven: false,
+    owner_action: "reauthorize_existing_profile_in_ordax_owner",
+  });
   assert.deepEqual(group.profile_alignment.missing_capabilities, [
     { capability: "computer.transfer_abort", access_mode: "write" },
     { capability: "computer.transfer_begin", access_mode: "write" },
