@@ -1,4 +1,5 @@
 import { OWNER_DEVICE_COMPUTER_GRANT_PROFILES } from "./product_action_scope.ts";
+import { OWNER_MCP_GRANT_PROFILES } from "./product_owner_grant_profiles.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { validChatGptSessionMarker } from "./product_central_admission.ts";
@@ -488,12 +489,37 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
         return capability && ["read", "write"].includes(String(item.access_mode))
           ? [{ capability, access_mode: item.access_mode }] : [];
       });
+      const profileKey = boundedText(group.profile_key);
+      const validUntil = timestamp(group.valid_until);
+      const canonicalProfile = profileKey ? OWNER_MCP_GRANT_PROFILES[profileKey] : null;
+      // A previously consented Owner grant is a snapshot: adding a new action
+      // to a profile never enlarges an existing grant. Compare with the ONE
+      // canonical Owner profile catalog and only diagnose, never reauthorize.
+      // Incomplete, expired and project-scoped grants cannot be diagnosed as
+      // current device-wide authority.
+      const comparable = canonicalProfile?.scope === "device"
+        && group.space_id === null && group.project_id === null
+        && Array.isArray(group.capabilities) && rawCapabilities.length <= 128
+        && (group.valid_until === null
+          || (validUntil !== null && Date.parse(validUntil) > Date.now()));
+      const present = new Set(capabilities.map(item => item.capability + ":" + item.access_mode));
+      const missing = comparable ? canonicalProfile.capabilities.filter(item =>
+        !present.has(item.capability + ":" + item.accessMode)).map(item => ({
+        capability: item.capability, access_mode: item.accessMode,
+      })) : [];
       return [{
-        profile_key: boundedText(group.profile_key),
+        profile_key: profileKey,
         space_id: boundedText(group.space_id),
         project_id: boundedText(group.project_id),
-        valid_until: timestamp(group.valid_until),
+        valid_until: validUntil,
         capabilities,
+        ...(missing.length ? { profile_alignment: {
+          state: "owner_reauthorization_required",
+          missing_capabilities: missing,
+          authorization_required: true,
+          owner_action: "reauthorize_existing_profile_in_ordax_owner",
+          attested: false,
+        } } : {}),
       }];
     });
     const name = boundedText(target.device_name) ?? "ORDAX device";

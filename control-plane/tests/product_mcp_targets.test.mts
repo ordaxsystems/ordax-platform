@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { handleOrdaxMcp } from "../cloudflare/src/mcp_http.ts";
+import { OWNER_MCP_GRANT_PROFILES } from "../cloudflare/src/product_owner_grant_profiles.ts";
 
 async function listTargets(targets: unknown[], authenticated = true) {
   let created = 0;
@@ -128,6 +129,62 @@ test("routing never promotes discovery, expired, project or incomplete grants",a
   assert.equal("client_device_routing" in partial,false);
   const missingGroups=(await listTargets([{device_id:desktop}])).body.result.structuredContent;
   assert.equal("client_device_routing" in missingGroups,false);
+});
+
+test("existing full-control Owner grant exposes newly missing transfer rights without automatic expansion", async () => {
+  const desktop = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const canonical = OWNER_MCP_GRANT_PROFILES["full-computer-control"];
+  assert.ok(canonical);
+  const oldCapabilities = canonical.capabilities
+    .filter(item => !item.capability.startsWith("computer.transfer_"))
+    .map(item => ({ capability: item.capability, access_mode: item.accessMode }));
+  const { body } = await listTargets([{
+    device_id: desktop, online: true, grant_groups: [{
+      profile_key: "full-computer-control", space_id: null, project_id: null,
+      valid_until: null, capabilities: oldCapabilities,
+    }],
+  }]);
+  const group = body.result.structuredContent.targets[0].grant_groups[0];
+  assert.equal(group.capabilities.length, oldCapabilities.length);
+  assert.equal(group.profile_alignment.state, "owner_reauthorization_required");
+  assert.equal(group.profile_alignment.owner_action, "reauthorize_existing_profile_in_ordax_owner");
+  assert.equal(group.profile_alignment.authorization_required, true);
+  assert.equal(group.profile_alignment.attested, false);
+  assert.deepEqual(group.profile_alignment.missing_capabilities, [
+    { capability: "computer.transfer_abort", access_mode: "write" },
+    { capability: "computer.transfer_begin", access_mode: "write" },
+    { capability: "computer.transfer_chunk", access_mode: "write" },
+    { capability: "computer.transfer_commit", access_mode: "write" },
+    { capability: "computer.transfer_status", access_mode: "read" },
+  ]);
+  assert.equal(group.capabilities.some((item: { capability: string }) =>
+    item.capability.startsWith("computer.transfer_")), false);
+  assert.equal(body.result.structuredContent.client_device_routing.attested, false);
+  assert.equal(body.result.structuredContent.client_device_routing.dispatch_authorized, false);
+});
+
+test("aligned grants are quiet and expired or non-device grants never claim current profile drift", async () => {
+  const canonical = OWNER_MCP_GRANT_PROFILES["full-computer-control"];
+  const capabilities = canonical.capabilities.map(item => ({
+    capability: item.capability, access_mode: item.accessMode,
+  }));
+  const group = (overrides: Record<string, unknown>) => ({
+    profile_key: "full-computer-control", space_id: null, project_id: null,
+    valid_until: null, capabilities, ...overrides,
+  });
+  const { body } = await listTargets([{
+    device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    grant_groups: [
+      group({}),
+      group({ capabilities: [], valid_until: "2020-01-01T00:00:00Z" }),
+      group({ capabilities: [], space_id: "space-one", project_id: "project-one" }),
+      group({ capabilities: undefined }),
+      group({ capabilities: Array(129).fill({ capability: "computer.windows", access_mode: "read" }) }),
+    ],
+  }]);
+  for (const result of body.result.structuredContent.targets[0].grant_groups) {
+    assert.equal("profile_alignment" in result, false);
+  }
 });
 
 test("multiple action targets remain ambiguous, never automatically selected",async()=>{
