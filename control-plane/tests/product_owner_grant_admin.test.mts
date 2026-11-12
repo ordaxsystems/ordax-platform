@@ -48,6 +48,11 @@ test("owner grant profiles are explicit and observation remains least privilege"
     {capability:"computer.text_patch",accessMode:"write"},
     {capability:"computer.text_read",accessMode:"read"},
     {capability:"computer.text_write",accessMode:"write"},
+    {capability:"computer.transfer_abort",accessMode:"write"},
+    {capability:"computer.transfer_begin",accessMode:"write"},
+    {capability:"computer.transfer_chunk",accessMode:"write"},
+    {capability:"computer.transfer_commit",accessMode:"write"},
+    {capability:"computer.transfer_status",accessMode:"read"},
   ]);
   for (const excluded of [
     "computer.path_remove", "computer.path_move", "computer.terminate_process",

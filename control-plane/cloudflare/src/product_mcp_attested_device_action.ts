@@ -65,10 +65,13 @@ const ATTESTED_FILESYSTEM_READ_ACTIONS = new Set([
   "computer.file_stat",
   "computer.directory_list",
   "computer.text_read",
+  "computer.transfer_status",
   "computer.search",
 ]);
 const ATTESTED_FILESYSTEM_WRITE_ACTIONS = new Set([
   "computer.text_write", "computer.text_patch",
+  "computer.transfer_begin", "computer.transfer_chunk",
+  "computer.transfer_commit", "computer.transfer_abort",
   "computer.directory_create", "computer.path_move", "computer.path_remove",
 ]);
 const ATTESTED_CLIPBOARD_ACTIONS = new Set(["computer.clipboard_read", "computer.clipboard_write"]);
@@ -282,13 +285,44 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
       && (value.expected_sha256 === undefined
         || (typeof value.expected_sha256 === "string" && /^[0-9a-f]{64}$/.test(value.expected_sha256)));
   }
+  if (action === "computer.transfer_begin") {
+    const digest = typeof value.sha256 === "string" && /^[a-f0-9]{64}$/.test(value.sha256);
+    const expected = typeof value.expected_sha256 === "string"
+      && /^[a-f0-9]{64}$/.test(value.expected_sha256);
+    return keysOnly(value, ["path", "size_bytes", "sha256", "expected_sha256", "create"])
+      && boundedString(value.path, 4096)
+      && boundedInteger(value.size_bytes, 0, 32 * 1024 * 1024)
+      && digest
+      && (value.expected_sha256 === undefined || expected)
+      && (value.create === undefined || typeof value.create === "boolean")
+      && (expected || value.create === true);
+  }
+  if (action === "computer.transfer_chunk") {
+    const encoded = typeof value.data_base64 === "string"
+      && value.data_base64.length >= 4 && value.data_base64.length <= 65536
+      && value.data_base64.length % 4 === 0
+      && /^[A-Za-z0-9+/]+={0,2}$/.test(value.data_base64);
+    const plain = typeof value.text_utf8 === "string"
+      && value.text_utf8.length > 0 && value.text_utf8.length <= 32768
+      && new TextEncoder().encode(value.text_utf8).byteLength <= 48 * 1024;
+    return keysOnly(value, ["transfer_id", "offset", "data_base64", "text_utf8"])
+      && typeof value.transfer_id === "string" && /^[a-f0-9]{32}$/.test(value.transfer_id)
+      && boundedInteger(value.offset, 0, 32 * 1024 * 1024)
+      && ((encoded && value.text_utf8 === undefined)
+        || (plain && value.data_base64 === undefined));
+  }
+  if (action === "computer.transfer_status" || action === "computer.transfer_commit"
+    || action === "computer.transfer_abort") {
+    return keysOnly(value, ["transfer_id"]) && typeof value.transfer_id === "string"
+      && /^[a-f0-9]{32}$/.test(value.transfer_id);
+  }
   if (action === "computer.text_write") {
     const hash = typeof value.expected_sha256 === "string"
       && /^[0-9a-f]{64}$/.test(value.expected_sha256);
     const create = value.create === true;
     return keysOnly(value, ["path", "content", "expected_sha256", "create"])
       && boundedString(value.path, 4096)
-      && typeof value.content === "string" && value.content.length <= 8192
+      && typeof value.content === "string" && value.content.length <= 32768
       && !value.content.includes(String.fromCharCode(0))
       && (value.create === undefined || typeof value.create === "boolean")
       // A new file may omit the SHA; replacing one must supply it. The local
@@ -477,7 +511,7 @@ export function createAttestedDeviceActionHandler(
       return json({ ok: false, error: "trusted_operation_required" }, 403);
     }
 
-    const body = await readBoundedJsonObject(request, 16 * 1024);
+    const body = await readBoundedJsonObject(request, 96 * 1024);
     // This MCP session is attested for exactly one device. A different
     // catalog target is not silently reachable through that attestation,
     // even if it belongs to the same Owner account or reports online.

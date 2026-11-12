@@ -149,6 +149,11 @@ const TOOLS: ToolSpec[] = [
   { name: "computer_search", description: "Search names or bounded text content under an allowed computer root.", action: "computer.search", properties: { device_id: DEVICE, space_id: SPACE, root: STRING, query: STRING, mode: { type: "string", enum: ["name", "content", "both"] }, max_results: { type: "integer", minimum: 1, maximum: 500 }, max_depth: { type: "integer", minimum: 1, maximum: 12 }, include_hidden: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "root", "query"] },
   { name: "computer_processes", description: "List bounded system process metadata on the authorized computer.", action: "computer.processes", properties: { device_id: DEVICE, space_id: SPACE, query: STRING, max_items: { type: "integer", minimum: 1, maximum: 1000 }, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_terminate_process", description: "Terminate one non-critical process only when expected_name still matches the PID.", action: "computer.terminate_process", properties: { device_id: DEVICE, space_id: SPACE, pid: { type: "integer", minimum: 1 }, expected_name: STRING, force: BOOLEAN, tree: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "pid", "expected_name"] },
+  { name: "computer_transfer_begin", description: "Begin a resumable atomic file transfer (up to 32 MiB). Existing files require current SHA-256; no destination is changed before commit.", action: "computer.transfer_begin", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, size_bytes: { type: "integer", minimum: 0, maximum: 33554432 }, sha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, expected_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, create: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "path", "size_bytes", "sha256"] },
+  { name: "computer_transfer_chunk", description: "Append or safely replay one UTF-8 text or base64 binary chunk (up to 48 KiB) at an exact offset. Resume with computer_transfer_status; never writes a partial destination.", action: "computer.transfer_chunk", properties: { device_id: DEVICE, space_id: SPACE, transfer_id: { type: "string", pattern: "^[a-f0-9]{32}$" }, offset: { type: "integer", minimum: 0, maximum: 33554432 }, data_base64: { type: "string", minLength: 4, maxLength: 65536 }, text_utf8: { type: "string", minLength: 1, maxLength: 32768 }, wait_for_completion_ms: WAIT }, required: ["device_id", "transfer_id", "offset"] },
+  { name: "computer_transfer_status", description: "Resume a transfer by reading its next offset, declared size, and whether it has committed. Staging expires after 24 hours.", action: "computer.transfer_status", properties: { device_id: DEVICE, space_id: SPACE, transfer_id: { type: "string", pattern: "^[a-f0-9]{32}$" }, wait_for_completion_ms: WAIT }, required: ["device_id", "transfer_id"] },
+  { name: "computer_transfer_commit", description: "Verify the complete content SHA-256 and destination concurrency hash, then atomically replace the destination. Retries return verified commit status.", action: "computer.transfer_commit", properties: { device_id: DEVICE, space_id: SPACE, transfer_id: { type: "string", pattern: "^[a-f0-9]{32}$" }, wait_for_completion_ms: WAIT }, required: ["device_id", "transfer_id"] },
+  { name: "computer_transfer_abort", description: "Discard a staged but uncommitted transfer without modifying the original file.", action: "computer.transfer_abort", properties: { device_id: DEVICE, space_id: SPACE, transfer_id: { type: "string", pattern: "^[a-f0-9]{32}$" }, wait_for_completion_ms: WAIT }, required: ["device_id", "transfer_id"] },
   { name: "computer_text_write", description: "Create or replace text at an allowed computer path with SHA-256 concurrency protection.", action: "computer.text_write", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, content: STRING, expected_sha256: STRING, create: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "path", "content"] },
   { name: "computer_text_patch", description: "Patch allowed computer text using exact replacements and a SHA-256 precondition.", action: "computer.text_patch", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, expected_sha256: STRING, replacements: REPLACEMENTS, wait_for_completion_ms: WAIT }, required: ["device_id", "path", "expected_sha256", "replacements"] },
   { name: "computer_directory_create", description: "Create a directory within the local computer-access policy.", action: "computer.directory_create", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, parents: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
@@ -207,6 +212,7 @@ const READ_ONLY_TOOLS = new Set([
   "computer_screen_info",
   "computer_clipboard_read",
   "computer_access_status",
+  "computer_transfer_status",
   "ordax_surface_status",
   "computer_file_stat",
   "computer_directory_list",
@@ -250,6 +256,7 @@ const DESTRUCTIVE_TOOLS = new Set([
   "computer_hotkey",
   "computer_text_write",
   "computer_text_patch",
+  "computer_transfer_commit",
   "computer_path_move",
   "computer_path_remove",
   "computer_terminate_process",
@@ -271,6 +278,9 @@ const NON_DESTRUCTIVE_WRITE_TOOLS = new Set([
   "computer_clipboard_write",
   "computer_launch_app",
   "computer_directory_create",
+  "computer_transfer_begin",
+  "computer_transfer_chunk",
+  "computer_transfer_abort",
 ]);
 
 const OPEN_WORLD_TOOLS = new Set([
