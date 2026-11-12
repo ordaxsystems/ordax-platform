@@ -71,7 +71,7 @@ const REPLACEMENTS = {
 const TOOLS: ToolSpec[] = [
   { name: "ordax_session", description: "Inspect the authenticated ORDAX Product session, the signed non-secret OAuth client_id for exact Owner grant selection, and the canonical MCP tool catalog (names, count, revision). Compare mcp_tool_names with the tools available to this conversation; if different, refresh the MCP connection. This does not grant device authority." },
   { name: "ordax_profile", description: "Return the authenticated OrdaX account subject id for connector identity display. Compatibility tool: not an OS Profile, Profile Pack, Space or preferences." },
-  { name: "ordax_targets", description: "List authorized ORDAX devices, reported presence, Spaces and grants. Offline devices require their Runtime to reconnect for local work; unknown presence is not proof of connectivity. This does not discover cloud executors or synchronize repository files." },
+  { name: "ordax_targets", description: "List OAuth-scoped ORDAX devices, reported presence and Owner grants. Each complete target has a nonauthoritative connection_diagnostic: online and granted does not prove action dispatch or Runtime attestation. A partially outdated profile retains its old permissions; new capabilities need explicit Owner reauthorization. Never select an execution target solely from discovery." },
   { name: "ordax_action_status", description: "Read the status/result of an existing ORDAX request_id. Keep the original ID and poll until terminal; never re-enqueue a potentially non-idempotent command just because status is queued or temporarily unavailable. Optional wait_for_completion_ms long-polls up to 20 seconds without re-executing.", properties: { request_id: STRING, wait_for_completion_ms: { ...WAIT, default: 0, description: "Optional verified status long-poll, 0-20000 milliseconds; default 0 for immediate read." } }, required: ["request_id"] },
   { name: "app_intelligence_catalog", description: "Read the compact version-bound App Intelligence catalog from the connected ORDAX device. Use this only to discover which app semantics are available; it grants no execution authority.", action: "intelligence.app_catalog", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "app_intelligence_detail", description: "Read declarative instructions, intents, parameters and examples for one exact app_id from the connected ORDAX device. This never grants permission to execute the app.", action: "intelligence.app_detail", properties: { device_id: DEVICE, space_id: SPACE, app_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "app_id"] },
@@ -539,9 +539,23 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
   // canonical target catalog. SQL session/grant checks remain the sole authority.
   // Never select a device for execution based on this diagnostic.
   const complete = rawTargets.length > 0 && rawTargets.length < 100 &&
-    rawTargets.every(raw => raw && typeof raw === "object" && !Array.isArray(raw) &&
-      Array.isArray((raw as JsonObject).grant_groups) &&
-      ((raw as JsonObject).grant_groups as unknown[]).length < 128);
+    rawTargets.every(raw => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+      const groups = (raw as JsonObject).grant_groups;
+      return Array.isArray(groups) && groups.length < 128 &&
+        groups.every(group => {
+          if (!group || typeof group !== "object" || Array.isArray(group)) return false;
+          const item = group as JsonObject;
+          // Never turn an omitted/invalid grant scope or expiry into a
+          // device-wide, unbounded authorization hint by sanitizing it to null.
+          const completeScope = ["space_id", "project_id"].every(key =>
+            Object.hasOwn(item, key) && (item[key] === null ||
+              (typeof item[key] === "string" && boundedText(item[key]) !== null)));
+          return completeScope && Object.hasOwn(item, "valid_until")
+            && (item.valid_until === null || timestamp(item.valid_until) !== null)
+            && Array.isArray(item.capabilities) && item.capabilities.length <= 128;
+        });
+    });
   if (!complete || targets.length !== rawTargets.length) {
     return { ok: true, targets };
   }
@@ -564,6 +578,31 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
             (cap as JsonObject).capability !== "product.target.read");
       });
   });
+  const candidateIds = new Set(candidates.map(target => target.device_id));
+  // Reuse the exact routing candidate computation, not another permissions
+  // inventory. Presence + a grant snapshot is NOT attested readiness. A grant
+  // profile that gained new capabilities does not revoke existing actions and
+  // cannot be silently extended on behalf of the Owner.
+  const targetsWithDiagnostics = targets.map(target => {
+    const hasCandidate = candidateIds.has(target.device_id);
+    const profileOutdated = target.grant_groups.some(group =>
+      "profile_alignment" in group && group.profile_alignment?.state === "owner_reauthorization_required");
+    const state = target.online === false ? "reported_offline"
+      : target.online !== true ? "presence_unknown"
+      : !hasCandidate ? "device_action_grant_required"
+      : profileOutdated ? "online_partial_grant_unverified"
+      : "online_grant_unverified";
+    return { ...target, connection_diagnostic: {
+      state,
+      attested: false,
+      dispatch_proven: false,
+      ...(state === "device_action_grant_required"
+        ? { owner_action: "authorize_in_ordax_owner_permissions" }
+        : state === "online_partial_grant_unverified"
+          ? { owner_action: "reauthorize_existing_profile_in_ordax_owner" }
+          : {}),
+    } };
+  });
   const routing = candidates.length === 1
     ? { state: "single_action_grant_candidate",
         candidate_device_id: candidates[0].device_id,
@@ -573,7 +612,7 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
           owner_action: "authorize_in_ordax_owner_permissions" }
       : { state: "multiple_action_grant_candidates",
           owner_action: "review_oauth_client_device_grants" };
-  return { ok: true, targets, client_device_routing: {
+  return { ok: true, targets: targetsWithDiagnostics, client_device_routing: {
     ...routing, basis: "current_oauth_client_target_catalog",
     attested: false, dispatch_authorized: false,
   } };
