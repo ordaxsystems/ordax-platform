@@ -18,6 +18,7 @@ const WRITE_ACTIONS = new Set<string>([
   "computer.drag", "computer.focus_window", "computer.hotkey", "computer.launch_app",
   "computer.mouse_move", "computer.path_move", "computer.path_remove", "computer.scroll",
   "computer.terminate_process", "computer.text_patch", "computer.text_write", "computer.type",
+  "computer.transfer_begin", "computer.transfer_chunk", "computer.transfer_commit", "computer.transfer_abort",
   "browser.click", "browser.navigate", "browser.start", "browser.stop", "browser.type",
   "computer.terminal_exec", "terminal.exec", "process.start", "process.write_stdin", "process.stop",
   "computer.process_start", "computer.process_write_stdin", "computer.process_stop",

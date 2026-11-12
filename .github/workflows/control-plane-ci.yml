@@ -66,9 +66,14 @@ jobs:
           test -s "$bundle"
           grep -q 'legacy_mcp_retired' "$bundle"
           grep -q 'legacy_product_action_retired' "$bundle"
-          if grep -q 'app_intelligence_catalog' "$bundle" ||
-             grep -q 'app_intelligence_detail' "$bundle"; then
-            echo "::error::Retired D1 Product action dispatch remains in the Worker bundle."
+          # Runtime-backed App Intelligence MCP read tools legitimately contain
+          # app_intelligence_catalog/detail in the bundle. Their names cannot
+          # identify the retired D1 action dispatcher. Validate the actual
+          # legacy route boundary and explicit 410 behavior instead.
+          python -m unittest discover -s tests -p 'test_legacy_mcp_retirement.py'
+          # The compiled production Worker must not receive a retired D1 binding.
+          if grep -Eq '^\\[\\[d1_databases\\]\\]|^[[:space:]]*binding[[:space:]]*=[[:space:]]*"DB"' control-plane/cloudflare/wrangler.toml; then
+            echo "::error::Retired D1 binding configured for production Worker."
             exit 1
           fi
           printf 'WORKER_BUNDLE=%s\n' "$bundle"

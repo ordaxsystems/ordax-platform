@@ -87,6 +87,11 @@ This document is reviewer-facing evidence for the OpenAI plugin submission. The 
 | `computer_processes` | true | false | false | Lists bounded local process metadata without changing process state. |
 | `computer_terminate_process` | false | true | false | Terminates one local non-critical process only after PID and expected process name are revalidated; ORDAX and protected system processes are refused. |
 | `computer_text_write` | false | true | false | Creates or replaces local text inside an allowed root; replacing existing content requires a SHA-256 precondition. |
+| `computer_transfer_begin` | false | false | false | Starts a bounded private staging session after Owner grant and filesystem-policy checks; the target file is not modified. |
+| `computer_transfer_chunk` | false | false | false | Appends or idempotently replays one bounded validated chunk within private staging; the target file remains unchanged. |
+| `computer_transfer_status` | true | false | false | Reads bounded progress and offset for an existing authorized local transfer without changing state. |
+| `computer_transfer_commit` | false | true | false | Can replace a target file only after full size, SHA-256 and existing-file precondition verification; classified destructive. |
+| `computer_transfer_abort` | false | false | false | Cancels only uncommitted temporary staging and does not modify the target file. |
 | `computer_text_patch` | false | true | false | Mutates an existing allowed local text file using exact replacements and a SHA-256 precondition. |
 | `computer_directory_create` | false | false | false | Creates additive local directory state only inside a root allowed by local policy. |
 | `computer_path_move` | false | true | false | Moves or renames allowed local filesystem state and can replace a destination file only when overwrite is explicit. |
