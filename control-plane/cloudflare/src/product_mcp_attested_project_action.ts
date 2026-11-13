@@ -57,7 +57,7 @@ function profileForAction(action: string): string | null {
   if (action === "terminal.exec") return TERMINAL_PROFILE;
   return PROJECT_NATIVE_ACTIONS.has(action) ? PROCESS_PROFILE : null;
 }
-const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled"]);
+const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled", "expired"]);
 
 function json(value: unknown, status = 200): Response {
   return Response.json(value, {
