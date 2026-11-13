@@ -1185,6 +1185,18 @@
         "blob_sha": "32508a6c4c2211de8b8b7772b91909437857990a"
       },
       "ledger_name": "owner_project_onboarding_authority_v1"
+    },
+    {
+      "name": "20261113223950_owner_github_installation_authority_v1",
+      "applied_version": "20261113225750",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261113223950_owner_github_installation_authority_v1.sql",
+        "blob_sha": "92ee131ccb257e78ab93c683b192b2b1baa08087"
+      },
+      "ledger_name": "owner_github_installation_authority_v1"
     }
   ]
 }
