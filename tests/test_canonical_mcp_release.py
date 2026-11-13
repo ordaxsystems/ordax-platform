@@ -186,13 +186,17 @@ class McpReleaseContract(unittest.TestCase):
             validate_interactive_candidate(f,self.config)
 
     def test_candidate_must_keep_real_production_blockers_until_release_proofs_exist(self):
+        expected={
+            "multi_device_end_to_end_not_verified":"multi_device_blocker_inconsistent",
+            "production_release_evidence_incomplete":"evidence_blocker_inconsistent",
+        }
         for blocker in PENDING_PRODUCTION_BLOCKERS:
             f=copy.deepcopy(self.foundation)
             f["mcp_release"]["readiness_blockers"].remove(blocker)
             with self.subTest(blocker=blocker):
-                with self.assertRaisesRegex(McpReleaseError,"production_blockers_incomplete"):
+                with self.assertRaisesRegex(McpReleaseError,expected[blocker]):
                     validate(f,self.config)
-                with self.assertRaisesRegex(McpReleaseError,"production_blockers_incomplete"):
+                with self.assertRaisesRegex(McpReleaseError,expected[blocker]):
                     validate_interactive_candidate(f,self.config)
 
     def test_release_proof_progress_is_exact_and_cannot_hide_missing_evidence(self):
@@ -233,15 +237,16 @@ class McpReleaseContract(unittest.TestCase):
         f["mcp_release"]["deployment_ready"]=True
         f["mcp_release"]["supports_remote_actions"]=True
         f["mcp_release"]["readiness_blockers"]=[]
+        proof_url="https://github.com/ordaxsystems/ordax-platform/actions/runs/38183091421"
+        f["mcp_release"]["release_evidence_progress"]={
+            p:{"status":"verified","run_url":proof_url} for p in REQUIRED_PROOFS
+        }
         with self.assertRaisesRegex(McpReleaseError,"independent_proofs"):
             validate(f,self.config)
         f["mcp_release"]["release_evidence"]={p:"not-a-verified-run" for p in REQUIRED_PROOFS}
         with self.assertRaisesRegex(McpReleaseError,"invalid_proof"):
             validate(f,self.config)
-        f["mcp_release"]["release_evidence"]={
-            p:"https://github.com/ordaxsystems/ordax-platform/actions/runs/38183091421"
-            for p in REQUIRED_PROOFS
-        }
+        f["mcp_release"]["release_evidence"]={p:proof_url for p in REQUIRED_PROOFS}
         with self.assertRaisesRegex(McpReleaseError,"device_dispatch_not_verified"):
             validate(f,self.config)
 
@@ -250,6 +255,10 @@ class McpReleaseContract(unittest.TestCase):
         f["mcp_release"]["deployment_ready"]=True
         f["mcp_release"]["readiness_blockers"]=[]
         f["mcp_release"]["supports_remote_actions"]=False
+        proof_url="https://github.com/ordaxsystems/ordax-platform/actions/runs/38183091421"
+        f["mcp_release"]["release_evidence_progress"]={
+            p:{"status":"verified","run_url":proof_url} for p in REQUIRED_PROOFS
+        }
         with self.assertRaisesRegex(McpReleaseError,"remote_actions_not_ready"):
             validate(f,self.config)
 
