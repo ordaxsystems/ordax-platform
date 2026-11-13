@@ -202,6 +202,27 @@ const RPC_SPECS = {
     keys: ["p_actor_user_id", "p_space_id", "p_name", "p_kind", "p_metadata"],
     casts: ["uuid", "uuid", "text", "text", "jsonb"],
   },
+  ordax_owner_create_github_authorization_challenge_v1: {
+    keys: ["p_owner_user_id", "p_project_id", "p_challenge_id", "p_state_sha256", "p_expires_at"],
+    casts: ["uuid", "uuid", "uuid", "text", "timestamptz"],
+  },
+  ordax_owner_begin_github_authorization_completion_v1: {
+    keys: ["p_owner_user_id", "p_challenge_id", "p_state_sha256"],
+    casts: ["uuid", "uuid", "text"],
+  },
+  ordax_owner_complete_github_authorization_v1: {
+    keys: ["p_owner_user_id", "p_challenge_id", "p_github_user_id",
+      "p_github_user_login", "p_candidates"],
+    casts: ["uuid", "uuid", "bigint", "text", "jsonb"],
+  },
+  ordax_owner_read_github_repository_candidates_v1: {
+    keys: ["p_owner_user_id", "p_challenge_id"],
+    casts: ["uuid", "uuid"],
+  },
+  ordax_owner_select_github_repository_v1: {
+    keys: ["p_owner_user_id", "p_challenge_id", "p_repository_id"],
+    casts: ["uuid", "uuid", "text"],
+  },
   // Staged read-only RPC: remains unavailable until the separately governed
   // PostgreSQL proposal is applied. No new grant authority is created here.
   ordax_approve_project_workspace_resource_v1: {
@@ -610,6 +631,76 @@ export async function createOwnerProject(
     // Onboarding does not accept arbitrary metadata from the browser. Provider
     // identity and repository selection remain separate server authorities.
     p_metadata: {},
+  });
+}
+
+export async function createOwnerGithubAuthorizationChallenge(
+  env: ProductPostgresEnv,
+  input: {
+    ownerUserId: string;
+    projectId: string;
+    challengeId: string;
+    stateSha256: string;
+    expiresAt: string;
+  },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_owner_create_github_authorization_challenge_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_project_id: input.projectId,
+    p_challenge_id: input.challengeId,
+    p_state_sha256: input.stateSha256,
+    p_expires_at: input.expiresAt,
+  });
+}
+
+export async function beginOwnerGithubAuthorizationCompletion(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; challengeId: string; stateSha256: string },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_owner_begin_github_authorization_completion_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_challenge_id: input.challengeId,
+    p_state_sha256: input.stateSha256,
+  });
+}
+
+export async function completeOwnerGithubAuthorization(
+  env: ProductPostgresEnv,
+  input: {
+    ownerUserId: string;
+    challengeId: string;
+    githubUserId: string;
+    githubUserLogin: string;
+    candidates: readonly Record<string, unknown>[];
+  },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_owner_complete_github_authorization_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_challenge_id: input.challengeId,
+    p_github_user_id: input.githubUserId,
+    p_github_user_login: input.githubUserLogin,
+    p_candidates: input.candidates,
+  });
+}
+
+export async function readOwnerGithubRepositoryCandidates(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; challengeId: string },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_owner_read_github_repository_candidates_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_challenge_id: input.challengeId,
+  });
+}
+
+export async function selectOwnerGithubRepository(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; challengeId: string; repositoryId: string },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_owner_select_github_repository_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_challenge_id: input.challengeId,
+    p_repository_id: input.repositoryId,
   });
 }
 
