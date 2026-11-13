@@ -76,33 +76,31 @@ corridas de escolha e tickets expirados. O teste
 e flags. A CI é fonte de verdade para o head específico; não tratar docs
 ou CI como deploy no Supabase.
 
-## Reconexão de conversa já atestada (migração candidata, 04/11/2026)
+## Binding persistente da conversa já atestada (13/11/2026)
 
-O prazo de 30 minutos da associação **não é o prazo do grant**. A migração
-`20261104024500_central_attested_session_reconnect_v1.sql` corrige uma
-situação específica: a **mesma** conversa, identificada pelo mesmo hash de
-sessão do provedor e mesmo Owner+client_id, já foi escolhida pelo Owner e
-confirmada anteriormente pela credencial do Runtime, mas seu vínculo expirou.
+O vínculo **conversa Product MCP → dispositivo confirmado** é roteamento persistente,
+não um grant temporário e não um mecanismo de segurança por inatividade. A migration
+`20261113151500_central_session_persistent_binding_v1.sql` substitui o comportamento
+de lease deslizante introduzido pelas migrations de 13/11: depois que o Owner escolhe
+o dispositivo e o Runtime correto confirma o challenge, a mesma conversa permanece
+ligada ao mesmo dispositivo sem expirar após 30 minutos ou exigir re-atestação periódica.
 
-Se houver vários dispositivos com grants válidos, `open` agora consulta a
-associação imutável já confirmada e cria somente um **novo desafio pendente
-para o mesmo dispositivo**, desde que o consentimento OAuth e o grant atual
-continuem válidos e a presença/digest do Runtime estejam prontos.
-`confirm` continua exigindo a credencial Native do dispositivo e mantém o
-mesmo identificador de associação. Nenhum grant é concedido, nenhuma tabela
-de preferência é criada e outro dispositivo autorizado **não** pode assumir
-a conversa por estar online. O Runtime ou OAuth revogado falha fechado.
+A segurança continua fail-closed em cada resolução. O PostgreSQL revalida o Owner,
+o `client_id` OAuth consentido e o grant atual do dispositivo. Revogação do
+consentimento OAuth, revogação/expiração do grant, retirada do dispositivo ou
+revogação explícita do binding bloqueiam a operação sem depender de TTL. Presença,
+heartbeat e Runtime readiness continuam sendo disponibilidade de execução; ficar
+offline não autoriza outro PC e também não apaga o roteamento já confirmado.
 
-**Não confundir com preferência padrão global.** Uma conversa nova, com
-outro marcador de sessão, continua solicitando seleção Owner quando existem
-vários destinos. A correção elimina a cerimônia Owner repetida por expiração
-**dentro da mesma conversa**, sem presumir uma preferência de roteamento
-entre conversas que o proprietário não cadastrou explicitamente.
+Challenges continuam curtos e descartáveis: o ticket de escolha/atestaçāo expira,
+mas o binding produzido por uma confirmação válida usa `expires_at = infinity`
+como representação compatível no schema existente. Esse campo **não deve voltar
+a ser tratado como timeout de UX ou autorização**. Uma conversa nova continua
+precisando da seleção correta quando houver múltiplos dispositivos elegíveis;
+trocar de dispositivo exige uma ação explícita/revogação do vínculo, nunca seleção
+automática pelo modelo, presença online ou passagem do tempo.
 
-Provas: `central_owner_device_selection_sql.test.mts` executa a migração
-posterior à seleção original no PGlite, simula expiração, verifica novo
-desafio de atestação, rejeita credencial de outro PC e bloqueia OAuth revogado,
-grant revogado, dispositivo offline e digest ausente. Revalida as ACLs
-de `ordax_edge_executor` e a ausência de acesso de papéis públicos.
-**Sem implantação e E2E reais do MCP, o comportamento em produção permanece
-o anterior.**
+O teste `central_owner_device_selection_sql.test.mts` é o gate de regressão:
+força um timestamp antigo para o passado, exige que `open/resolve` mantenham o
+mesmo `request_id` e dispositivo sem criar novo challenge, e verifica que OAuth
+ou grant revogados continuam bloqueando imediatamente.
