@@ -1101,6 +1101,18 @@
         "blob_sha": "284479d5aa965f898ba99cc33917937e5f232bc2"
       },
       "ledger_name": "forge_read_authorization_v1"
+    },
+    {
+      "name": "20261113070000_product_action_concurrent_claim_v1",
+      "applied_version": "20261113070108",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261113070000_product_action_concurrent_claim_v1.sql",
+        "blob_sha": "5e128b58e741987c5c274699598dc8e01b2bf1f5"
+      },
+      "ledger_name": "product_action_concurrent_claim_v1"
     }
   ]
 }
