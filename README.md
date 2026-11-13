@@ -91,6 +91,7 @@ Do not create `/mcp-v2`, `/mcp-v3` or duplicate ChatGPT registrations merely to 
 - No legacy Worker fallback is allowed for authorization or execution.
 - `workers.dev` is not the identity of the official MCP endpoint.
 - OAuth, grants and local Runtime policy remain fail-closed.
+- A confirmed Product-MCP conversation→device binding is persistent routing, not a 30-minute authorization lease; OAuth consent, grants and explicit revocation are revalidated instead of using inactivity as security.
 - Generic shell execution must not replace typed file, Git, browser, desktop, Blender or Unity APIs.
 - Source tests do not by themselves prove a live-device E2E release.
 
