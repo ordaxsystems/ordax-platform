@@ -30,10 +30,13 @@ begin
 
   select * into v_expired
     from private.ordax_product_action_requests
-   where status = 'failed'
+   where status = 'expired'
      and error_code = 'action_expired'
-     and execution_epoch = 0
+     and started_at is null
+     and attempt_id is null
+     and lease_id is null
      and report_id is null
+     and execution_epoch = 0
      and expires_at <= pg_catalog.clock_timestamp()
      and client_kind in ('ordax-web','ordax-mobile','product-mcp')
      and client_id is not null
@@ -41,8 +44,7 @@ begin
    limit 1;
 
   if not found then
-    raise notice 'No historical expired fixture available; ACL/definition assertions passed';
-    return;
+    raise exception 'product_action_expired_fixture_missing';
   end if;
 
   -- This row cannot be claimed: the modification remains uncommitted,
@@ -50,24 +52,26 @@ begin
   update private.ordax_product_action_requests
      set status = 'queued', error_code = null, finished_at = null
    where request_id = v_expired.request_id
-     and status = 'failed' and error_code = 'action_expired';
+     and status = 'expired' and error_code = 'action_expired';
 
   v_result := public.ordax_get_product_action_v1(
     v_expired.owner_user_id,v_expired.client_kind,
     v_expired.client_id,v_expired.request_id);
 
-  if v_result->>'status' <> 'failed'
+  if v_result->>'status' <> 'expired'
      or v_result->>'error_code' <> 'action_expired'
   then
-    raise exception 'product_action_expiry_not_terminal';
+    raise exception 'product_action_expiry_not_distinct_terminal_state';
   end if;
 
   select * into v_stored from private.ordax_product_action_requests
     where request_id=v_expired.request_id;
-  if v_stored.status <> 'failed'
+  if v_stored.status <> 'expired'
+     or v_stored.started_at is not null
      or v_stored.execution_epoch <> v_expired.execution_epoch
      or v_stored.report_id is distinct from v_expired.report_id
      or v_stored.attempt_id is distinct from v_expired.attempt_id
+     or v_stored.lease_id is distinct from v_expired.lease_id
   then
     raise exception 'product_action_expiry_mutated_execution_provenance';
   end if;
@@ -80,6 +84,8 @@ begin
   then
     raise exception 'product_action_expiry_client_isolation_failed';
   end if;
+
+  raise notice 'PRODUCT_ACTION_EXPIRED_STATE_ROLLBACK_PASS';
 end;
 $postflight$;
 

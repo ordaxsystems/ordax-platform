@@ -122,7 +122,7 @@ export function createCanonicalRelayActionSubmitHandler(env: Env, deps: Dependen
       }
       if (result?.ok !== true || !isCanonicalUuid(result.request_id)
         || !isCanonicalUuid(result.effect_id) || typeof result.replayed !== "boolean"
-        || !["queued", "leased", "running", "succeeded", "failed", "cancelled"]
+        || !["queued", "leased", "running", "succeeded", "failed", "cancelled", "expired"]
           .includes(result.status ?? "")) return unavailable();
 
       return json({

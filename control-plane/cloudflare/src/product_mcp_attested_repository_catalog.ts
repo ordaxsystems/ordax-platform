@@ -38,7 +38,7 @@ type Dependencies = Readonly<{
 const ACTION = "workspace.repository_catalog";
 const PROFILE = "repository-catalog-read";
 const QUEUE_TTL_MS = 2 * 60 * 1000;
-const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled"]);
+const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled", "expired"]);
 
 function json(value: unknown, status = 200): Response {
   return Response.json(value, {
