@@ -758,3 +758,26 @@ test("published MCP Worker passes request-owned waitUntil to both attested actio
   assert.match(source, /createCanonicalProductMcpGateway\(env\)\(request, context\)/);
   assert.doesNotMatch(source, /void notifyProductDeviceWake\(/);
 });
+
+
+test("Owner Project binding intent is a trusted Product path but remains default-off in release config", async () => {
+  const { isProductTrustedClientPath } = await import("../cloudflare/src/product_mcp_entry.ts");
+  const exact = "/v3/owner/project-onboarding/device-binding-intents";
+  assert.equal(isProductTrustedClientPath(exact), true);
+  for (const lookalike of [
+    exact + "/extra",
+    "/v3/owner/project-onboarding/device-binding-intent",
+    "/v3/owner/device-binding-intents",
+  ]) assert.equal(isProductTrustedClientPath(lookalike), false, lookalike);
+
+  const source = await readFile(
+    new URL("../cloudflare/src/product_mcp_entry.ts", import.meta.url), "utf8",
+  );
+  const release = await readFile(
+    new URL("../cloudflare/wrangler.mcp.toml", import.meta.url), "utf8",
+  );
+  assert.match(source, /PRODUCT_OWNER_PROJECT_DEVICE_BINDING_INTENTS_PATH/);
+  assert.match(source, /handleProductOwnerProjectOnboarding\(request, env\)/);
+  assert.doesNotMatch(release, /OWNER_PROJECT_DEVICE_BINDING_ENABLED\s*=/,
+    "merging source must not activate Project binding before Runtime attestation");
+});
