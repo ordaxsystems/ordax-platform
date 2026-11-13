@@ -263,6 +263,7 @@ declare
   v_intent private.ordax_owner_project_device_binding_intents%rowtype;
   v_active_binding public.ordax_device_project_bindings%rowtype;
   v_binding_id uuid;
+  v_had_active_binding boolean := false;
   v_allowed_capabilities text[] := array[
     'agent.project_briefing',
     'browser.click',
@@ -365,7 +366,8 @@ begin
     and b.state = 'active'
   for update;
 
-  if found and v_active_binding.local_project_ref <> p_local_project_ref then
+  v_had_active_binding := found;
+  if v_had_active_binding and v_active_binding.local_project_ref <> p_local_project_ref then
     return pg_catalog.jsonb_build_object(
       'ok', false, 'error', 'project_device_binding_conflict'
     );
@@ -391,7 +393,7 @@ begin
          granted_by_user_id = excluded.granted_by_user_id,
          updated_at = v_now;
 
-  if found then
+  if v_had_active_binding then
     update public.ordax_device_project_bindings
        set allowed_capabilities = v_allowed_capabilities,
            updated_at = v_now
