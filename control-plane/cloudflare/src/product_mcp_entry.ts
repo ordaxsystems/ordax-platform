@@ -217,9 +217,12 @@ type SessionRecoveryDependencies = Readonly<{
   wait?: (milliseconds: number) => Promise<void>;
 }>;
 
-// The current native Runtime polls Central challenges every five seconds.
-// The twelve-second bound covers two polls plus scheduling margin. A Runtime
-// confirmation remains mandatory before an action can be authorized.
+// The Runtime schedules Central attestation from the existing Product heartbeat,
+// which runs every 20 seconds; its five-second min_poll_seconds is only a floor,
+// NOT a five-second poll cadence. A confirmation may also take up to eight
+// seconds of device HTTP work. Cover a full heartbeat plus network/scheduler
+// margin without increasing idle SQL traffic or weakening device attestation.
+// This is a finite request-local wait, never an authorization grace period.
 // Public, bounded remediation codes. They explain why a trusted session was
 // not established, but never grant a device or dispatch an action.
 const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
@@ -232,7 +235,7 @@ const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
   "central_session_revoked",
   "central_session_target_mismatch",
 ]);
-const SESSION_CONFIRMATION_ATTEMPTS = 6;
+const SESSION_CONFIRMATION_ATTEMPTS = 16;
 const SESSION_CONFIRMATION_INTERVAL_MS = 2000;
 function waitForSessionConfirmation(milliseconds: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -271,6 +274,13 @@ export async function resolveOrBootstrapAttestedSession(
     return { ok: false as const, error: "central_session_owner_selection_required",
       ...(isCanonicalUuid(challengeId) ? { challenge_id: challengeId } : {}),
     };
+  }
+  // The challenge can be confirmed between the first resolve and the open RPC.
+  // The opened response is only a hint; authority STILL requires a fresh,
+  // client/session-scoped PostgreSQL resolve before any action is dispatched.
+  if ((payload as Record<string, unknown>).status === "bound") {
+    result = await resolve(request.clone(), env);
+    if (result.ok || result.error !== "central_session_unbound") return result;
   }
   const wait = deps.wait ?? waitForSessionConfirmation;
   for (let attempt = 0; attempt < SESSION_CONFIRMATION_ATTEMPTS; attempt += 1) {

@@ -547,6 +547,53 @@ test("attested session recovery auto-opens once and waits only for Runtime proof
   assert.equal(waits, 2);
 });
 
+test("native twenty-second heartbeat confirmation succeeds without a manual session call", async () => {
+  let checks = 0, opens = 0, waitedMs = 0;
+  const confirmed = await resolveOrBootstrapAttestedSession(request("computer_text_read"), ENV, {
+    resolve: async () => {
+      checks++;
+      return checks < 13 ? { ok: false, error: "central_session_unbound" }
+        : { ok: true, ownerUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            clientId: "product-client-123", deviceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" };
+    },
+    open: async () => { opens++; return Response.json({ ok: true, status: "pending" }, { status: 202 }); },
+    wait: async (milliseconds) => { assert.equal(milliseconds, 2000); waitedMs += milliseconds; },
+  });
+  assert.equal(confirmed.ok, true);
+  assert.equal(waitedMs, 24000, "covers the actual 20s heartbeat plus confirmation latency");
+  assert.equal(checks, 13);
+  assert.equal(opens, 1, "never duplicates the device challenge");
+});
+
+test("bound-open race still requires canonical SQL confirmation, never trusts a response hint", async () => {
+  let checks = 0, waits = 0;
+  const confirmed = await resolveOrBootstrapAttestedSession(request("computer_windows"), ENV, {
+    resolve: async () => {
+      checks++;
+      return checks === 1 ? { ok: false, error: "central_session_unbound" }
+        : { ok: true, ownerUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            clientId: "product-client-123", deviceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" };
+    },
+    open: async () => Response.json({ ok: true, status: "bound",
+      device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }),
+    wait: async () => { waits++; },
+  });
+  assert.equal(confirmed.ok, true);
+  assert.equal(checks, 2);
+  assert.equal(waits, 0, "already-confirmed binding has no artificial polling delay");
+
+  let failures = 0;
+  const denied = await resolveOrBootstrapAttestedSession(request("computer_windows"), ENV, {
+    resolve: async () => { failures++; return { ok: false, error: "central_session_unbound" }; },
+    open: async () => Response.json({ ok: true, status: "bound",
+      device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }),
+    wait: async () => {},
+  });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, "central_session_pending");
+  assert.equal(failures, 18, "opening a bound ticket is never sufficient to authorize a device");
+});
+
 test("attested recovery never retries revoked, missing-marker or rejected challenges", async () => {
   for (const error of ["central_session_marker_required", "central_session_revoked", "central_session_invalid"]) {
     let opens = 0;
@@ -669,8 +716,8 @@ test("pending device challenge does not enqueue any action or expand grants", as
   assert.equal(body.result.isError, true);
   assert.equal(body.result.structuredContent.error, "central_session_pending");
   assert.equal(opens, 1);
-  assert.equal(checks, 7);
-  assert.equal(waits, 6);
+  assert.equal(checks, 17);
+  assert.equal(waits, 16);
   assert.equal(calls.targets, 0);
   assert.equal(calls.getAction, 0);
 });
