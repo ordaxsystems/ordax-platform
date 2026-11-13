@@ -119,6 +119,23 @@ class McpReleaseContract(unittest.TestCase):
         self.assertTrue(validation["interactive_computer_grant_authorized"])
         self.assertTrue(validation["attested_interactive_end_to_end_verified"])
         self.assertTrue(validation["canonical_remote_actions_verified"])
+        progress=release["release_evidence_progress"]
+        self.assertEqual(set(progress),REQUIRED_PROOFS)
+        self.assertEqual({
+            key for key,item in progress.items() if item["status"]=="verified"
+        },{
+            "custom_domain_tls_run_url",
+            "remote_actions_contract_run_url",
+            "legacy_worker_retirement_run_url",
+        })
+        self.assertEqual({
+            key for key,item in progress.items() if item["status"]=="missing"
+        },{
+            "oauth_chatgpt_consent_run_url",
+            "paired_device_and_grants_run_url",
+            "trusted_host_attestation_run_url",
+            "multi_device_end_to_end_run_url",
+        })
         evidence=release.get("verified_evidence") or {}
         self.assertRegex(
             evidence.get("custom_domain_tls_run_url", ""),
@@ -177,6 +194,39 @@ class McpReleaseContract(unittest.TestCase):
                     validate(f,self.config)
                 with self.assertRaisesRegex(McpReleaseError,"production_blockers_incomplete"):
                     validate_interactive_candidate(f,self.config)
+
+    def test_release_proof_progress_is_exact_and_cannot_hide_missing_evidence(self):
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["release_evidence_progress"].pop("oauth_chatgpt_consent_run_url")
+        with self.assertRaisesRegex(McpReleaseError,"proof_progress_invalid"):
+            validate(f,self.config)
+
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["release_evidence_progress"]["paired_device_and_grants_run_url"]={
+            "status":"verified","run_url":"https://evil.example/run/1"
+        }
+        with self.assertRaisesRegex(McpReleaseError,"proof_progress_run"):
+            validate(f,self.config)
+
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["release_evidence_progress"]["trusted_host_attestation_run_url"]={
+            "status":"missing","reason":"short"
+        }
+        with self.assertRaisesRegex(McpReleaseError,"proof_progress_reason"):
+            validate(f,self.config)
+
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["readiness_blockers"].remove("production_release_evidence_incomplete")
+        with self.assertRaisesRegex(McpReleaseError,"evidence_blocker_inconsistent"):
+            validate(f,self.config)
+
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["release_evidence_progress"]["multi_device_end_to_end_run_url"]={
+            "status":"verified",
+            "run_url":"https://github.com/ordaxsystems/ordax-platform/actions/runs/1",
+        }
+        with self.assertRaisesRegex(McpReleaseError,"multi_device_blocker_inconsistent"):
+            validate(f,self.config)
 
     def test_bogus_production_enablement_without_proofs_is_rejected(self):
         f=copy.deepcopy(self.foundation)
