@@ -22,6 +22,9 @@ export interface ProductPostgresEnv {
   WORKSPACE_RESOURCE_VERIFIER_ENABLED?: string;
   // Separate rollout gate: verifier approval must NOT enable grant issuance.
   WORKSPACE_RESOURCE_ISSUANCE_ENABLED?: string;
+  // Owner request + enrolled Device Agent confirmation for Project binding.
+  // Absent/any other value keeps both endpoints unavailable.
+  OWNER_PROJECT_DEVICE_BINDING_ENABLED?: string;
   /** Usage recording stays off until the privacy and database rollout gates pass. */
   MCP_USAGE_METER_MODE?: string;
   /** High-entropy Cloudflare secret; required for retry fingerprints. */
@@ -201,6 +204,18 @@ const RPC_SPECS = {
   ordax_create_project_v1: {
     keys: ["p_actor_user_id", "p_space_id", "p_name", "p_kind", "p_metadata"],
     casts: ["uuid", "uuid", "text", "text", "jsonb"],
+  },
+  ordax_owner_create_project_device_binding_intent_v1: {
+    keys: ["p_owner_user_id", "p_project_id", "p_device_id", "p_intent_id", "p_expires_at"],
+    casts: ["uuid", "uuid", "uuid", "uuid", "timestamptz"],
+  },
+  ordax_device_read_project_binding_intents_v1: {
+    keys: ["p_device_id"],
+    casts: ["uuid"],
+  },
+  ordax_device_confirm_project_binding_v1: {
+    keys: ["p_device_id", "p_intent_id", "p_local_project_ref"],
+    casts: ["uuid", "uuid", "text"],
   },
   ordax_owner_create_github_authorization_challenge_v1: {
     keys: ["p_owner_user_id", "p_project_id", "p_challenge_id", "p_state_sha256", "p_expires_at"],
@@ -631,6 +646,45 @@ export async function createOwnerProject(
     // Onboarding does not accept arbitrary metadata from the browser. Provider
     // identity and repository selection remain separate server authorities.
     p_metadata: {},
+  });
+}
+
+export async function createOwnerProjectDeviceBindingIntent(
+  env: ProductPostgresEnv,
+  input: {
+    ownerUserId: string;
+    projectId: string;
+    deviceId: string;
+    intentId: string;
+    expiresAt: string;
+  },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_owner_create_project_device_binding_intent_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_project_id: input.projectId,
+    p_device_id: input.deviceId,
+    p_intent_id: input.intentId,
+    p_expires_at: input.expiresAt,
+  });
+}
+
+export async function readDeviceProjectBindingIntents(
+  env: ProductPostgresEnv,
+  input: { deviceId: string },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_device_read_project_binding_intents_v1", {
+    p_device_id: input.deviceId,
+  });
+}
+
+export async function confirmDeviceProjectBinding(
+  env: ProductPostgresEnv,
+  input: { deviceId: string; intentId: string; localProjectRef: string },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_device_confirm_project_binding_v1", {
+    p_device_id: input.deviceId,
+    p_intent_id: input.intentId,
+    p_local_project_ref: input.localProjectRef,
   });
 }
 
