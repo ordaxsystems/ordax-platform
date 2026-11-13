@@ -92,11 +92,15 @@ begin
     );
   end if;
 
+  -- The Project row is the stable serialization point shared with Device
+  -- confirmation. This prevents a new pending intent from being created after
+  -- a concurrent confirmation has already activated the binding.
   select p.space_id
     into v_space_id
   from public.ordax_projects p
   where p.project_id = p_project_id
-    and p.state = 'active';
+    and p.state = 'active'
+  for update;
 
   if not found then
     return pg_catalog.jsonb_build_object(
@@ -140,6 +144,18 @@ begin
   if v_connection_count <> 1 then
     return pg_catalog.jsonb_build_object(
       'ok', false, 'error', 'github_repository_ambiguous'
+    );
+  end if;
+
+  if exists (
+    select 1
+    from public.ordax_device_project_bindings b
+    where b.project_id = p_project_id
+      and b.device_id = p_device_id
+      and b.state = 'active'
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'project_device_already_bound'
     );
   end if;
 
@@ -299,6 +315,30 @@ begin
       'ok', false, 'error', 'project_device_binding_confirmation_invalid'
     );
   end if;
+
+  -- First resolve the immutable intent identity without locking it. Then lock
+  -- the canonical Project row before locking the intent, matching the Owner
+  -- creation lock order and avoiding a Project<->intent deadlock.
+  select *
+    into v_intent
+  from private.ordax_owner_project_device_binding_intents i
+  where i.intent_id = p_intent_id;
+
+  if not found
+     or v_intent.device_id <> p_device_id
+     or v_intent.consumed_at is not null
+     or v_intent.expires_at <= v_now
+  then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'project_device_binding_intent_not_active'
+    );
+  end if;
+
+  perform 1
+  from public.ordax_projects p
+  where p.project_id = v_intent.project_id
+    and p.space_id = v_intent.space_id
+  for update;
 
   select *
     into v_intent
