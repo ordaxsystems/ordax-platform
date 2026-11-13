@@ -1173,6 +1173,18 @@
         "blob_sha": "28dfcf24c7d7d530d9428ffbd804ea6ba23e8f91"
       },
       "ledger_name": "product_action_expired_state_v1"
+    },
+    {
+      "name": "20261113214943_owner_project_onboarding_authority_v1",
+      "applied_version": "20261113215619",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261113214943_owner_project_onboarding_authority_v1.sql",
+        "blob_sha": "32508a6c4c2211de8b8b7772b91909437857990a"
+      },
+      "ledger_name": "owner_project_onboarding_authority_v1"
     }
   ]
 }
