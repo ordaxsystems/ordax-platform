@@ -104,6 +104,7 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     // Upgrade must retain the existing Owner + Device confirmation model.
     await db.exec(read("20261104024500_central_attested_session_reconnect_v1.sql"));
     await db.exec(read("20261113085000_central_session_sliding_binding_v1.sql"));
+    await db.exec(read("20261113085500_central_session_activity_lease_v1.sql"));
 
     await db.query("insert into auth.users values($1)",[owner]);
     await db.query("insert into auth.oauth_clients values($1,null),($2,null)",[client,otherClient]);
@@ -174,6 +175,19 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
       "continuous authorized use renews the binding lease by roughly 30 minutes");
     assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where session_sha256=$1",[hash])).rows[0].total,
       challengeCountBefore,"sliding renewal creates no new challenge");
+
+    // Ordinary tool resolution is the activity path used after the session has
+    // already been opened. It must slide the exact same binding as well.
+    await db.query("update private.ordax_central_conversation_bindings set expires_at=now()+interval '5 minutes' where session_sha256=$1",[hash]);
+    const beforeResolveSlide=(await db.query("select expires_at from private.ordax_central_conversation_bindings where session_sha256=$1",[hash])).rows[0].expires_at;
+    const resolvedActive=await resolve();
+    const afterResolveSlide=(await db.query("select expires_at from private.ordax_central_conversation_bindings where session_sha256=$1",[hash])).rows[0].expires_at;
+    assert.equal(resolvedActive.device_id,desktop);
+    assert.equal(resolvedActive.request_id,confirmed.request_id);
+    assert.ok(new Date(afterResolveSlide).getTime() > new Date(beforeResolveSlide).getTime()+20*60*1000,
+      "ordinary authorized tool use renews the exact binding lease");
+    assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where session_sha256=$1",[hash])).rows[0].total,
+      challengeCountBefore,"resolver renewal creates no new challenge");
     await db.query("update public.ordax_remote_capability_grants set state='active' where grant_id=$1",[grantNote]);
 
     // After 30 minutes, the SAME Owner-selected and Device-confirmed
