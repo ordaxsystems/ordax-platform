@@ -34,6 +34,8 @@ Os grants Owner são snapshots explícitos, não aliases dinâmicos de perfil. Q
 
 A validação física de 13/11/2026 encerrou três lacunas de candidato que não devem voltar a aparecer como bloqueadores: o grant interativo está autorizado, o caminho atestado foi exercitado E2E no Desktop Windows e ações remotas canônicas foram concluídas com recibos reais. Isso **não** equivale à promoção de produção: `validation_evidence.production_release_authority=false` existe justamente para separar validação funcional de evidência formal de release.
 
+Na mesma data, o Runtime físico foi atualizado pelo lifecycle canônico para `7a1be0cb24b2b32d0ef24ad953e2a3338fab2260` (transação `8804f522f7784713827261ee141d5561`, `committed`). O update preservou uma única instalação: um `ORDAX Runtime.exe` e seu Python embutido no mesmo install root, readiness local/transport/Product pronta. A regressão `action_expired` por wake perdido foi reproduzida antes da correção e validada depois dela: durante um terminal de 76,8 s, ações independentes foram reivindicadas em 8,925 s, 1,885 s e 11,916 s; houve **zero** `action_expired` após o boot verificado. A regra canônica é: trabalho ativo mantém fallback de claim ≤18 s; somente Runtime realmente ocioso com wake já verificado pode usar reconciliação de 60 s, sempre abaixo do TTL de ação de 120 s.
+
 O Worker legado principal `ordax-control-plane-v3` já estava ausente na conta oficial. Em 13/11/2026 o canário público histórico `ordax-control-plane-v3-canary` também foi aposentado; o domínio `mcp.ordax.com.br` permanece ligado somente a `ordax-mcp`. O arquivo de candidato continua existindo apenas para `wrangler --dry-run`, com nome `ordax-mcp-validation-candidate` e `workers_dev=false`, portanto não deve recriar uma superfície pública paralela.
 
 Os bloqueios canônicos restantes são:
@@ -59,7 +61,11 @@ A publicação de uma tool só torna seu contrato descobrível pelo cliente. A e
 
 ## Tarefas longas sem bloquear o MCP
 
-`computer_terminal_exec` e `terminal_exec` são comandos **foreground** no executor canônico, que atende a fila Product serialmente. O tempo padrão passa a **60 segundos**; quem solicitar um timeout explícito maior continua autorizado a fazê-lo, mas ocupa o executor até encerrar. Compilações, servidores e outras tarefas demoradas devem utilizar o supervisor existente (`computer_process_start` ou `process_start`), com acompanhamento por `*_process_status` e `*_process_logs`. Não há segundo daemon, fila, autoridade ou cópia do processo.
+`computer_terminal_exec` e `terminal_exec` são comandos **foreground**, mas o Runtime Product usa execução concorrente limitada — **não existe fila global serial**. Um comando longo ocupa apenas seu slot de job e os recursos que realmente conflitam com ele; leituras, metadados, outros projetos e ações independentes podem ser reivindicados e executados em paralelo. Exclusividade é aplicada somente onde existe conflito real (por exemplo, mesmo recurso de escrita, terminal/recurso incompatível, GUI/foco compartilhado ou lifecycle/update).
+
+O fallback de claim também não pode transformar wake advisory em requisito para concorrência: com qualquer job ativo, novas ações independentes continuam sendo reconciliadas em até **18 segundos**. Somente quando o Runtime está realmente ocioso e já recebeu um wake autenticado na conexão atual a reconciliação pode subir para **60 segundos**, ainda abaixo do TTL Product de **120 segundos**.
+
+Comandos foreground com timeout explícito maior continuam válidos, porém para compilações, servidores e tarefas que precisam de acompanhamento/cancelamento independente prefira o supervisor existente (`computer_process_start` ou `process_start`), acompanhado por `*_process_status` e `*_process_logs`. Isso fornece IDs estáveis e supervisão sem criar segundo daemon, fila ou autoridade.
 
 A capacidade legada `ordax.product.read.invoke` foi retirada do Runtime: o contrato vigente usa operações Product tipadas e, quando aplicável, `ordax.product.invoke` com auditoria e autorização próprias. Comandos já aceitos não devem ser enfileirados novamente só porque a verificação de status demorou. Essa regra não altera nem afrouxa grants Owner.
 
