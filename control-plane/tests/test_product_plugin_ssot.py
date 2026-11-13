@@ -89,13 +89,13 @@ class PrivateProductInteractiveValidationPluginTest(unittest.TestCase):
                     "0.3.0",
                 )
 
-    def test_package_fails_closed_if_candidate_or_e2e_state_is_wrong(self):
+    def test_package_fails_closed_if_candidate_or_release_state_is_wrong(self):
         foundation = json.loads(plugin_build.FOUNDATION.read_text(encoding="utf-8"))
         for mutate, expected in (
             (lambda release: release.__setitem__("supports_remote_actions", False), "requires remote actions"),
             (lambda release: release.__setitem__("validation_deployment_ready", False), "not deployable"),
             (lambda release: release.__setitem__("deployment_ready", True), "already-approved production"),
-            (lambda release: release.__setitem__("readiness_blockers", []), "real E2E blocker"),
+            (lambda release: release.__setitem__("readiness_blockers", []), "production-evidence blocker"),
         ):
             candidate = json.loads(json.dumps(foundation))
             mutate(candidate["mcp_release"])
