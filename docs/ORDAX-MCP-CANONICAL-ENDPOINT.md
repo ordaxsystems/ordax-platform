@@ -34,11 +34,12 @@ Os grants Owner são snapshots explícitos, não aliases dinâmicos de perfil. Q
 
 A validação física de 13/11/2026 encerrou três lacunas de candidato que não devem voltar a aparecer como bloqueadores: o grant interativo está autorizado, o caminho atestado foi exercitado E2E no Desktop Windows e ações remotas canônicas foram concluídas com recibos reais. Isso **não** equivale à promoção de produção: `validation_evidence.production_release_authority=false` existe justamente para separar validação funcional de evidência formal de release.
 
+O Worker legado principal `ordax-control-plane-v3` já estava ausente na conta oficial. Em 13/11/2026 o canário público histórico `ordax-control-plane-v3-canary` também foi aposentado; o domínio `mcp.ordax.com.br` permanece ligado somente a `ordax-mcp`. O arquivo de candidato continua existindo apenas para `wrangler --dry-run`, com nome `ordax-mcp-validation-candidate` e `workers_dev=false`, portanto não deve recriar uma superfície pública paralela.
+
 Os bloqueios canônicos restantes são:
 
 - `multi_device_end_to_end_not_verified`: ainda falta prova real com mais de um dispositivo elegível;
-- `legacy_worker_retirement_not_verified`: ainda falta a prova formal de retirada/ausência do caminho legado;
-- `production_release_evidence_incomplete`: o conjunto independente de sete URLs de execução exigido por `REQUIRED_PROOFS` ainda não está completo.
+- `production_release_evidence_incomplete`: o conjunto independente de sete URLs de execução exigido por `REQUIRED_PROOFS` ainda não está completo. Isso inclui o comprovante formal de retirement em URL de workflow, embora a retirada física já esteja concluída.
 
 O guard de produção continua fail-closed. Remover esses bloqueios sem preencher `release_evidence` com os sete comprovantes válidos e sem `device_dispatch_via_trusted_host_verified=true` continua rejeitado pelos testes. Não reintroduzir os antigos bloqueadores apenas por histórico documental: eles descreviam o estado anterior à validação física de 13/11.
 

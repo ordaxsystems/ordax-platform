@@ -1,5 +1,5 @@
 {
-  "version": 25,
+  "version": 26,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -199,7 +199,6 @@
     },
     "readiness_blockers": [
       "multi_device_end_to_end_not_verified",
-      "legacy_worker_retirement_not_verified",
       "production_release_evidence_incomplete"
     ],
     "verified_evidence": {
@@ -225,7 +224,11 @@
       "canonical_remote_actions_verified": true,
       "runtime_source_commit": "bbf7af01228c63562fbb8e2e605ed75e37303fb8",
       "platform_source_commit": "4732d40e4495bdfb7cbc60cd3652423847b64ffd",
-      "note": "Physical single-device validation is complete; production still requires the independent release_evidence proof set."
+      "note": "Physical single-device validation is complete; production still requires the independent release_evidence proof set.",
+      "legacy_public_worker_retired": true,
+      "legacy_worker_retirement_observed_at": "2026-11-13",
+      "legacy_worker_retirement_scope": "ordax-control-plane-v3 absent; ordax-control-plane-v3-canary removed; canonical mcp.ordax.com.br remains on ordax-mcp",
+      "legacy_worker_retirement_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/43457462005"
     }
   }
 }

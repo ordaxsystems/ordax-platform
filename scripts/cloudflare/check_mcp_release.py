@@ -25,7 +25,6 @@ class McpReleaseError(ValueError):
 
 PENDING_PRODUCTION_BLOCKERS=frozenset({
     "multi_device_end_to_end_not_verified",
-    "legacy_worker_retirement_not_verified",
     "production_release_evidence_incomplete",
 })
 REQUIRED_PROOFS=frozenset({

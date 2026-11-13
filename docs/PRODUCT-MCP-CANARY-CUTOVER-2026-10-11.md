@@ -1,5 +1,7 @@
 # Product MCP canônico — validação sem D1
 
+> **Documento histórico — supersedido em 13/11/2026.** O Worker público `ordax-control-plane-v3-canary` foi aposentado. O candidato atual é apenas um build `--dry-run` não roteável (`ordax-mcp-validation-candidate`, `workers_dev=false`). A superfície pública canônica é exclusivamente `https://mcp.ordax.com.br/mcp` no Worker `ordax-mcp`. Não usar os passos deste documento para republicar o canário legado.
+
 **Estado:** candidato read-only para a migração da issue #42. **Não foi publicado em produção**. Não é substituto para o Relay funcional, não representa instalação de dispositivo nem serviço GPT.
 
 ## Entrypoint e autoridade

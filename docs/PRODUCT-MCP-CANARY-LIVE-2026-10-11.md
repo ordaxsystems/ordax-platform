@@ -1,5 +1,7 @@
 # OrdaX Product MCP — auditoria da publicação e do plugin privado
 
+> **Documento histórico — supersedido em 13/11/2026.** O Worker público `ordax-control-plane-v3-canary` foi aposentado. O candidato atual é apenas um build `--dry-run` não roteável (`ordax-mcp-validation-candidate`, `workers_dev=false`). A superfície pública canônica é exclusivamente `https://mcp.ordax.com.br/mcp` no Worker `ordax-mcp`. Não usar os passos deste documento para republicar o canário legado.
+
 **Data:** 11 de outubro de 2026. **Owner do código:** `ordaxsystems/ordax-platform`.
 **Estado:** canary público **somente leitura**, sem integração real de IA pelo Relay.
 **Não é a produção** e não comprova três PCs/usuários online.
