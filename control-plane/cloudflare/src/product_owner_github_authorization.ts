@@ -100,6 +100,8 @@ function configuredGithubApp(env: ProductGithubAppEnv) {
   return { clientId, clientSecret, pkceSecret, installUrl };
 }
 
+type GithubAppConfig = NonNullable<ReturnType<typeof configuredGithubApp>>;
+
 function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const value of bytes) binary += String.fromCharCode(value);
@@ -203,7 +205,7 @@ export type VerifiedGithubRepositoryCandidate = Readonly<{
 }>;
 
 async function exchangeGithubAuthorizationCode(
-  config: ReturnType<typeof configuredGithubApp> extends infer T ? Exclude<T, null> : never,
+  config: GithubAppConfig,
   code: string,
   codeVerifier: string,
   fetcher: GithubFetch,
@@ -342,7 +344,7 @@ export async function collectVerifiedGithubRepositories(
 }
 
 async function buildAuthorizationChallenge(
-  config: Exclude<ReturnType<typeof configuredGithubApp>, null>,
+  config: GithubAppConfig,
   ownerUserId: string,
   projectId: string,
   now: number,
