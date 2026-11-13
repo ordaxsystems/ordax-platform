@@ -1,8 +1,8 @@
--- Keep an already Device-attested conversation bound while it is actively used.
--- Every open still rechecks current grant, target integrity, presence and Runtime
--- readiness. The binding lease slides by 30 minutes only for the exact same
--- active binding; inactivity still expires it and requires the existing Device
--- proof path. Multi-device target selection remains Owner-controlled.
+-- Keep an already Device-attested conversation bound while it is actively used
+-- when exactly one device remains eligible. That path rechecks current grant,
+-- target integrity, presence and Runtime readiness before sliding the same binding
+-- by 30 minutes. Inactivity still expires it and requires the existing Device
+-- proof path. Multi-device target selection and lease behavior remain unchanged.
 -- This migration changes no grant ledger, device identity or target selection.
 begin;
 
@@ -86,18 +86,6 @@ begin
          return jsonb_build_object('ok',false,'error','central_device_grant_revoked');
        end if;
        if v_existing.expires_at>v_now then
-         update private.ordax_central_conversation_bindings b
-            set expires_at=pg_catalog.greatest(b.expires_at,v_now+interval '30 minutes')
-          where b.request_id=v_existing.request_id
-            and b.owner_user_id=p_owner_user_id
-            and b.client_id=p_client_id
-            and b.session_sha256=p_session_sha256
-            and b.device_id=v_existing.device_id
-            and b.state='active'
-          returning b.* into v_existing;
-         if not found then
-           return jsonb_build_object('ok',false,'error','central_session_invalid');
-         end if;
          return jsonb_build_object('ok',true,'status','bound',
            'device_id',v_existing.device_id,
            'request_id',v_existing.request_id,'expires_at',v_existing.expires_at);
