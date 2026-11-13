@@ -452,7 +452,7 @@ async function bodyJson(response: Response): Promise<JsonObject> {
   return await readBoundedJsonObject(response, 2 * 1024 * 1024) ?? {};
 }
 
-const ACTION_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled"]);
+const ACTION_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled", "expired"]);
 export function isProductActionStatus(value: unknown): value is string {
   return typeof value === "string" && ACTION_STATUSES.has(value);
 }
@@ -655,7 +655,7 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
       || typeof action.action !== "string" || action.action.length > 120
       || !/^[a-z][a-z0-9._-]+$/.test(action.action)) return invalid;
     const status = action.status;
-    const pending = !["succeeded", "failed", "cancelled"].includes(status);
+    const pending = !["succeeded", "failed", "cancelled", "expired"].includes(status);
     const runtimeKind = action.execution_runtime_kind;
     const runtimeVersion = action.execution_agent_version;
     const provenanceUnknown = (runtimeKind === null || runtimeKind === undefined)
