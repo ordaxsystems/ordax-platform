@@ -45,6 +45,39 @@ VALIDATION_BASELINE_EVIDENCE=frozenset({
 })
 CHATGPT_OAUTH_CLIENT_ID="95d41a8f-0fb8-4c4b-9757-83ba6345062d"
 RUN_URL_RE=re.compile(r"https://github\.com/ordaxsystems/ordax-platform/actions/runs/[0-9]+")
+PROOF_RUN_URL_RE=re.compile(
+    r"https://github\.com/ordaxsystems/(ordax-platform|ordax-apps|ordax-os)/actions/runs/[0-9]+"
+)
+
+
+def validate_release_evidence_progress(release:dict)->set[str]:
+    progress=release.get("release_evidence_progress")
+    if not isinstance(progress,dict) or set(progress)!=REQUIRED_PROOFS:
+        raise McpReleaseError("mcp_release_proof_progress_invalid")
+    missing:set[str]=set()
+    for key in REQUIRED_PROOFS:
+        item=progress.get(key)
+        if not isinstance(item,dict):
+            raise McpReleaseError(f"mcp_release_proof_progress_invalid_{key}")
+        status=item.get("status")
+        if status=="verified":
+            if set(item)!={"status","run_url"}:
+                raise McpReleaseError(f"mcp_release_proof_progress_shape_{key}")
+            value=item.get("run_url")
+            if not isinstance(value,str) or PROOF_RUN_URL_RE.fullmatch(value) is None:
+                raise McpReleaseError(f"mcp_release_proof_progress_run_{key}")
+        elif status=="missing":
+            if set(item)!={"status","reason"}:
+                raise McpReleaseError(f"mcp_release_proof_progress_shape_{key}")
+            reason=item.get("reason")
+            if not isinstance(reason,str) or len(reason.strip())<24:
+                raise McpReleaseError(f"mcp_release_proof_progress_reason_{key}")
+            missing.add(key)
+        else:
+            raise McpReleaseError(f"mcp_release_proof_progress_status_{key}")
+    return missing
+
+
 TRUSTED_CLIENT_INGRESS={
     "hostname":"ordax-mcp.ordaxsystems.workers.dev",
     "workers_dev_enabled":True,
@@ -181,6 +214,14 @@ def validate(foundation:dict,config:dict)->bool:
         raise McpReleaseError("mcp_release_status_invalid")
     if ready==bool(blocked):
         raise McpReleaseError("mcp_release_status_inconsistent")
+    missing_proofs=validate_release_evidence_progress(release)
+    has_evidence_blocker="production_release_evidence_incomplete" in blocked
+    if has_evidence_blocker != bool(missing_proofs):
+        raise McpReleaseError("mcp_release_evidence_blocker_inconsistent")
+    multi_missing="multi_device_end_to_end_run_url" in missing_proofs
+    has_multi_blocker="multi_device_end_to_end_not_verified" in blocked
+    if has_multi_blocker != multi_missing:
+        raise McpReleaseError("mcp_release_multi_device_blocker_inconsistent")
     if not ready:
         if remote_actions:
             missing=PENDING_PRODUCTION_BLOCKERS-set(blocked)
@@ -196,9 +237,7 @@ def validate(foundation:dict,config:dict)->bool:
     if not isinstance(proofs,dict) or set(proofs)!=REQUIRED_PROOFS:
         raise McpReleaseError("mcp_release_missing_independent_proofs")
     for key,value in proofs.items():
-        if not isinstance(value,str) or not re.fullmatch(
-            r"https://github\.com/ordaxsystems/(ordax-platform|ordax-apps|ordax-os)/actions/runs/[0-9]+",value
-        ):
+        if not isinstance(value,str) or PROOF_RUN_URL_RE.fullmatch(value) is None:
             raise McpReleaseError(f"mcp_release_invalid_proof_{key}")
     if not release.get("device_dispatch_via_trusted_host_verified",False):
         raise McpReleaseError("mcp_device_dispatch_not_verified")
