@@ -1137,6 +1137,18 @@
         "blob_sha": "e1198bba636546486674b94771e5296789381e42"
       },
       "ledger_name": "central_session_activity_lease_v1"
+    },
+    {
+      "name": "20261113151500_central_session_persistent_binding_v1",
+      "applied_version": "20261113153444",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261113151500_central_session_persistent_binding_v1.sql",
+        "blob_sha": "a18b9f67707c82c6fcf93b07e64d870de13f5ed1"
+      },
+      "ledger_name": "central_session_persistent_binding_v1"
     }
   ]
 }
