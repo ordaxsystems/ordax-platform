@@ -65,6 +65,10 @@ import {
   PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH,
 } from "./product_owner_project_onboarding.ts";
 import {
+  handleProductOwnerProjectBinding,
+  PRODUCT_OWNER_PROJECT_BINDING_INTENTS_PATH,
+} from "./product_owner_project_binding.ts";
+import {
   handleProductOwnerGithubAuthorization,
   PRODUCT_OWNER_GITHUB_AUTHORIZATION_CHALLENGES_PATH,
   PRODUCT_OWNER_GITHUB_AUTHORIZATION_COMPLETIONS_PATH,
@@ -90,6 +94,7 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH
     || pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PATH
     || pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH
+    || pathname === PRODUCT_OWNER_PROJECT_BINDING_INTENTS_PATH
     || pathname === PRODUCT_OWNER_GITHUB_AUTHORIZATION_CHALLENGES_PATH
     || pathname === PRODUCT_OWNER_GITHUB_AUTHORIZATION_COMPLETIONS_PATH
     || pathname === PRODUCT_OWNER_GITHUB_REPOSITORY_CANDIDATES_PATH
@@ -410,6 +415,9 @@ export function createCanonicalProductMcpGateway(
     if (url.pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PATH
         || url.pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH) {
       return handleProductOwnerProjectOnboarding(request, env);
+    }
+    if (url.pathname === PRODUCT_OWNER_PROJECT_BINDING_INTENTS_PATH) {
+      return handleProductOwnerProjectBinding(request, env);
     }
     if (url.pathname === PRODUCT_OWNER_GITHUB_AUTHORIZATION_CHALLENGES_PATH
         || url.pathname === PRODUCT_OWNER_GITHUB_AUTHORIZATION_COMPLETIONS_PATH
