@@ -30,6 +30,9 @@ test("published entry cannot accidentally import legacy D1 Worker or configure D
   const config = await readFile(new URL("../cloudflare/wrangler.product-mcp-canary.toml", import.meta.url), "utf8");
   assert.doesNotMatch(source, /env\.DB\b|from ["']\.\/index(?:\.ts)?["']/);
   assert.doesNotMatch(config, /\[\[d1_databases\]\]|\bbinding\s*=\s*["']DB["']/);
+  assert.match(config, /name = "ordax-mcp-validation-candidate"/);
+  assert.match(config, /workers_dev\s*=\s*false/);
+  assert.doesNotMatch(config, /ordax-control-plane-v3-canary/);
   assert.match(config, /main = "src\/product_mcp_entry.ts"/);
   assert.match(config, /binding = "POSTGRES"/);
   assert.match(config, /id = "4b601ec5815f43259bd8040053825d2a"/);
