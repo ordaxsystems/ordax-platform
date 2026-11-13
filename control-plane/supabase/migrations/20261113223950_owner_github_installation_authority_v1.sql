@@ -280,13 +280,14 @@ begin
      and c.status = 'verifying'
      and c.expires_at > v_now
      and exists (
-       select 1 from public.ordax_projects p
-       where p.project_id = c.project_id
-         and p.space_id = c.space_id
-         and p.state = 'active'
-         and private.ordax_subject_can_admin_space_v1(
-           p_owner_user_id, p.space_id
-         )
+       select 1
+         from public.ordax_projects p
+        where p.project_id = c.project_id
+          and p.space_id = c.space_id
+          and p.state = 'active'
+          and private.ordax_subject_can_admin_space_v1(
+            p_owner_user_id, p.space_id
+          )
      )
    for update;
 
@@ -298,37 +299,56 @@ begin
 
   if exists (
     select 1
-    from pg_catalog.jsonb_array_elements(p_candidates) e(value)
-    where pg_catalog.jsonb_typeof(e.value) <> 'object'
-       or (
-         select pg_catalog.array_agg(k order by k)
-         from pg_catalog.jsonb_object_keys(e.value) k
-       ) <> array[
-         'default_branch',
-         'installation_account_id',
-         'installation_account_login',
-         'installation_id',
-         'repository_full_name',
-         'repository_id'
-       ]::text[]
-       or not (
-         case
-           when coalesce(e.value->>'installation_id', '') ~ '^[1-9][0-9]{0,18}       or char_length(coalesce(e.value->>'installation_account_login', ''))
-            not between 1 and 100
-       or coalesce(e.value->>'installation_account_login', '')
-            !~ '^[A-Za-z0-9-]+$'
-       or char_length(coalesce(e.value->>'repository_full_name', ''))
-            not between 3 and 200
-       or coalesce(e.value->>'repository_full_name', '')
-            !~ '^[^[:space:]/]+/[^[:space:]/]+$'
-       or (
-         e.value->'default_branch' <> 'null'::jsonb
-         and (
-           pg_catalog.jsonb_typeof(e.value->'default_branch') <> 'string'
-           or char_length(e.value->>'default_branch') not between 1 and 255
-           or (e.value->>'default_branch') ~ '[[:cntrl:]]'
-         )
-       )
+      from pg_catalog.jsonb_array_elements(p_candidates) as e(value)
+     where pg_catalog.jsonb_typeof(e.value) <> 'object'
+        or (
+          select pg_catalog.array_agg(keys.k order by keys.k)
+            from pg_catalog.jsonb_object_keys(e.value) as keys(k)
+        ) <> array[
+          'default_branch',
+          'installation_account_id',
+          'installation_account_login',
+          'installation_id',
+          'repository_full_name',
+          'repository_id'
+        ]::text[]
+        or not (
+          case
+            when coalesce(e.value->>'installation_id', '') ~ '^[1-9][0-9]{0,18}$'
+            then (e.value->>'installation_id')::numeric <= 9223372036854775807
+            else false
+          end
+        )
+        or not (
+          case
+            when coalesce(e.value->>'installation_account_id', '') ~ '^[1-9][0-9]{0,18}$'
+            then (e.value->>'installation_account_id')::numeric <= 9223372036854775807
+            else false
+          end
+        )
+        or not (
+          case
+            when coalesce(e.value->>'repository_id', '') ~ '^[1-9][0-9]{0,18}$'
+            then (e.value->>'repository_id')::numeric <= 9223372036854775807
+            else false
+          end
+        )
+        or char_length(coalesce(e.value->>'installation_account_login', ''))
+             not between 1 and 100
+        or coalesce(e.value->>'installation_account_login', '')
+             !~ '^[A-Za-z0-9-]+$'
+        or char_length(coalesce(e.value->>'repository_full_name', ''))
+             not between 3 and 200
+        or coalesce(e.value->>'repository_full_name', '')
+             !~ '^[^[:space:]/]+/[^[:space:]/]+$'
+        or (
+          e.value->'default_branch' <> 'null'::jsonb
+          and (
+            pg_catalog.jsonb_typeof(e.value->'default_branch') <> 'string'
+            or char_length(e.value->>'default_branch') not between 1 and 255
+            or (e.value->>'default_branch') ~ '[[:cntrl:]]'
+          )
+        )
   ) then
     return pg_catalog.jsonb_build_object(
       'ok', false, 'error', 'github_repository_candidates_invalid'
@@ -337,8 +357,8 @@ begin
 
   if exists (
     select 1
-    from pg_catalog.jsonb_array_elements(p_candidates) e(value)
-    group by e.value->>'repository_id'
+      from pg_catalog.jsonb_array_elements(p_candidates) as e(value)
+     group by e.value->>'repository_id'
     having pg_catalog.count(*) > 1
   ) then
     return pg_catalog.jsonb_build_object(
@@ -347,12 +367,17 @@ begin
   end if;
 
   delete from private.ordax_owner_github_repository_candidates r
-  where r.challenge_id = p_challenge_id;
+   where r.challenge_id = p_challenge_id;
 
   insert into private.ordax_owner_github_repository_candidates(
-    challenge_id, installation_id, installation_account_id,
-    installation_account_login, repository_id, repository_full_name,
-    default_branch, expires_at
+    challenge_id,
+    installation_id,
+    installation_account_id,
+    installation_account_login,
+    repository_id,
+    repository_full_name,
+    default_branch,
+    expires_at
   )
   select
     p_challenge_id,
@@ -366,7 +391,7 @@ begin
       else e.value->>'default_branch'
     end,
     v_expires_at
-  from pg_catalog.jsonb_array_elements(p_candidates) e(value);
+  from pg_catalog.jsonb_array_elements(p_candidates) as e(value);
 
   get diagnostics v_candidate_count = row_count;
 
@@ -477,7 +502,12 @@ begin
      or p_repository_id is null
      or not (
        case
-         when p_repository_id ~ '^[1-9][0-9]{0,18}    return pg_catalog.jsonb_build_object(
+         when p_repository_id ~ '^[1-9][0-9]{0,18}$'
+         then p_repository_id::numeric <= 9223372036854775807
+         else false
+       end
+     ) then
+    return pg_catalog.jsonb_build_object(
       'ok', false, 'error', 'github_repository_selection_invalid'
     );
   end if;
@@ -490,13 +520,14 @@ begin
      and c.status = 'verified'
      and c.expires_at > v_now
      and exists (
-       select 1 from public.ordax_projects p
-       where p.project_id = c.project_id
-         and p.space_id = c.space_id
-         and p.state = 'active'
-         and private.ordax_subject_can_admin_space_v1(
-           p_owner_user_id, p.space_id
-         )
+       select 1
+         from public.ordax_projects p
+        where p.project_id = c.project_id
+          and p.space_id = c.space_id
+          and p.state = 'active'
+          and private.ordax_subject_can_admin_space_v1(
+            p_owner_user_id, p.space_id
+          )
      )
    for update;
 
@@ -506,12 +537,28 @@ begin
     );
   end if;
 
+  -- Serialize selections across distinct challenges for the same Project.
+  -- This keeps one active GitHub connection authoritative under concurrency.
+  perform 1
+    from public.ordax_projects p
+   where p.project_id = v_project_id
+     and p.space_id = v_space_id
+     and p.state = 'active'
+   for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'project_not_found_or_inactive'
+    );
+  end if;
+
   if exists (
-    select 1 from public.ordax_project_connections c
-    where c.project_id = v_project_id
-      and c.space_id = v_space_id
-      and c.provider = 'github'
-      and c.state = 'active'
+    select 1
+      from public.ordax_project_connections c
+     where c.project_id = v_project_id
+       and c.space_id = v_space_id
+       and c.provider = 'github'
+       and c.state = 'active'
   ) then
     return pg_catalog.jsonb_build_object(
       'ok', false, 'error', 'project_github_connection_exists'
@@ -528,10 +575,10 @@ begin
          v_repository_id,
          v_repository_full_name,
          v_default_branch
-  from private.ordax_owner_github_repository_candidates r
-  where r.challenge_id = p_challenge_id
-    and r.repository_id = p_repository_id::bigint
-    and r.expires_at > v_now;
+    from private.ordax_owner_github_repository_candidates r
+   where r.challenge_id = p_challenge_id
+     and r.repository_id = p_repository_id::bigint
+     and r.expires_at > v_now;
 
   if not found then
     return pg_catalog.jsonb_build_object(
@@ -539,12 +586,13 @@ begin
     );
   end if;
 
-  select c.connection_id into v_connection_id
-  from public.ordax_project_connections c
-  where c.project_id = v_project_id
-    and c.provider = 'github'
-    and c.repository_id = v_repository_id
-  for update;
+  select c.connection_id
+    into v_connection_id
+    from public.ordax_project_connections c
+   where c.project_id = v_project_id
+     and c.provider = 'github'
+     and c.repository_id = v_repository_id
+   for update;
 
   if found then
     update public.ordax_project_connections
@@ -563,13 +611,29 @@ begin
      where connection_id = v_connection_id;
   else
     insert into public.ordax_project_connections(
-      space_id, owner_user_id, provider, external_account_id,
-      installation_id, repository_id, repository_full_name,
-      default_branch, access_mode, state, metadata, project_id
+      space_id,
+      owner_user_id,
+      provider,
+      external_account_id,
+      installation_id,
+      repository_id,
+      repository_full_name,
+      default_branch,
+      access_mode,
+      state,
+      metadata,
+      project_id
     ) values (
-      v_space_id, p_owner_user_id, 'github',
-      v_installation_account_id::text, v_installation_id, v_repository_id,
-      v_repository_full_name, v_default_branch, 'read', 'active',
+      v_space_id,
+      p_owner_user_id,
+      'github',
+      v_installation_account_id::text,
+      v_installation_id,
+      v_repository_id,
+      v_repository_full_name,
+      v_default_branch,
+      'read',
+      'active',
       pg_catalog.jsonb_build_object(
         'authority', 'github_app_user_authorization_v1'
       ),
@@ -579,11 +643,13 @@ begin
   end if;
 
   update private.ordax_owner_github_authorization_challenges c
-     set status = 'selected', consumed_at = v_now, updated_at = v_now
+     set status = 'selected',
+         consumed_at = v_now,
+         updated_at = v_now
    where c.challenge_id = p_challenge_id;
 
   delete from private.ordax_owner_github_repository_candidates r
-  where r.challenge_id = p_challenge_id;
+   where r.challenge_id = p_challenge_id;
 
   return pg_catalog.jsonb_build_object(
     'ok', true,
