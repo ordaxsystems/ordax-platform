@@ -2,6 +2,14 @@
 
 **Owner:** OrdaX Product/Platform. **Migration:** `20261007213500_central_durable_conversation_binding_v1.sql`.
 
+> **Escopo histórico importante:** o limite de 30 minutos descrito neste documento pertence
+> ao contrato genérico original do attestor Central. O Product MCP direto evoluiu para
+> o fluxo Device-attested `ordax_open/confirm/resolve_central_device_session_v1`.
+> Desde `20261113151500_central_session_persistent_binding_v1.sql`, o binding
+> conversa → dispositivo confirmado é persistente e sua segurança vem de revalidação
+> de OAuth/grants/revogação, não de expiração por inatividade. Não usar este documento
+> histórico para reintroduzir TTL no Product MCP.
+
 A `private.ordax_central_conversation_bindings` é o único registro que
 associa `request_id`, sujeito do Supabase, **client_id OAuth assinado**, PC,
 Space/projeto (ambos nulos para um grant device), conversa observada no Web
