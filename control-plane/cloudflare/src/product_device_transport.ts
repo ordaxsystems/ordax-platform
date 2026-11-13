@@ -8,6 +8,8 @@
 import {
   authenticateProductDevice,
   commitProjectWorkspaceResource,
+  confirmDeviceProjectBinding,
+  readDeviceProjectBindingIntents,
   bindProductActionRuntimeProvenance,
   claimProductAction,
   progressProductAction,
@@ -24,6 +26,7 @@ import {
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { projectWorkspaceGrantProjection } from "./project_workspace_grant_contract.ts";
+import { OWNER_MCP_GRANT_PROFILES } from "./product_owner_grant_profiles.ts";
 import { canonicalDeviceWorkspaceConfirmation } from "./project_workspace_issue_contract.ts";
 import { subscribeProductDeviceWake } from "./product_device_wake.ts";
 
@@ -407,6 +410,134 @@ async function workspaceResourceConfirmation(
   return respond({ ok: committed, committed }, committed ? 200 : 403);
 }
 
+const LOCAL_PROJECT_REF_RE = /^project-[1-9][0-9]*$/;
+const REPOSITORY_FULL_NAME_RE = /^[^\\s/]+\\/[^\\s/]+$/;
+const PROJECT_BINDABLE_CAPABILITIES = new Set<string>(
+  Object.values(OWNER_MCP_GRANT_PROFILES)
+    .filter(profile => profile.scope === "project")
+    .flatMap(profile => profile.capabilities.map(item => item.capability)),
+);
+
+export function canonicalDeviceProjectBindingConfirmation(body: unknown): {
+  intentId: string;
+  localProjectRef: string;
+  capabilities: string[];
+} | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const raw = body as Json;
+  if (Object.keys(raw).sort().join(",") !== "capabilities,intent_id,local_project_ref")
+    return null;
+  const intentId = typeof raw.intent_id === "string" ? raw.intent_id.toLowerCase() : "";
+  const localProjectRef = typeof raw.local_project_ref === "string"
+    ? raw.local_project_ref : "";
+  if (!isCanonicalUuid(intentId) || !LOCAL_PROJECT_REF_RE.test(localProjectRef)
+      || localProjectRef.length > 160 || !Array.isArray(raw.capabilities)
+      || raw.capabilities.length < 1 || raw.capabilities.length > 128) return null;
+  const capabilities: string[] = [];
+  const seen = new Set<string>();
+  for (const value of raw.capabilities) {
+    if (typeof value !== "string" || !PROJECT_BINDABLE_CAPABILITIES.has(value)
+        || seen.has(value)) return null;
+    seen.add(value);
+    capabilities.push(value);
+  }
+  capabilities.sort();
+  return { intentId, localProjectRef, capabilities };
+}
+
+export function deviceProjectBindingIntentsResponse(
+  raw: unknown, deviceId: string, now = Date.now(),
+): Json | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const value = raw as Json;
+  if (Object.keys(value).sort().join(",") !== "device_id,intents,ok"
+      || value.ok !== true || value.device_id !== deviceId
+      || !Array.isArray(value.intents) || value.intents.length > 32) return null;
+  const ids = new Set<string>();
+  const intents: Json[] = [];
+  for (const item of value.intents) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+    const row = item as Json;
+    if (Object.keys(row).sort().join(",")
+          !== "expires_at,intent_id,project_id,project_name,repository_full_name,space_id"
+        || !isCanonicalUuid(row.intent_id) || ids.has(row.intent_id as string)
+        || !isCanonicalUuid(row.project_id) || !isCanonicalUuid(row.space_id)
+        || typeof row.project_name !== "string" || row.project_name.length < 1
+        || row.project_name.length > 120 || /[\\u0000-\\u001f\\u007f]/.test(row.project_name)
+        || typeof row.repository_full_name !== "string"
+        || row.repository_full_name.length < 3 || row.repository_full_name.length > 200
+        || !REPOSITORY_FULL_NAME_RE.test(row.repository_full_name)
+        || typeof row.expires_at !== "string" || !Number.isFinite(Date.parse(row.expires_at))
+        || Date.parse(row.expires_at) <= now) return null;
+    ids.add(row.intent_id as string);
+    intents.push({
+      intent_id: row.intent_id,
+      project_id: row.project_id,
+      space_id: row.space_id,
+      project_name: row.project_name,
+      repository_full_name: row.repository_full_name,
+      expires_at: row.expires_at,
+    });
+  }
+  return {
+    ok: true,
+    schema: "ordax.device-project-binding-intents/1",
+    device_id: deviceId,
+    intents,
+  };
+}
+
+async function projectBindingIntents(
+  request: Request, env: ProductPostgresEnv, deviceId: string,
+): Promise<Response> {
+  const body = await readBoundedJsonObject(request, 64);
+  if (!body || Object.keys(body).length !== 0)
+    return respond({ ok: false, error: "project_binding_intents_invalid" }, 400);
+  const raw = await readDeviceProjectBindingIntents(env, { deviceId });
+  const result = deviceProjectBindingIntentsResponse(raw, deviceId);
+  return result ? respond(result)
+    : respond({ ok: false, error: "project_binding_intents_unavailable" }, 403);
+}
+
+async function projectBindingConfirmation(
+  request: Request, env: ProductPostgresEnv, deviceId: string,
+): Promise<Response> {
+  const body = await readBoundedJsonObject(request, 16 * 1024);
+  const input = canonicalDeviceProjectBindingConfirmation(body);
+  if (!input)
+    return respond({ ok: false, error: "project_binding_confirmation_invalid" }, 400);
+  // Device authentication identifies the transport. This route MUST only be
+  // called by Runtime composition after it has revalidated that localProjectRef
+  // is a currently registered local Project and that these capabilities are
+  // the local Project capability surface. The feature remains default-off until
+  // that composition is installed.
+  const raw = await confirmDeviceProjectBinding(env, {
+    deviceId,
+    intentId: input.intentId,
+    localProjectRef: input.localProjectRef,
+    allowedCapabilities: input.capabilities,
+  });
+  if (raw.ok !== true || !isCanonicalUuid(raw.binding_id)
+      || !isCanonicalUuid(raw.project_id) || !isCanonicalUuid(raw.space_id)
+      || raw.device_id !== deviceId || raw.capability_count !== input.capabilities.length
+      || raw.state !== "active" || raw.next_state !== "ready_without_grants") {
+    const error = raw.ok === false && typeof raw.error === "string"
+      ? raw.error : "project_binding_confirmation_unconfirmed";
+    return respond({ ok: false, error }, raw.ok === false ? 409 : 502);
+  }
+  return respond({
+    ok: true,
+    schema: "ordax.device-project-binding-confirmed/1",
+    binding_id: raw.binding_id,
+    project_id: raw.project_id,
+    space_id: raw.space_id,
+    device_id: deviceId,
+    capability_count: raw.capability_count,
+    state: "active",
+    next_state: "ready_without_grants",
+  });
+}
+
 async function orchestratorAuthorization(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
   const body = await readBoundedJsonObject(request, 4096);
   const allowed = new Set(["job_id", "effect_id", "attempt_id", "lease_id",
@@ -499,6 +630,20 @@ export async function handleProductDeviceTransport(
       break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/orchestrator-read-authorization":
       execute = deviceId => orchestratorAuthorization(request, env, deviceId);
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/project-binding-intents":
+      execute = async deviceId => {
+        if (env.OWNER_PROJECT_BINDING_ENABLED !== "enabled")
+          return respond({ ok: false, error: "not_found" }, 404);
+        return projectBindingIntents(request, env, deviceId);
+      };
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/project-binding-confirm":
+      execute = async deviceId => {
+        if (env.OWNER_PROJECT_BINDING_ENABLED !== "enabled")
+          return respond({ ok: false, error: "not_found" }, 404);
+        return projectBindingConfirmation(request, env, deviceId);
+      };
       break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/workspace-confirm":
       execute = async deviceId => {
