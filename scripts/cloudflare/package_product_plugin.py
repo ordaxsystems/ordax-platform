@@ -67,8 +67,8 @@ def _canonical_endpoint(foundation: dict) -> str:
     if release.get("deployment_ready") is not False:
         raise ValueError("Private validation package cannot represent an already-approved production release")
     blockers = release.get("readiness_blockers")
-    if not isinstance(blockers, list) or "attested_interactive_end_to_end_not_verified" not in blockers:
-        raise ValueError("Private validation package requires the real E2E blocker")
+    if not isinstance(blockers, list) or "production_release_evidence_incomplete" not in blockers:
+        raise ValueError("Private validation package requires the unresolved production-evidence blocker")
     endpoint = f"https://{hostname}{path}"
     parsed = urlsplit(endpoint)
     if parsed.scheme != "https" or parsed.hostname != hostname or parsed.path != path:

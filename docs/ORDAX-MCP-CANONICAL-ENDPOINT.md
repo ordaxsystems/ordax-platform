@@ -16,7 +16,7 @@ A nomenclatura de produto é **Servidor MCP personalizado do OrdaX** ou, de form
 
 A configuração e o fluxo de atualização estão em [CHATGPT-CUSTOM-MCP-SERVER.md](CHATGPT-CUSTOM-MCP-SERVER.md).
 
-## Estado e fontes canônicas — 12/11/2026
+## Estado e fontes canônicas — 13/11/2026
 
 O contrato oficial continua em `control-plane/cloudflare/production-foundation.json#mcp_release`, com PostgreSQL/Hyperdrive, OAuth 2.1, domínio `mcp.ordax.com.br` e um único Worker `ordax-mcp`. `supports_remote_actions=true` não significa `deployment_ready=true`: o guard de produção exige provas autenticadas de grants, atestação e ações reais.
 
@@ -32,13 +32,15 @@ Em 12/11/2026, `computer.terminal_exec` foi executado no `DESKTOP-4UFL03B` pelo 
 
 Os grants Owner são snapshots explícitos, não aliases dinâmicos de perfil. Quando um perfil (`full-computer-control`, por exemplo) recebe novas ações `computer.transfer_*`, os grants anteriores não as herdam. A projeção de `ordax_targets` pode indicar a divergência com `profile_alignment` calculado diretamente do catálogo canônico `OWNER_MCP_GRANT_PROFILES`; esse aviso nunca autoriza, executa ou altera um grant. O proprietário deve revisar e conceder novamente o perfil pelo fluxo Owner existente.
 
-O manifesto ainda registra os bloqueios de promoção:
+A validação física de 13/11/2026 encerrou três lacunas de candidato que não devem voltar a aparecer como bloqueadores: o grant interativo está autorizado, o caminho atestado foi exercitado E2E no Desktop Windows e ações remotas canônicas foram concluídas com recibos reais. Isso **não** equivale à promoção de produção: `validation_evidence.production_release_authority=false` existe justamente para separar validação funcional de evidência formal de release.
 
-- `interactive_computer_grant_not_authorized`;
-- `attested_interactive_end_to_end_not_verified`;
-- `canonical_remote_actions_release_not_verified`.
+Os bloqueios canônicos restantes são:
 
-Não basta criar um artefato de CI ou obter um único recibo de terminal para remover esses bloqueios. A promoção exige provas reais específicas do gate e consentimento Owner, sem duplicação de Worker, armazenamento ou política.
+- `multi_device_end_to_end_not_verified`: ainda falta prova real com mais de um dispositivo elegível;
+- `legacy_worker_retirement_not_verified`: ainda falta a prova formal de retirada/ausência do caminho legado;
+- `production_release_evidence_incomplete`: o conjunto independente de sete URLs de execução exigido por `REQUIRED_PROOFS` ainda não está completo.
+
+O guard de produção continua fail-closed. Remover esses bloqueios sem preencher `release_evidence` com os sete comprovantes válidos e sem `device_dispatch_via_trusted_host_verified=true` continua rejeitado pelos testes. Não reintroduzir os antigos bloqueadores apenas por histórico documental: eles descreviam o estado anterior à validação física de 13/11.
 
 **Candidato de integração (ainda não promovido):** `terminal_exec`, `process_status`, `process_list`, `process_logs`, `process_start`, `process_write_stdin` e `process_stop` são ações de projeto, não herdam `full-computer-control`; exigem a prova canônica do Git origin, a associação Space/projeto, o perfil Owner `project-native-terminal` ou `project-native-process` e Runtime com suporte à atestação. Essa fronteira reutiliza o executor `terminal.exec`/supervisor `process.*` existente. O candidato não cria outro daemon, MCP ou banco de grants. Um terminal não deve ser simulado por `computer_type`.
 

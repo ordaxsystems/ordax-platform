@@ -6,7 +6,8 @@ import unittest
 
 from scripts.cloudflare.check_mcp_release import (
     ROOT, FOUNDATION, CONFIG, McpReleaseError, validate, validate_interactive_candidate,
-    REQUIRED_PROOFS, VALIDATION_BASELINE_EVIDENCE, TRUSTED_CLIENT_INGRESS,
+    REQUIRED_PROOFS, PENDING_PRODUCTION_BLOCKERS, VALIDATION_BASELINE_EVIDENCE,
+    TRUSTED_CLIENT_INGRESS,
 )
 
 
@@ -110,12 +111,14 @@ class McpReleaseContract(unittest.TestCase):
         release=self.foundation["mcp_release"]
         self.assertFalse(release["deployment_ready"])
         self.assertTrue(release["supports_remote_actions"])
-        required_blockers={
-            "interactive_computer_grant_not_authorized",
-            "attested_interactive_end_to_end_not_verified",
-            "canonical_remote_actions_release_not_verified",
-        }
-        self.assertTrue(required_blockers.issubset(set(release["readiness_blockers"])))
+        self.assertTrue(
+            PENDING_PRODUCTION_BLOCKERS.issubset(set(release["readiness_blockers"]))
+        )
+        validation=release["validation_evidence"]
+        self.assertFalse(validation["production_release_authority"])
+        self.assertTrue(validation["interactive_computer_grant_authorized"])
+        self.assertTrue(validation["attested_interactive_end_to_end_verified"])
+        self.assertTrue(validation["canonical_remote_actions_verified"])
         evidence=release.get("verified_evidence") or {}
         self.assertRegex(
             evidence.get("custom_domain_tls_run_url", ""),
@@ -165,13 +168,15 @@ class McpReleaseContract(unittest.TestCase):
         with self.assertRaisesRegex(McpReleaseError,"interactive_candidate_not_ready"):
             validate_interactive_candidate(f,self.config)
 
-    def test_candidate_must_keep_real_e2e_blocker_until_proven(self):
-        f=copy.deepcopy(self.foundation)
-        f["mcp_release"]["readiness_blockers"].remove("attested_interactive_end_to_end_not_verified")
-        with self.assertRaisesRegex(McpReleaseError,"interactive_e2e_blocker_missing"):
-            validate(f,self.config)
-        with self.assertRaisesRegex(McpReleaseError,"interactive_e2e_blocker_missing|candidate_e2e_blocker_missing"):
-            validate_interactive_candidate(f,self.config)
+    def test_candidate_must_keep_real_production_blockers_until_release_proofs_exist(self):
+        for blocker in PENDING_PRODUCTION_BLOCKERS:
+            f=copy.deepcopy(self.foundation)
+            f["mcp_release"]["readiness_blockers"].remove(blocker)
+            with self.subTest(blocker=blocker):
+                with self.assertRaisesRegex(McpReleaseError,"production_blockers_incomplete"):
+                    validate(f,self.config)
+                with self.assertRaisesRegex(McpReleaseError,"production_blockers_incomplete"):
+                    validate_interactive_candidate(f,self.config)
 
     def test_bogus_production_enablement_without_proofs_is_rejected(self):
         f=copy.deepcopy(self.foundation)
