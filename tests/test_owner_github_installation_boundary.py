@@ -84,7 +84,7 @@ class OwnerGithubInstallationBoundaryTest(unittest.TestCase):
         self.assertIn("c.status = 'pending'", self.lowered)
         self.assertIn("c.status = 'verifying'", self.lowered)
         self.assertIn("c.status = 'verified'", self.lowered)
-        self.assertIn("c.status = 'selected'", self.lowered)
+        self.assertIn("set status = 'selected'", self.lowered)
 
     def test_worker_uses_user_authorization_and_never_app_installation_token(self):
         self.assertIn("https://github.com/login/oauth/access_token", self.worker)
