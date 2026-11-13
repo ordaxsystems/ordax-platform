@@ -194,6 +194,14 @@ export function safePostgresFailure(error: unknown, rpc: string): SafePostgresFa
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const RPC_SPECS = {
+  ordax_owner_project_onboarding_state_v1: {
+    keys: ["p_owner_user_id", "p_device_id"],
+    casts: ["uuid", "uuid"],
+  },
+  ordax_create_project_v1: {
+    keys: ["p_actor_user_id", "p_space_id", "p_name", "p_kind", "p_metadata"],
+    casts: ["uuid", "uuid", "text", "text", "jsonb"],
+  },
   // Staged read-only RPC: remains unavailable until the separately governed
   // PostgreSQL proposal is applied. No new grant authority is created here.
   ordax_approve_project_workspace_resource_v1: {
@@ -573,6 +581,36 @@ async function callRpc<T>(
       // the result of an already-completed authority call.
     }
   }
+}
+
+export async function readOwnerProjectOnboardingState(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; deviceId: string },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_owner_project_onboarding_state_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_device_id: input.deviceId,
+  });
+}
+
+export async function createOwnerProject(
+  env: ProductPostgresEnv,
+  input: {
+    ownerUserId: string;
+    spaceId: string;
+    name: string;
+    kind: "general" | "development" | "creative" | "legal" | "business" | "research";
+  },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_create_project_v1", {
+    p_actor_user_id: input.ownerUserId,
+    p_space_id: input.spaceId,
+    p_name: input.name,
+    p_kind: input.kind,
+    // Onboarding does not accept arbitrary metadata from the browser. Provider
+    // identity and repository selection remain separate server authorities.
+    p_metadata: {},
+  });
 }
 
 export async function enqueueProductAction(

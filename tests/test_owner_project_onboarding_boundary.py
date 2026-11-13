@@ -34,6 +34,20 @@ class OwnerProjectOnboardingBoundaryTest(unittest.TestCase):
                     sql,
                 )
 
+    def test_owner_onboarding_executor_is_narrow_and_has_no_table_dml(self):
+        sql = (MIGRATIONS / "20261113214943_owner_project_onboarding_authority_v1.sql").read_text()
+        lowered = sql.lower()
+        self.assertIn("create role ordax_owner_project_onboarding_executor", lowered)
+        self.assertIn("nologin", lowered)
+        self.assertIn("grant ordax_owner_project_onboarding_executor to ordax_edge_runtime", lowered)
+        self.assertIn("ordax_owner_project_onboarding_state_v1", lowered)
+        self.assertIn("grant execute on function public.ordax_create_project_v1", lowered)
+        self.assertNotIn("grant insert", lowered)
+        self.assertNotIn("grant update", lowered)
+        self.assertNotIn("grant delete", lowered)
+        self.assertNotIn("insert into public.ordax_project_connections", lowered)
+        self.assertNotIn("ordax_replace_remote_grant_group_v1(", lowered)
+
     def test_native_grants_are_distinct_and_project_scoped(self):
         ts = (SRC / "product_owner_grant_profiles.ts").read_text()
         self.assertIn('"project-native-terminal": profile("project", ["terminal.exec"])', ts)
