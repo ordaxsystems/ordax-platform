@@ -1161,6 +1161,18 @@
         "blob_sha": "3a168243d1005f446e59184b7d0f2ddfde8b221a"
       },
       "ledger_name": "product_running_lease_expiry_reconciliation_v1"
+    },
+    {
+      "name": "20261113182849_product_action_expired_state_v1",
+      "applied_version": "20261113201151",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261113182849_product_action_expired_state_v1.sql",
+        "blob_sha": "28dfcf24c7d7d530d9428ffbd804ea6ba23e8f91"
+      },
+      "ledger_name": "product_action_expired_state_v1"
     }
   ]
 }
