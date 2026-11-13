@@ -311,12 +311,2533 @@ begin
          'repository_full_name',
          'repository_id'
        ]::text[]
-       or coalesce(e.value->>'installation_id', '') !~ '^[1-9][0-9]{0,18}$'
-       or (e.value->>'installation_id')::numeric > 9223372036854775807
-       or coalesce(e.value->>'installation_account_id', '') !~ '^[1-9][0-9]{0,18}$'
-       or (e.value->>'installation_account_id')::numeric > 9223372036854775807
-       or coalesce(e.value->>'repository_id', '') !~ '^[1-9][0-9]{0,18}$'
-       or (e.value->>'repository_id')::numeric > 9223372036854775807
+       or not (
+         case
+           when coalesce(e.value->>'installation_id', '') ~ '^[1-9][0-9]{0,18}       or char_length(coalesce(e.value->>'installation_account_login', ''))
+            not between 1 and 100
+       or coalesce(e.value->>'installation_account_login', '')
+            !~ '^[A-Za-z0-9-]+$'
+       or char_length(coalesce(e.value->>'repository_full_name', ''))
+            not between 3 and 200
+       or coalesce(e.value->>'repository_full_name', '')
+            !~ '^[^[:space:]/]+/[^[:space:]/]+$'
+       or (
+         e.value->'default_branch' <> 'null'::jsonb
+         and (
+           pg_catalog.jsonb_typeof(e.value->'default_branch') <> 'string'
+           or char_length(e.value->>'default_branch') not between 1 and 255
+           or (e.value->>'default_branch') ~ '[[:cntrl:]]'
+         )
+       )
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.jsonb_array_elements(p_candidates) e(value)
+    group by e.value->>'repository_id'
+    having pg_catalog.count(*) > 1
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_duplicate'
+    );
+  end if;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  insert into private.ordax_owner_github_repository_candidates(
+    challenge_id, installation_id, installation_account_id,
+    installation_account_login, repository_id, repository_full_name,
+    default_branch, expires_at
+  )
+  select
+    p_challenge_id,
+    (e.value->>'installation_id')::bigint,
+    (e.value->>'installation_account_id')::bigint,
+    e.value->>'installation_account_login',
+    (e.value->>'repository_id')::bigint,
+    e.value->>'repository_full_name',
+    case
+      when e.value->'default_branch' = 'null'::jsonb then null
+      else e.value->>'default_branch'
+    end,
+    v_expires_at
+  from pg_catalog.jsonb_array_elements(p_candidates) e(value);
+
+  get diagnostics v_candidate_count = row_count;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'verified',
+         github_user_id = p_github_user_id,
+         github_user_login = p_github_user_login,
+         verified_at = v_now,
+         updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'candidate_count', v_candidate_count,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_read_github_repository_candidates_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_expires_at timestamptz;
+  v_repositories jsonb;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  select c.project_id, c.expires_at
+    into v_project_id, v_expires_at
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     );
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_unavailable'
+    );
+  end if;
+
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'repository_id', r.repository_id::text,
+        'repository_full_name', r.repository_full_name,
+        'default_branch', r.default_branch,
+        'installation_account_login', r.installation_account_login
+      )
+      order by pg_catalog.lower(r.repository_full_name), r.repository_id
+    ),
+    '[]'::jsonb
+  )
+  into v_repositories
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id and r.expires_at > v_now;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'repositories', v_repositories,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_select_github_repository_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid,
+  p_repository_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_space_id uuid;
+  v_installation_id bigint;
+  v_installation_account_id bigint;
+  v_repository_id bigint;
+  v_repository_full_name text;
+  v_default_branch text;
+  v_connection_id uuid;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  if p_owner_user_id is null or p_challenge_id is null
+     or p_repository_id is null
+     or not (
+       case
+         when p_repository_id ~ '^[1-9][0-9]{0,18}    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_selection_invalid'
+    );
+  end if;
+
+  select c.project_id, c.space_id
+    into v_project_id, v_space_id
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     )
+   for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_authorization_challenge_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1 from public.ordax_project_connections c
+    where c.project_id = v_project_id
+      and c.space_id = v_space_id
+      and c.provider = 'github'
+      and c.state = 'active'
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'project_github_connection_exists'
+    );
+  end if;
+
+  select r.installation_id,
+         r.installation_account_id,
+         r.repository_id,
+         r.repository_full_name,
+         r.default_branch
+    into v_installation_id,
+         v_installation_account_id,
+         v_repository_id,
+         v_repository_full_name,
+         v_default_branch
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id
+    and r.repository_id = p_repository_id::bigint
+    and r.expires_at > v_now;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_not_verified'
+    );
+  end if;
+
+  select c.connection_id into v_connection_id
+  from public.ordax_project_connections c
+  where c.project_id = v_project_id
+    and c.provider = 'github'
+    and c.repository_id = v_repository_id
+  for update;
+
+  if found then
+    update public.ordax_project_connections
+       set space_id = v_space_id,
+           owner_user_id = p_owner_user_id,
+           external_account_id = v_installation_account_id::text,
+           installation_id = v_installation_id,
+           repository_full_name = v_repository_full_name,
+           default_branch = v_default_branch,
+           access_mode = 'read',
+           state = 'active',
+           metadata = pg_catalog.jsonb_build_object(
+             'authority', 'github_app_user_authorization_v1'
+           ),
+           updated_at = v_now
+     where connection_id = v_connection_id;
+  else
+    insert into public.ordax_project_connections(
+      space_id, owner_user_id, provider, external_account_id,
+      installation_id, repository_id, repository_full_name,
+      default_branch, access_mode, state, metadata, project_id
+    ) values (
+      v_space_id, p_owner_user_id, 'github',
+      v_installation_account_id::text, v_installation_id, v_repository_id,
+      v_repository_full_name, v_default_branch, 'read', 'active',
+      pg_catalog.jsonb_build_object(
+        'authority', 'github_app_user_authorization_v1'
+      ),
+      v_project_id
+    )
+    returning connection_id into v_connection_id;
+  end if;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'selected', consumed_at = v_now, updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'connection_id', v_connection_id,
+    'project_id', v_project_id,
+    'repository_id', v_repository_id::text,
+    'repository_full_name', v_repository_full_name,
+    'default_branch', v_default_branch,
+    'state', 'active',
+    'next_state', 'needs_device_binding'
+  );
+end;
+$$;
+
+revoke all on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+
+grant execute on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+
+do $postflight$
+declare
+  v_relation_authority integer;
+begin
+  select pg_catalog.count(*) into v_relation_authority
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where n.nspname in ('public', 'private')
+    and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+    and (
+      (c.relkind = 'S' and (
+        pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'USAGE'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+      ))
+      or
+      (c.relkind <> 'S' and (
+        pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'INSERT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'DELETE'
+        )
+      ))
+    );
+
+  if v_relation_authority <> 0 then
+    raise exception 'owner github authority: direct relation authority detected';
+  end if;
+
+  if pg_catalog.has_schema_privilege(
+    'ordax_owner_project_onboarding_executor', 'private', 'USAGE'
+  ) then
+    raise exception 'owner github authority: private schema unexpectedly visible';
+  end if;
+end;
+$postflight$;
+
+commit;
+
+           then (e.value->>'installation_id')::numeric <= 9223372036854775807
+           else false
+         end
+       )
+       or not (
+         case
+           when coalesce(e.value->>'installation_account_id', '') ~ '^[1-9][0-9]{0,18}       or char_length(coalesce(e.value->>'installation_account_login', ''))
+            not between 1 and 100
+       or coalesce(e.value->>'installation_account_login', '')
+            !~ '^[A-Za-z0-9-]+$'
+       or char_length(coalesce(e.value->>'repository_full_name', ''))
+            not between 3 and 200
+       or coalesce(e.value->>'repository_full_name', '')
+            !~ '^[^[:space:]/]+/[^[:space:]/]+$'
+       or (
+         e.value->'default_branch' <> 'null'::jsonb
+         and (
+           pg_catalog.jsonb_typeof(e.value->'default_branch') <> 'string'
+           or char_length(e.value->>'default_branch') not between 1 and 255
+           or (e.value->>'default_branch') ~ '[[:cntrl:]]'
+         )
+       )
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.jsonb_array_elements(p_candidates) e(value)
+    group by e.value->>'repository_id'
+    having pg_catalog.count(*) > 1
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_duplicate'
+    );
+  end if;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  insert into private.ordax_owner_github_repository_candidates(
+    challenge_id, installation_id, installation_account_id,
+    installation_account_login, repository_id, repository_full_name,
+    default_branch, expires_at
+  )
+  select
+    p_challenge_id,
+    (e.value->>'installation_id')::bigint,
+    (e.value->>'installation_account_id')::bigint,
+    e.value->>'installation_account_login',
+    (e.value->>'repository_id')::bigint,
+    e.value->>'repository_full_name',
+    case
+      when e.value->'default_branch' = 'null'::jsonb then null
+      else e.value->>'default_branch'
+    end,
+    v_expires_at
+  from pg_catalog.jsonb_array_elements(p_candidates) e(value);
+
+  get diagnostics v_candidate_count = row_count;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'verified',
+         github_user_id = p_github_user_id,
+         github_user_login = p_github_user_login,
+         verified_at = v_now,
+         updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'candidate_count', v_candidate_count,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_read_github_repository_candidates_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_expires_at timestamptz;
+  v_repositories jsonb;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  select c.project_id, c.expires_at
+    into v_project_id, v_expires_at
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     );
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_unavailable'
+    );
+  end if;
+
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'repository_id', r.repository_id::text,
+        'repository_full_name', r.repository_full_name,
+        'default_branch', r.default_branch,
+        'installation_account_login', r.installation_account_login
+      )
+      order by pg_catalog.lower(r.repository_full_name), r.repository_id
+    ),
+    '[]'::jsonb
+  )
+  into v_repositories
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id and r.expires_at > v_now;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'repositories', v_repositories,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_select_github_repository_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid,
+  p_repository_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_space_id uuid;
+  v_installation_id bigint;
+  v_installation_account_id bigint;
+  v_repository_id bigint;
+  v_repository_full_name text;
+  v_default_branch text;
+  v_connection_id uuid;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  if p_owner_user_id is null or p_challenge_id is null
+     or p_repository_id is null
+     or p_repository_id !~ '^[1-9][0-9]{0,18}$'
+     or p_repository_id::numeric > 9223372036854775807 then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_selection_invalid'
+    );
+  end if;
+
+  select c.project_id, c.space_id
+    into v_project_id, v_space_id
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     )
+   for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_authorization_challenge_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1 from public.ordax_project_connections c
+    where c.project_id = v_project_id
+      and c.space_id = v_space_id
+      and c.provider = 'github'
+      and c.state = 'active'
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'project_github_connection_exists'
+    );
+  end if;
+
+  select r.installation_id,
+         r.installation_account_id,
+         r.repository_id,
+         r.repository_full_name,
+         r.default_branch
+    into v_installation_id,
+         v_installation_account_id,
+         v_repository_id,
+         v_repository_full_name,
+         v_default_branch
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id
+    and r.repository_id = p_repository_id::bigint
+    and r.expires_at > v_now;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_not_verified'
+    );
+  end if;
+
+  select c.connection_id into v_connection_id
+  from public.ordax_project_connections c
+  where c.project_id = v_project_id
+    and c.provider = 'github'
+    and c.repository_id = v_repository_id
+  for update;
+
+  if found then
+    update public.ordax_project_connections
+       set space_id = v_space_id,
+           owner_user_id = p_owner_user_id,
+           external_account_id = v_installation_account_id::text,
+           installation_id = v_installation_id,
+           repository_full_name = v_repository_full_name,
+           default_branch = v_default_branch,
+           access_mode = 'read',
+           state = 'active',
+           metadata = pg_catalog.jsonb_build_object(
+             'authority', 'github_app_user_authorization_v1'
+           ),
+           updated_at = v_now
+     where connection_id = v_connection_id;
+  else
+    insert into public.ordax_project_connections(
+      space_id, owner_user_id, provider, external_account_id,
+      installation_id, repository_id, repository_full_name,
+      default_branch, access_mode, state, metadata, project_id
+    ) values (
+      v_space_id, p_owner_user_id, 'github',
+      v_installation_account_id::text, v_installation_id, v_repository_id,
+      v_repository_full_name, v_default_branch, 'read', 'active',
+      pg_catalog.jsonb_build_object(
+        'authority', 'github_app_user_authorization_v1'
+      ),
+      v_project_id
+    )
+    returning connection_id into v_connection_id;
+  end if;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'selected', consumed_at = v_now, updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'connection_id', v_connection_id,
+    'project_id', v_project_id,
+    'repository_id', v_repository_id::text,
+    'repository_full_name', v_repository_full_name,
+    'default_branch', v_default_branch,
+    'state', 'active',
+    'next_state', 'needs_device_binding'
+  );
+end;
+$$;
+
+revoke all on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+
+grant execute on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+
+do $postflight$
+declare
+  v_relation_authority integer;
+begin
+  select pg_catalog.count(*) into v_relation_authority
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where n.nspname in ('public', 'private')
+    and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+    and (
+      (c.relkind = 'S' and (
+        pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'USAGE'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+      ))
+      or
+      (c.relkind <> 'S' and (
+        pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'INSERT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'DELETE'
+        )
+      ))
+    );
+
+  if v_relation_authority <> 0 then
+    raise exception 'owner github authority: direct relation authority detected';
+  end if;
+
+  if pg_catalog.has_schema_privilege(
+    'ordax_owner_project_onboarding_executor', 'private', 'USAGE'
+  ) then
+    raise exception 'owner github authority: private schema unexpectedly visible';
+  end if;
+end;
+$postflight$;
+
+commit;
+
+           then (e.value->>'installation_account_id')::numeric <= 9223372036854775807
+           else false
+         end
+       )
+       or not (
+         case
+           when coalesce(e.value->>'repository_id', '') ~ '^[1-9][0-9]{0,18}       or char_length(coalesce(e.value->>'installation_account_login', ''))
+            not between 1 and 100
+       or coalesce(e.value->>'installation_account_login', '')
+            !~ '^[A-Za-z0-9-]+$'
+       or char_length(coalesce(e.value->>'repository_full_name', ''))
+            not between 3 and 200
+       or coalesce(e.value->>'repository_full_name', '')
+            !~ '^[^[:space:]/]+/[^[:space:]/]+$'
+       or (
+         e.value->'default_branch' <> 'null'::jsonb
+         and (
+           pg_catalog.jsonb_typeof(e.value->'default_branch') <> 'string'
+           or char_length(e.value->>'default_branch') not between 1 and 255
+           or (e.value->>'default_branch') ~ '[[:cntrl:]]'
+         )
+       )
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.jsonb_array_elements(p_candidates) e(value)
+    group by e.value->>'repository_id'
+    having pg_catalog.count(*) > 1
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_duplicate'
+    );
+  end if;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  insert into private.ordax_owner_github_repository_candidates(
+    challenge_id, installation_id, installation_account_id,
+    installation_account_login, repository_id, repository_full_name,
+    default_branch, expires_at
+  )
+  select
+    p_challenge_id,
+    (e.value->>'installation_id')::bigint,
+    (e.value->>'installation_account_id')::bigint,
+    e.value->>'installation_account_login',
+    (e.value->>'repository_id')::bigint,
+    e.value->>'repository_full_name',
+    case
+      when e.value->'default_branch' = 'null'::jsonb then null
+      else e.value->>'default_branch'
+    end,
+    v_expires_at
+  from pg_catalog.jsonb_array_elements(p_candidates) e(value);
+
+  get diagnostics v_candidate_count = row_count;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'verified',
+         github_user_id = p_github_user_id,
+         github_user_login = p_github_user_login,
+         verified_at = v_now,
+         updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'candidate_count', v_candidate_count,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_read_github_repository_candidates_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_expires_at timestamptz;
+  v_repositories jsonb;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  select c.project_id, c.expires_at
+    into v_project_id, v_expires_at
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     );
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_unavailable'
+    );
+  end if;
+
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'repository_id', r.repository_id::text,
+        'repository_full_name', r.repository_full_name,
+        'default_branch', r.default_branch,
+        'installation_account_login', r.installation_account_login
+      )
+      order by pg_catalog.lower(r.repository_full_name), r.repository_id
+    ),
+    '[]'::jsonb
+  )
+  into v_repositories
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id and r.expires_at > v_now;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'repositories', v_repositories,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_select_github_repository_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid,
+  p_repository_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_space_id uuid;
+  v_installation_id bigint;
+  v_installation_account_id bigint;
+  v_repository_id bigint;
+  v_repository_full_name text;
+  v_default_branch text;
+  v_connection_id uuid;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  if p_owner_user_id is null or p_challenge_id is null
+     or p_repository_id is null
+     or p_repository_id !~ '^[1-9][0-9]{0,18}$'
+     or p_repository_id::numeric > 9223372036854775807 then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_selection_invalid'
+    );
+  end if;
+
+  select c.project_id, c.space_id
+    into v_project_id, v_space_id
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     )
+   for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_authorization_challenge_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1 from public.ordax_project_connections c
+    where c.project_id = v_project_id
+      and c.space_id = v_space_id
+      and c.provider = 'github'
+      and c.state = 'active'
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'project_github_connection_exists'
+    );
+  end if;
+
+  select r.installation_id,
+         r.installation_account_id,
+         r.repository_id,
+         r.repository_full_name,
+         r.default_branch
+    into v_installation_id,
+         v_installation_account_id,
+         v_repository_id,
+         v_repository_full_name,
+         v_default_branch
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id
+    and r.repository_id = p_repository_id::bigint
+    and r.expires_at > v_now;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_not_verified'
+    );
+  end if;
+
+  select c.connection_id into v_connection_id
+  from public.ordax_project_connections c
+  where c.project_id = v_project_id
+    and c.provider = 'github'
+    and c.repository_id = v_repository_id
+  for update;
+
+  if found then
+    update public.ordax_project_connections
+       set space_id = v_space_id,
+           owner_user_id = p_owner_user_id,
+           external_account_id = v_installation_account_id::text,
+           installation_id = v_installation_id,
+           repository_full_name = v_repository_full_name,
+           default_branch = v_default_branch,
+           access_mode = 'read',
+           state = 'active',
+           metadata = pg_catalog.jsonb_build_object(
+             'authority', 'github_app_user_authorization_v1'
+           ),
+           updated_at = v_now
+     where connection_id = v_connection_id;
+  else
+    insert into public.ordax_project_connections(
+      space_id, owner_user_id, provider, external_account_id,
+      installation_id, repository_id, repository_full_name,
+      default_branch, access_mode, state, metadata, project_id
+    ) values (
+      v_space_id, p_owner_user_id, 'github',
+      v_installation_account_id::text, v_installation_id, v_repository_id,
+      v_repository_full_name, v_default_branch, 'read', 'active',
+      pg_catalog.jsonb_build_object(
+        'authority', 'github_app_user_authorization_v1'
+      ),
+      v_project_id
+    )
+    returning connection_id into v_connection_id;
+  end if;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'selected', consumed_at = v_now, updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'connection_id', v_connection_id,
+    'project_id', v_project_id,
+    'repository_id', v_repository_id::text,
+    'repository_full_name', v_repository_full_name,
+    'default_branch', v_default_branch,
+    'state', 'active',
+    'next_state', 'needs_device_binding'
+  );
+end;
+$$;
+
+revoke all on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+
+grant execute on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+
+do $postflight$
+declare
+  v_relation_authority integer;
+begin
+  select pg_catalog.count(*) into v_relation_authority
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where n.nspname in ('public', 'private')
+    and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+    and (
+      (c.relkind = 'S' and (
+        pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'USAGE'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+      ))
+      or
+      (c.relkind <> 'S' and (
+        pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'INSERT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'DELETE'
+        )
+      ))
+    );
+
+  if v_relation_authority <> 0 then
+    raise exception 'owner github authority: direct relation authority detected';
+  end if;
+
+  if pg_catalog.has_schema_privilege(
+    'ordax_owner_project_onboarding_executor', 'private', 'USAGE'
+  ) then
+    raise exception 'owner github authority: private schema unexpectedly visible';
+  end if;
+end;
+$postflight$;
+
+commit;
+
+           then (e.value->>'repository_id')::numeric <= 9223372036854775807
+           else false
+         end
+       )
+       or char_length(coalesce(e.value->>'installation_account_login', ''))
+            not between 1 and 100
+       or coalesce(e.value->>'installation_account_login', '')
+            !~ '^[A-Za-z0-9-]+$'
+       or char_length(coalesce(e.value->>'repository_full_name', ''))
+            not between 3 and 200
+       or coalesce(e.value->>'repository_full_name', '')
+            !~ '^[^[:space:]/]+/[^[:space:]/]+$'
+       or (
+         e.value->'default_branch' <> 'null'::jsonb
+         and (
+           pg_catalog.jsonb_typeof(e.value->'default_branch') <> 'string'
+           or char_length(e.value->>'default_branch') not between 1 and 255
+           or (e.value->>'default_branch') ~ '[[:cntrl:]]'
+         )
+       )
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.jsonb_array_elements(p_candidates) e(value)
+    group by e.value->>'repository_id'
+    having pg_catalog.count(*) > 1
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_duplicate'
+    );
+  end if;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  insert into private.ordax_owner_github_repository_candidates(
+    challenge_id, installation_id, installation_account_id,
+    installation_account_login, repository_id, repository_full_name,
+    default_branch, expires_at
+  )
+  select
+    p_challenge_id,
+    (e.value->>'installation_id')::bigint,
+    (e.value->>'installation_account_id')::bigint,
+    e.value->>'installation_account_login',
+    (e.value->>'repository_id')::bigint,
+    e.value->>'repository_full_name',
+    case
+      when e.value->'default_branch' = 'null'::jsonb then null
+      else e.value->>'default_branch'
+    end,
+    v_expires_at
+  from pg_catalog.jsonb_array_elements(p_candidates) e(value);
+
+  get diagnostics v_candidate_count = row_count;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'verified',
+         github_user_id = p_github_user_id,
+         github_user_login = p_github_user_login,
+         verified_at = v_now,
+         updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'candidate_count', v_candidate_count,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_read_github_repository_candidates_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_expires_at timestamptz;
+  v_repositories jsonb;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  select c.project_id, c.expires_at
+    into v_project_id, v_expires_at
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     );
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_unavailable'
+    );
+  end if;
+
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'repository_id', r.repository_id::text,
+        'repository_full_name', r.repository_full_name,
+        'default_branch', r.default_branch,
+        'installation_account_login', r.installation_account_login
+      )
+      order by pg_catalog.lower(r.repository_full_name), r.repository_id
+    ),
+    '[]'::jsonb
+  )
+  into v_repositories
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id and r.expires_at > v_now;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'repositories', v_repositories,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_select_github_repository_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid,
+  p_repository_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_space_id uuid;
+  v_installation_id bigint;
+  v_installation_account_id bigint;
+  v_repository_id bigint;
+  v_repository_full_name text;
+  v_default_branch text;
+  v_connection_id uuid;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  if p_owner_user_id is null or p_challenge_id is null
+     or p_repository_id is null
+     or p_repository_id !~ '^[1-9][0-9]{0,18}$'
+     or p_repository_id::numeric > 9223372036854775807 then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_selection_invalid'
+    );
+  end if;
+
+  select c.project_id, c.space_id
+    into v_project_id, v_space_id
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     )
+   for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_authorization_challenge_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1 from public.ordax_project_connections c
+    where c.project_id = v_project_id
+      and c.space_id = v_space_id
+      and c.provider = 'github'
+      and c.state = 'active'
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'project_github_connection_exists'
+    );
+  end if;
+
+  select r.installation_id,
+         r.installation_account_id,
+         r.repository_id,
+         r.repository_full_name,
+         r.default_branch
+    into v_installation_id,
+         v_installation_account_id,
+         v_repository_id,
+         v_repository_full_name,
+         v_default_branch
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id
+    and r.repository_id = p_repository_id::bigint
+    and r.expires_at > v_now;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_not_verified'
+    );
+  end if;
+
+  select c.connection_id into v_connection_id
+  from public.ordax_project_connections c
+  where c.project_id = v_project_id
+    and c.provider = 'github'
+    and c.repository_id = v_repository_id
+  for update;
+
+  if found then
+    update public.ordax_project_connections
+       set space_id = v_space_id,
+           owner_user_id = p_owner_user_id,
+           external_account_id = v_installation_account_id::text,
+           installation_id = v_installation_id,
+           repository_full_name = v_repository_full_name,
+           default_branch = v_default_branch,
+           access_mode = 'read',
+           state = 'active',
+           metadata = pg_catalog.jsonb_build_object(
+             'authority', 'github_app_user_authorization_v1'
+           ),
+           updated_at = v_now
+     where connection_id = v_connection_id;
+  else
+    insert into public.ordax_project_connections(
+      space_id, owner_user_id, provider, external_account_id,
+      installation_id, repository_id, repository_full_name,
+      default_branch, access_mode, state, metadata, project_id
+    ) values (
+      v_space_id, p_owner_user_id, 'github',
+      v_installation_account_id::text, v_installation_id, v_repository_id,
+      v_repository_full_name, v_default_branch, 'read', 'active',
+      pg_catalog.jsonb_build_object(
+        'authority', 'github_app_user_authorization_v1'
+      ),
+      v_project_id
+    )
+    returning connection_id into v_connection_id;
+  end if;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'selected', consumed_at = v_now, updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'connection_id', v_connection_id,
+    'project_id', v_project_id,
+    'repository_id', v_repository_id::text,
+    'repository_full_name', v_repository_full_name,
+    'default_branch', v_default_branch,
+    'state', 'active',
+    'next_state', 'needs_device_binding'
+  );
+end;
+$$;
+
+revoke all on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+
+grant execute on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+
+do $postflight$
+declare
+  v_relation_authority integer;
+begin
+  select pg_catalog.count(*) into v_relation_authority
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where n.nspname in ('public', 'private')
+    and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+    and (
+      (c.relkind = 'S' and (
+        pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'USAGE'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+      ))
+      or
+      (c.relkind <> 'S' and (
+        pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'INSERT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'DELETE'
+        )
+      ))
+    );
+
+  if v_relation_authority <> 0 then
+    raise exception 'owner github authority: direct relation authority detected';
+  end if;
+
+  if pg_catalog.has_schema_privilege(
+    'ordax_owner_project_onboarding_executor', 'private', 'USAGE'
+  ) then
+    raise exception 'owner github authority: private schema unexpectedly visible';
+  end if;
+end;
+$postflight$;
+
+commit;
+
+         then p_repository_id::numeric <= 9223372036854775807
+         else false
+       end
+     ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_selection_invalid'
+    );
+  end if;
+
+  select c.project_id, c.space_id
+    into v_project_id, v_space_id
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     )
+   for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_authorization_challenge_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1 from public.ordax_project_connections c
+    where c.project_id = v_project_id
+      and c.space_id = v_space_id
+      and c.provider = 'github'
+      and c.state = 'active'
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'project_github_connection_exists'
+    );
+  end if;
+
+  select r.installation_id,
+         r.installation_account_id,
+         r.repository_id,
+         r.repository_full_name,
+         r.default_branch
+    into v_installation_id,
+         v_installation_account_id,
+         v_repository_id,
+         v_repository_full_name,
+         v_default_branch
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id
+    and r.repository_id = p_repository_id::bigint
+    and r.expires_at > v_now;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_not_verified'
+    );
+  end if;
+
+  select c.connection_id into v_connection_id
+  from public.ordax_project_connections c
+  where c.project_id = v_project_id
+    and c.provider = 'github'
+    and c.repository_id = v_repository_id
+  for update;
+
+  if found then
+    update public.ordax_project_connections
+       set space_id = v_space_id,
+           owner_user_id = p_owner_user_id,
+           external_account_id = v_installation_account_id::text,
+           installation_id = v_installation_id,
+           repository_full_name = v_repository_full_name,
+           default_branch = v_default_branch,
+           access_mode = 'read',
+           state = 'active',
+           metadata = pg_catalog.jsonb_build_object(
+             'authority', 'github_app_user_authorization_v1'
+           ),
+           updated_at = v_now
+     where connection_id = v_connection_id;
+  else
+    insert into public.ordax_project_connections(
+      space_id, owner_user_id, provider, external_account_id,
+      installation_id, repository_id, repository_full_name,
+      default_branch, access_mode, state, metadata, project_id
+    ) values (
+      v_space_id, p_owner_user_id, 'github',
+      v_installation_account_id::text, v_installation_id, v_repository_id,
+      v_repository_full_name, v_default_branch, 'read', 'active',
+      pg_catalog.jsonb_build_object(
+        'authority', 'github_app_user_authorization_v1'
+      ),
+      v_project_id
+    )
+    returning connection_id into v_connection_id;
+  end if;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'selected', consumed_at = v_now, updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'connection_id', v_connection_id,
+    'project_id', v_project_id,
+    'repository_id', v_repository_id::text,
+    'repository_full_name', v_repository_full_name,
+    'default_branch', v_default_branch,
+    'state', 'active',
+    'next_state', 'needs_device_binding'
+  );
+end;
+$$;
+
+revoke all on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+
+grant execute on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+
+do $postflight$
+declare
+  v_relation_authority integer;
+begin
+  select pg_catalog.count(*) into v_relation_authority
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where n.nspname in ('public', 'private')
+    and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+    and (
+      (c.relkind = 'S' and (
+        pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'USAGE'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+      ))
+      or
+      (c.relkind <> 'S' and (
+        pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'INSERT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'DELETE'
+        )
+      ))
+    );
+
+  if v_relation_authority <> 0 then
+    raise exception 'owner github authority: direct relation authority detected';
+  end if;
+
+  if pg_catalog.has_schema_privilege(
+    'ordax_owner_project_onboarding_executor', 'private', 'USAGE'
+  ) then
+    raise exception 'owner github authority: private schema unexpectedly visible';
+  end if;
+end;
+$postflight$;
+
+commit;
+
+           then (e.value->>'installation_id')::numeric <= 9223372036854775807
+           else false
+         end
+       )
+       or not (
+         case
+           when coalesce(e.value->>'installation_account_id', '') ~ '^[1-9][0-9]{0,18}       or char_length(coalesce(e.value->>'installation_account_login', ''))
+            not between 1 and 100
+       or coalesce(e.value->>'installation_account_login', '')
+            !~ '^[A-Za-z0-9-]+$'
+       or char_length(coalesce(e.value->>'repository_full_name', ''))
+            not between 3 and 200
+       or coalesce(e.value->>'repository_full_name', '')
+            !~ '^[^[:space:]/]+/[^[:space:]/]+$'
+       or (
+         e.value->'default_branch' <> 'null'::jsonb
+         and (
+           pg_catalog.jsonb_typeof(e.value->'default_branch') <> 'string'
+           or char_length(e.value->>'default_branch') not between 1 and 255
+           or (e.value->>'default_branch') ~ '[[:cntrl:]]'
+         )
+       )
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.jsonb_array_elements(p_candidates) e(value)
+    group by e.value->>'repository_id'
+    having pg_catalog.count(*) > 1
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_duplicate'
+    );
+  end if;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  insert into private.ordax_owner_github_repository_candidates(
+    challenge_id, installation_id, installation_account_id,
+    installation_account_login, repository_id, repository_full_name,
+    default_branch, expires_at
+  )
+  select
+    p_challenge_id,
+    (e.value->>'installation_id')::bigint,
+    (e.value->>'installation_account_id')::bigint,
+    e.value->>'installation_account_login',
+    (e.value->>'repository_id')::bigint,
+    e.value->>'repository_full_name',
+    case
+      when e.value->'default_branch' = 'null'::jsonb then null
+      else e.value->>'default_branch'
+    end,
+    v_expires_at
+  from pg_catalog.jsonb_array_elements(p_candidates) e(value);
+
+  get diagnostics v_candidate_count = row_count;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'verified',
+         github_user_id = p_github_user_id,
+         github_user_login = p_github_user_login,
+         verified_at = v_now,
+         updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'candidate_count', v_candidate_count,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_read_github_repository_candidates_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_expires_at timestamptz;
+  v_repositories jsonb;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  select c.project_id, c.expires_at
+    into v_project_id, v_expires_at
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     );
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_unavailable'
+    );
+  end if;
+
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'repository_id', r.repository_id::text,
+        'repository_full_name', r.repository_full_name,
+        'default_branch', r.default_branch,
+        'installation_account_login', r.installation_account_login
+      )
+      order by pg_catalog.lower(r.repository_full_name), r.repository_id
+    ),
+    '[]'::jsonb
+  )
+  into v_repositories
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id and r.expires_at > v_now;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'repositories', v_repositories,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_select_github_repository_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid,
+  p_repository_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_space_id uuid;
+  v_installation_id bigint;
+  v_installation_account_id bigint;
+  v_repository_id bigint;
+  v_repository_full_name text;
+  v_default_branch text;
+  v_connection_id uuid;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  if p_owner_user_id is null or p_challenge_id is null
+     or p_repository_id is null
+     or p_repository_id !~ '^[1-9][0-9]{0,18}$'
+     or p_repository_id::numeric > 9223372036854775807 then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_selection_invalid'
+    );
+  end if;
+
+  select c.project_id, c.space_id
+    into v_project_id, v_space_id
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     )
+   for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_authorization_challenge_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1 from public.ordax_project_connections c
+    where c.project_id = v_project_id
+      and c.space_id = v_space_id
+      and c.provider = 'github'
+      and c.state = 'active'
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'project_github_connection_exists'
+    );
+  end if;
+
+  select r.installation_id,
+         r.installation_account_id,
+         r.repository_id,
+         r.repository_full_name,
+         r.default_branch
+    into v_installation_id,
+         v_installation_account_id,
+         v_repository_id,
+         v_repository_full_name,
+         v_default_branch
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id
+    and r.repository_id = p_repository_id::bigint
+    and r.expires_at > v_now;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_not_verified'
+    );
+  end if;
+
+  select c.connection_id into v_connection_id
+  from public.ordax_project_connections c
+  where c.project_id = v_project_id
+    and c.provider = 'github'
+    and c.repository_id = v_repository_id
+  for update;
+
+  if found then
+    update public.ordax_project_connections
+       set space_id = v_space_id,
+           owner_user_id = p_owner_user_id,
+           external_account_id = v_installation_account_id::text,
+           installation_id = v_installation_id,
+           repository_full_name = v_repository_full_name,
+           default_branch = v_default_branch,
+           access_mode = 'read',
+           state = 'active',
+           metadata = pg_catalog.jsonb_build_object(
+             'authority', 'github_app_user_authorization_v1'
+           ),
+           updated_at = v_now
+     where connection_id = v_connection_id;
+  else
+    insert into public.ordax_project_connections(
+      space_id, owner_user_id, provider, external_account_id,
+      installation_id, repository_id, repository_full_name,
+      default_branch, access_mode, state, metadata, project_id
+    ) values (
+      v_space_id, p_owner_user_id, 'github',
+      v_installation_account_id::text, v_installation_id, v_repository_id,
+      v_repository_full_name, v_default_branch, 'read', 'active',
+      pg_catalog.jsonb_build_object(
+        'authority', 'github_app_user_authorization_v1'
+      ),
+      v_project_id
+    )
+    returning connection_id into v_connection_id;
+  end if;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'selected', consumed_at = v_now, updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'connection_id', v_connection_id,
+    'project_id', v_project_id,
+    'repository_id', v_repository_id::text,
+    'repository_full_name', v_repository_full_name,
+    'default_branch', v_default_branch,
+    'state', 'active',
+    'next_state', 'needs_device_binding'
+  );
+end;
+$$;
+
+revoke all on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+
+grant execute on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+
+do $postflight$
+declare
+  v_relation_authority integer;
+begin
+  select pg_catalog.count(*) into v_relation_authority
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where n.nspname in ('public', 'private')
+    and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+    and (
+      (c.relkind = 'S' and (
+        pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'USAGE'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+      ))
+      or
+      (c.relkind <> 'S' and (
+        pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'INSERT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'DELETE'
+        )
+      ))
+    );
+
+  if v_relation_authority <> 0 then
+    raise exception 'owner github authority: direct relation authority detected';
+  end if;
+
+  if pg_catalog.has_schema_privilege(
+    'ordax_owner_project_onboarding_executor', 'private', 'USAGE'
+  ) then
+    raise exception 'owner github authority: private schema unexpectedly visible';
+  end if;
+end;
+$postflight$;
+
+commit;
+
+           then (e.value->>'installation_account_id')::numeric <= 9223372036854775807
+           else false
+         end
+       )
+       or not (
+         case
+           when coalesce(e.value->>'repository_id', '') ~ '^[1-9][0-9]{0,18}       or char_length(coalesce(e.value->>'installation_account_login', ''))
+            not between 1 and 100
+       or coalesce(e.value->>'installation_account_login', '')
+            !~ '^[A-Za-z0-9-]+$'
+       or char_length(coalesce(e.value->>'repository_full_name', ''))
+            not between 3 and 200
+       or coalesce(e.value->>'repository_full_name', '')
+            !~ '^[^[:space:]/]+/[^[:space:]/]+$'
+       or (
+         e.value->'default_branch' <> 'null'::jsonb
+         and (
+           pg_catalog.jsonb_typeof(e.value->'default_branch') <> 'string'
+           or char_length(e.value->>'default_branch') not between 1 and 255
+           or (e.value->>'default_branch') ~ '[[:cntrl:]]'
+         )
+       )
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.jsonb_array_elements(p_candidates) e(value)
+    group by e.value->>'repository_id'
+    having pg_catalog.count(*) > 1
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_duplicate'
+    );
+  end if;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  insert into private.ordax_owner_github_repository_candidates(
+    challenge_id, installation_id, installation_account_id,
+    installation_account_login, repository_id, repository_full_name,
+    default_branch, expires_at
+  )
+  select
+    p_challenge_id,
+    (e.value->>'installation_id')::bigint,
+    (e.value->>'installation_account_id')::bigint,
+    e.value->>'installation_account_login',
+    (e.value->>'repository_id')::bigint,
+    e.value->>'repository_full_name',
+    case
+      when e.value->'default_branch' = 'null'::jsonb then null
+      else e.value->>'default_branch'
+    end,
+    v_expires_at
+  from pg_catalog.jsonb_array_elements(p_candidates) e(value);
+
+  get diagnostics v_candidate_count = row_count;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'verified',
+         github_user_id = p_github_user_id,
+         github_user_login = p_github_user_login,
+         verified_at = v_now,
+         updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'candidate_count', v_candidate_count,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_read_github_repository_candidates_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_expires_at timestamptz;
+  v_repositories jsonb;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  select c.project_id, c.expires_at
+    into v_project_id, v_expires_at
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     );
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_candidates_unavailable'
+    );
+  end if;
+
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'repository_id', r.repository_id::text,
+        'repository_full_name', r.repository_full_name,
+        'default_branch', r.default_branch,
+        'installation_account_login', r.installation_account_login
+      )
+      order by pg_catalog.lower(r.repository_full_name), r.repository_id
+    ),
+    '[]'::jsonb
+  )
+  into v_repositories
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id and r.expires_at > v_now;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'challenge_id', p_challenge_id,
+    'project_id', v_project_id,
+    'repositories', v_repositories,
+    'expires_at', v_expires_at
+  );
+end;
+$$;
+
+create function public.ordax_owner_select_github_repository_v1(
+  p_owner_user_id uuid,
+  p_challenge_id uuid,
+  p_repository_id text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_project_id uuid;
+  v_space_id uuid;
+  v_installation_id bigint;
+  v_installation_account_id bigint;
+  v_repository_id bigint;
+  v_repository_full_name text;
+  v_default_branch text;
+  v_connection_id uuid;
+  v_now timestamptz := pg_catalog.timezone('utc', pg_catalog.now());
+begin
+  if p_owner_user_id is null or p_challenge_id is null
+     or p_repository_id is null
+     or p_repository_id !~ '^[1-9][0-9]{0,18}$'
+     or p_repository_id::numeric > 9223372036854775807 then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_selection_invalid'
+    );
+  end if;
+
+  select c.project_id, c.space_id
+    into v_project_id, v_space_id
+    from private.ordax_owner_github_authorization_challenges c
+   where c.challenge_id = p_challenge_id
+     and c.owner_user_id = p_owner_user_id
+     and c.status = 'verified'
+     and c.expires_at > v_now
+     and exists (
+       select 1 from public.ordax_projects p
+       where p.project_id = c.project_id
+         and p.space_id = c.space_id
+         and p.state = 'active'
+         and private.ordax_subject_can_admin_space_v1(
+           p_owner_user_id, p.space_id
+         )
+     )
+   for update;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_authorization_challenge_invalid'
+    );
+  end if;
+
+  if exists (
+    select 1 from public.ordax_project_connections c
+    where c.project_id = v_project_id
+      and c.space_id = v_space_id
+      and c.provider = 'github'
+      and c.state = 'active'
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'project_github_connection_exists'
+    );
+  end if;
+
+  select r.installation_id,
+         r.installation_account_id,
+         r.repository_id,
+         r.repository_full_name,
+         r.default_branch
+    into v_installation_id,
+         v_installation_account_id,
+         v_repository_id,
+         v_repository_full_name,
+         v_default_branch
+  from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id
+    and r.repository_id = p_repository_id::bigint
+    and r.expires_at > v_now;
+
+  if not found then
+    return pg_catalog.jsonb_build_object(
+      'ok', false, 'error', 'github_repository_not_verified'
+    );
+  end if;
+
+  select c.connection_id into v_connection_id
+  from public.ordax_project_connections c
+  where c.project_id = v_project_id
+    and c.provider = 'github'
+    and c.repository_id = v_repository_id
+  for update;
+
+  if found then
+    update public.ordax_project_connections
+       set space_id = v_space_id,
+           owner_user_id = p_owner_user_id,
+           external_account_id = v_installation_account_id::text,
+           installation_id = v_installation_id,
+           repository_full_name = v_repository_full_name,
+           default_branch = v_default_branch,
+           access_mode = 'read',
+           state = 'active',
+           metadata = pg_catalog.jsonb_build_object(
+             'authority', 'github_app_user_authorization_v1'
+           ),
+           updated_at = v_now
+     where connection_id = v_connection_id;
+  else
+    insert into public.ordax_project_connections(
+      space_id, owner_user_id, provider, external_account_id,
+      installation_id, repository_id, repository_full_name,
+      default_branch, access_mode, state, metadata, project_id
+    ) values (
+      v_space_id, p_owner_user_id, 'github',
+      v_installation_account_id::text, v_installation_id, v_repository_id,
+      v_repository_full_name, v_default_branch, 'read', 'active',
+      pg_catalog.jsonb_build_object(
+        'authority', 'github_app_user_authorization_v1'
+      ),
+      v_project_id
+    )
+    returning connection_id into v_connection_id;
+  end if;
+
+  update private.ordax_owner_github_authorization_challenges c
+     set status = 'selected', consumed_at = v_now, updated_at = v_now
+   where c.challenge_id = p_challenge_id;
+
+  delete from private.ordax_owner_github_repository_candidates r
+  where r.challenge_id = p_challenge_id;
+
+  return pg_catalog.jsonb_build_object(
+    'ok', true,
+    'connection_id', v_connection_id,
+    'project_id', v_project_id,
+    'repository_id', v_repository_id::text,
+    'repository_full_name', v_repository_full_name,
+    'default_branch', v_default_branch,
+    'state', 'active',
+    'next_state', 'needs_device_binding'
+  );
+end;
+$$;
+
+revoke all on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+revoke all on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) from public, anon, authenticated, service_role, ordax_edge_executor,
+  ordax_space_executor, ordax_project_executor, ordax_edge_runtime,
+  ordax_owner_project_onboarding_executor;
+
+grant execute on function public.ordax_owner_create_github_authorization_challenge_v1(
+  uuid, uuid, uuid, text, timestamptz
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_begin_github_authorization_completion_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_complete_github_authorization_v1(
+  uuid, uuid, bigint, text, jsonb
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_read_github_repository_candidates_v1(
+  uuid, uuid
+) to ordax_owner_project_onboarding_executor;
+grant execute on function public.ordax_owner_select_github_repository_v1(
+  uuid, uuid, text
+) to ordax_owner_project_onboarding_executor;
+
+do $postflight$
+declare
+  v_relation_authority integer;
+begin
+  select pg_catalog.count(*) into v_relation_authority
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  where n.nspname in ('public', 'private')
+    and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S')
+    and (
+      (c.relkind = 'S' and (
+        pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'USAGE'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_sequence_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+      ))
+      or
+      (c.relkind <> 'S' and (
+        pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'SELECT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'INSERT'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'UPDATE'
+        )
+        or pg_catalog.has_table_privilege(
+          'ordax_owner_project_onboarding_executor', c.oid, 'DELETE'
+        )
+      ))
+    );
+
+  if v_relation_authority <> 0 then
+    raise exception 'owner github authority: direct relation authority detected';
+  end if;
+
+  if pg_catalog.has_schema_privilege(
+    'ordax_owner_project_onboarding_executor', 'private', 'USAGE'
+  ) then
+    raise exception 'owner github authority: private schema unexpectedly visible';
+  end if;
+end;
+$postflight$;
+
+commit;
+
+           then (e.value->>'repository_id')::numeric <= 9223372036854775807
+           else false
+         end
+       )
        or char_length(coalesce(e.value->>'installation_account_login', ''))
             not between 1 and 100
        or coalesce(e.value->>'installation_account_login', '')
