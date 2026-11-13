@@ -92,6 +92,7 @@ TRUSTED_CLIENT_INGRESS={
         "/v3/owner/project-scope",
         "/v3/owner/project-onboarding",
         "/v3/owner/project-onboarding/projects",
+        "/v3/owner/project-bindings/intents",
         "/v3/owner/github/authorization-challenges",
         "/v3/owner/github/authorization-completions",
         "/v3/owner/github/repository-candidates",
