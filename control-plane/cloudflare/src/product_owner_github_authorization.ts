@@ -444,7 +444,10 @@ function challengeResponse(
 ): Json {
   if (raw.ok === false) return publicAuthorityError(raw, CHALLENGE_ERRORS);
   if (raw.ok !== true || raw.challenge_id !== expectedChallengeId
-      || raw.project_id !== expectedProjectId || raw.expires_at !== expiresAt) {
+      || raw.project_id !== expectedProjectId
+      || typeof raw.expires_at !== "string"
+      || !Number.isFinite(Date.parse(raw.expires_at))
+      || Date.parse(raw.expires_at) !== Date.parse(expiresAt)) {
     throw new Error("product_postgres_invalid_response");
   }
   return {
