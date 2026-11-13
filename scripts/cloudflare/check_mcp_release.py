@@ -23,6 +23,11 @@ ENTRY=ROOT/"control-plane/cloudflare/src/product_mcp_entry.ts"
 class McpReleaseError(ValueError):
     pass
 
+PENDING_PRODUCTION_BLOCKERS=frozenset({
+    "multi_device_end_to_end_not_verified",
+    "legacy_worker_retirement_not_verified",
+    "production_release_evidence_incomplete",
+})
 REQUIRED_PROOFS=frozenset({
     "custom_domain_tls_run_url",
     "oauth_chatgpt_consent_run_url",
@@ -179,8 +184,9 @@ def validate(foundation:dict,config:dict)->bool:
         raise McpReleaseError("mcp_release_status_inconsistent")
     if not ready:
         if remote_actions:
-            if "attested_interactive_end_to_end_not_verified" not in blocked:
-                raise McpReleaseError("mcp_interactive_e2e_blocker_missing")
+            missing=PENDING_PRODUCTION_BLOCKERS-set(blocked)
+            if missing:
+                raise McpReleaseError("mcp_production_blockers_incomplete")
         elif "canonical_remote_actions_not_ready" not in blocked:
             raise McpReleaseError("mcp_remote_actions_blocker_missing")
         return False
@@ -215,8 +221,8 @@ def validate_interactive_candidate(foundation:dict,config:dict)->bool:
     if release.get("conversation_topology")!="user_chatgpt_direct" or release.get("model_relay") is not False:
         raise McpReleaseError("mcp_interactive_candidate_topology_invalid")
     blockers=set(release.get("readiness_blockers") or [])
-    if "attested_interactive_end_to_end_not_verified" not in blockers:
-        raise McpReleaseError("mcp_interactive_candidate_e2e_blocker_missing")
+    if not PENDING_PRODUCTION_BLOCKERS.issubset(blockers):
+        raise McpReleaseError("mcp_interactive_candidate_production_blockers_incomplete")
 
     evidence=release.get("oauth_baseline_evidence")
     if not isinstance(evidence,dict) or set(evidence)!=VALIDATION_BASELINE_EVIDENCE:
