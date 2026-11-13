@@ -67,6 +67,7 @@ const PUBLIC_BINDING_INTENT_ERRORS = new Set([
   "space_admin_required",
   "github_repository_required",
   "github_repository_ambiguous",
+  "project_device_already_bound",
 ]);
 
 const json = (body: unknown, status = 200) => Response.json(body, {
@@ -229,6 +230,7 @@ function bindingIntentStatus(result: Json): number {
       return 404;
     case "github_repository_required":
     case "github_repository_ambiguous":
+    case "project_device_already_bound":
       return 409;
     default:
       return 400;
