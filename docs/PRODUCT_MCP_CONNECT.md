@@ -160,6 +160,22 @@ Em 16/10/2026 a conexão autenticada do ChatGPT reporta **18 tools**.
 - `ordax_targets`
 - `ordax_action_status`
 
+### Binding de conversa → dispositivo
+
+No Product MCP direto, o binding confirmado entre uma conversa e um dispositivo é
+**persistente por identidade**, não uma sessão de 30 minutos. Depois da confirmação
+Native, o mesmo `owner_user_id + client_id + session_sha256` continua roteado para
+o mesmo `device_id` até um evento explícito de autoridade invalidá-lo.
+
+Cada resolução continua revalidando consentimento OAuth e grant atual. Portanto,
+persistência **não** significa autorização eterna: consentimento revogado, grant
+revogado/expirado, dispositivo retirado ou binding explicitamente revogado falham
+fechado imediatamente. Presence/heartbeat/readiness representam disponibilidade de
+execução e não devem ser usados para esquecer ou trocar silenciosamente o target.
+Challenges de seleção/atestaçāo permanecem curtos; somente o binding confirmado é
+durável. Não reintroduzir TTL de inatividade, lease deslizante ou re-atestação
+periódica como requisito de UX.
+
 ### Observação e política do computador
 
 - `computer_windows`
