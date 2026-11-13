@@ -59,6 +59,11 @@ import {
   handleProductOwnerProjectScope,
   PRODUCT_OWNER_PROJECT_SCOPE_PATH,
 } from "./product_owner_project_scope.ts";
+import {
+  handleProductOwnerProjectOnboarding,
+  PRODUCT_OWNER_PROJECT_ONBOARDING_PATH,
+  PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH,
+} from "./product_owner_project_onboarding.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 
@@ -76,6 +81,8 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_DEVICE_PRESENCE_PATH
     || pathname === PRODUCT_DEVICE_CENTRAL_SESSION_PATH
     || pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH
+    || pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PATH
+    || pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH
     || pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
     || pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
@@ -388,6 +395,10 @@ export function createCanonicalProductMcpGateway(
     }
     if (url.pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH) {
       return handleProductOwnerProjectScope(request, env);
+    }
+    if (url.pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PATH
+        || url.pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH) {
+      return handleProductOwnerProjectOnboarding(request, env);
     }
     if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
         || url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
