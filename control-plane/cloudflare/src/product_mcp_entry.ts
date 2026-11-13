@@ -64,6 +64,13 @@ import {
   PRODUCT_OWNER_PROJECT_ONBOARDING_PATH,
   PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH,
 } from "./product_owner_project_onboarding.ts";
+import {
+  handleProductOwnerGithubAuthorization,
+  PRODUCT_OWNER_GITHUB_AUTHORIZATION_CHALLENGES_PATH,
+  PRODUCT_OWNER_GITHUB_AUTHORIZATION_COMPLETIONS_PATH,
+  PRODUCT_OWNER_GITHUB_REPOSITORY_CANDIDATES_PATH,
+  PRODUCT_OWNER_GITHUB_REPOSITORY_SELECTIONS_PATH,
+} from "./product_owner_github_authorization.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 
@@ -83,6 +90,10 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH
     || pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PATH
     || pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH
+    || pathname === PRODUCT_OWNER_GITHUB_AUTHORIZATION_CHALLENGES_PATH
+    || pathname === PRODUCT_OWNER_GITHUB_AUTHORIZATION_COMPLETIONS_PATH
+    || pathname === PRODUCT_OWNER_GITHUB_REPOSITORY_CANDIDATES_PATH
+    || pathname === PRODUCT_OWNER_GITHUB_REPOSITORY_SELECTIONS_PATH
     || pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
     || pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
@@ -399,6 +410,12 @@ export function createCanonicalProductMcpGateway(
     if (url.pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PATH
         || url.pathname === PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH) {
       return handleProductOwnerProjectOnboarding(request, env);
+    }
+    if (url.pathname === PRODUCT_OWNER_GITHUB_AUTHORIZATION_CHALLENGES_PATH
+        || url.pathname === PRODUCT_OWNER_GITHUB_AUTHORIZATION_COMPLETIONS_PATH
+        || url.pathname === PRODUCT_OWNER_GITHUB_REPOSITORY_CANDIDATES_PATH
+        || url.pathname === PRODUCT_OWNER_GITHUB_REPOSITORY_SELECTIONS_PATH) {
+      return handleProductOwnerGithubAuthorization(request, env);
     }
     if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
         || url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
