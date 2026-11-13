@@ -105,6 +105,7 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     await db.exec(read("20261104024500_central_attested_session_reconnect_v1.sql"));
     await db.exec(read("20261113085000_central_session_sliding_binding_v1.sql"));
     await db.exec(read("20261113085500_central_session_activity_lease_v1.sql"));
+    await db.exec(read("20261113151500_central_session_persistent_binding_v1.sql"));
 
     await db.query("insert into auth.users values($1)",[owner]);
     await db.query("insert into auth.oauth_clients values($1,null),($2,null)",[client,otherClient]);
@@ -159,73 +160,47 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
       "previous attested binding prevails over subsequent multiple grants");
     assert.equal((await list()).count,0);
 
-    // With exactly one currently eligible device, active use slides only the
-    // SAME already-attested binding after the normal grant/presence/readiness checks.
-    // It must not mint another challenge, change target, or require ceremony.
+    // A confirmed Product-MCP binding is durable routing, not a timed grant.
+    // Historical finite timestamps are normalized on ordinary open/resolve,
+    // without minting a new challenge or changing the selected device.
     await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",[grantNote]);
-    await db.query("update private.ordax_central_conversation_bindings set expires_at=now()+interval '5 minutes' where session_sha256=$1",[hash]);
-    const beforeSlide=(await db.query("select expires_at from private.ordax_central_conversation_bindings where session_sha256=$1",[hash])).rows[0].expires_at;
+    await db.query("update private.ordax_central_conversation_bindings set expires_at=now()-interval '1 second' where session_sha256=$1",[hash]);
     const challengeCountBefore=(await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where session_sha256=$1",[hash])).rows[0].total;
-    const slid=await open();
-    const afterSlide=(await db.query("select expires_at from private.ordax_central_conversation_bindings where session_sha256=$1",[hash])).rows[0].expires_at;
-    assert.equal(slid.status,"bound");
-    assert.equal(slid.device_id,desktop);
-    assert.equal(slid.request_id,confirmed.request_id);
-    assert.ok(new Date(afterSlide).getTime() > new Date(beforeSlide).getTime()+20*60*1000,
-      "continuous authorized use renews the binding lease by roughly 30 minutes");
+    const resolvedPersistent=await resolve();
+    assert.equal(resolvedPersistent.device_id,desktop);
+    assert.equal(resolvedPersistent.request_id,confirmed.request_id);
+    assert.equal((await db.query("select expires_at='infinity'::timestamptz as persistent from private.ordax_central_conversation_bindings where session_sha256=$1",[hash])).rows[0].persistent,true,
+      "ordinary authorized resolution normalizes the binding to persistent routing");
+    const reopened=await open();
+    assert.equal(reopened.status,"bound");
+    assert.equal(reopened.device_id,desktop);
+    assert.equal(reopened.request_id,confirmed.request_id);
     assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where session_sha256=$1",[hash])).rows[0].total,
-      challengeCountBefore,"sliding renewal creates no new challenge");
+      challengeCountBefore,"persistent routing creates no recurring challenge");
 
-    // Ordinary tool resolution is the activity path used after the session has
-    // already been opened. It must slide the exact same binding as well.
-    await db.query("update private.ordax_central_conversation_bindings set expires_at=now()+interval '5 minutes' where session_sha256=$1",[hash]);
-    const beforeResolveSlide=(await db.query("select expires_at from private.ordax_central_conversation_bindings where session_sha256=$1",[hash])).rows[0].expires_at;
-    const resolvedActive=await resolve();
-    const afterResolveSlide=(await db.query("select expires_at from private.ordax_central_conversation_bindings where session_sha256=$1",[hash])).rows[0].expires_at;
-    assert.equal(resolvedActive.device_id,desktop);
-    assert.equal(resolvedActive.request_id,confirmed.request_id);
-    assert.ok(new Date(afterResolveSlide).getTime() > new Date(beforeResolveSlide).getTime()+20*60*1000,
-      "ordinary authorized tool use renews the exact binding lease");
-    assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where session_sha256=$1",[hash])).rows[0].total,
-      challengeCountBefore,"resolver renewal creates no new challenge");
-    await db.query("update public.ordax_remote_capability_grants set state='active' where grant_id=$1",[grantNote]);
-
-    // After 30 minutes, the SAME Owner-selected and Device-confirmed
-    // conversation must re-attest the SAME computer, not reopen Owner OAuth.
-    await db.query("update private.ordax_central_conversation_bindings set expires_at=now()-interval '1 second' where session_sha256=$1",[hash]);
-    const resumedTicket=await open();
-    assert.equal(resumedTicket.status,"pending","expired attested session needs device credential, not Owner login");
-    assert.equal(resumedTicket.device_id,desktop,"never select an unrelated granted PC");
-    assert.notEqual(resumedTicket.challenge_id,waiting.challenge_id,"fresh device attestation");
-    assert.equal((await list()).count,0,"no new Owner selection");
-    assert.equal((await poll()).challenge_id,resumedTicket.challenge_id);
-    assert.equal((await confirm(notebook,tokenNote,resumedTicket.challenge_id)).ok,false,
-      "other device credential is never allowed to refresh a binding");
-    const rebound=await confirm(desktop,tokenDesk,resumedTicket.challenge_id);
-    assert.equal(rebound.ok,true);
-    assert.equal(rebound.request_id,confirmed.request_id,"reuse the exact immutable conversation binding");
-    assert.equal((await resolve()).device_id,desktop);
-
-    // A revoked OAuth consent must NEVER be revived by a prior confirmed
-    // conversation, even when its device grant remains active.
-    await db.query("update private.ordax_central_conversation_bindings set expires_at=now()-interval '1 second' where session_sha256=$1",[hash]);
+    // OAuth consent revocation invalidates routing immediately even though the
+    // binding itself has no inactivity expiry.
     await db.exec("update auth.oauth_consents set revoked_at=now()");
+    assert.equal((await resolve()).error,"owner_central_client_not_consented");
     assert.equal((await open()).error,"owner_central_client_not_consented");
     await db.exec("update auth.oauth_consents set revoked_at=null");
-    await db.query("update public.ordax_device_presence set online=false where device_id=$1",[desktop]);
-    assert.equal((await open()).error,"central_device_offline","offline device cannot renew");
-    await db.query("update public.ordax_device_presence set online=true,last_seen_at=now(),capability_digest=null where device_id=$1",[desktop]);
-    assert.equal((await open()).error,"central_device_runtime_not_ready","discovery-only agent cannot renew");
-    await db.query("update public.ordax_device_presence set capability_digest=$2 where device_id=$1",[desktop,"f".repeat(64)]);
-    const renewedTicket=await open();
-    assert.equal(renewedTicket.status,"pending");
-    assert.equal((await confirm(desktop,tokenDesk,renewedTicket.challenge_id)).ok,true);
 
-    await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",
-      [grantDesk]);
+    // Presence/readiness are execution availability, not routing authority for
+    // an already-attested conversation. Going offline must not forget the target.
+    await db.query("update public.ordax_device_presence set online=false where device_id=$1",[desktop]);
+    assert.equal((await resolve()).device_id,desktop);
+    assert.equal((await open()).device_id,desktop);
+    await db.query("update public.ordax_device_presence set online=true,last_seen_at=now(),capability_digest=null where device_id=$1",[desktop]);
+    assert.equal((await resolve()).device_id,desktop);
+    assert.equal((await open()).device_id,desktop);
+    await db.query("update public.ordax_device_presence set capability_digest=$2 where device_id=$1",[desktop,"f".repeat(64)]);
+
+    // Grant revocation is still immediate and fail-closed.
+    await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",[grantDesk]);
     assert.equal((await resolve()).error,"central_device_grant_revoked");
+    assert.equal((await open()).error,"central_device_grant_revoked");
     assert.equal((await db.query("select count(*)::int as total from public.ordax_remote_capability_grants")).rows[0].total,2,
-      "session selection never modifies grant ledger");
+      "session routing never modifies grant ledger");
 
     // A DIFFERENT provider session with two grants cannot reuse a prior ticket.
     await db.query("update public.ordax_remote_capability_grants set state='active' where grant_id=$1",
