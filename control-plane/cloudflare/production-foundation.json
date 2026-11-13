@@ -1,5 +1,5 @@
 {
-  "version": 26,
+  "version": 27,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -229,6 +229,36 @@
       "legacy_worker_retirement_observed_at": "2026-11-13",
       "legacy_worker_retirement_scope": "ordax-control-plane-v3 absent; ordax-control-plane-v3-canary removed; canonical mcp.ordax.com.br remains on ordax-mcp",
       "legacy_worker_retirement_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/43457462005"
+    },
+    "release_evidence_progress": {
+      "custom_domain_tls_run_url": {
+        "status": "verified",
+        "run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/38705274585"
+      },
+      "oauth_chatgpt_consent_run_url": {
+        "status": "missing",
+        "reason": "OAuth consent exists in canonical state, but no independent workflow run currently proves the real ChatGPT consent ceremony."
+      },
+      "paired_device_and_grants_run_url": {
+        "status": "missing",
+        "reason": "Physical pairing/grants and Windows receipts are recorded in issue #291/PR #336, but their CI runs do not independently execute that live proof."
+      },
+      "trusted_host_attestation_run_url": {
+        "status": "missing",
+        "reason": "Physical attested dispatch is validated on the authorized Desktop, but no independent workflow run currently proves the trusted-host attestation path live."
+      },
+      "remote_actions_contract_run_url": {
+        "status": "verified",
+        "run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/43457584303"
+      },
+      "multi_device_end_to_end_run_url": {
+        "status": "missing",
+        "reason": "Only one action-capable authorized device is currently online; the second registered device is offline and discovery-only."
+      },
+      "legacy_worker_retirement_run_url": {
+        "status": "verified",
+        "run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/43457462005"
+      }
     }
   }
 }
