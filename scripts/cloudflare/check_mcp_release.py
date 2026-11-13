@@ -90,6 +90,8 @@ TRUSTED_CLIENT_INGRESS={
         "/v3/product/device/presence",
         "/v3/product/device/central-session",
         "/v3/owner/project-scope",
+        "/v3/owner/project-onboarding",
+        "/v3/owner/project-onboarding/projects",
         "/v3/owner/central-session-selections",
         "/v3/owner/central-session-targets",
         "/v3/owner/remote-authority",
