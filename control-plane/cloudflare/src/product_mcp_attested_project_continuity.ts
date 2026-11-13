@@ -43,7 +43,7 @@ type Dependencies = Readonly<{
 }>;
 
 const QUEUE_TTL_MS = 2 * 60 * 1000;
-const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled"]);
+const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled", "expired"]);
 const CONTINUITY_PROFILE = "project-continuity";
 export const ATTESTED_MCP_PROJECT_CONTINUITY_ACTIONS: ReadonlySet<string> = new Set(PROJECT_CONTINUITY_ACTIONS);
 
