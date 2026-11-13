@@ -77,7 +77,7 @@ class OrdaxChatGptConnectorPackageTests(unittest.TestCase):
         self.assertFalse(readiness["ready"])
         self.assertTrue(readiness["supports_remote_actions"])
         self.assertIn("multi_device_end_to_end_not_verified", readiness["blockers"])
-        self.assertIn("legacy_worker_retirement_not_verified", readiness["blockers"])
+        self.assertNotIn("legacy_worker_retirement_not_verified", readiness["blockers"])
         self.assertIn("production_release_evidence_incomplete", readiness["blockers"])
         self.assertNotIn("interactive_computer_grant_not_authorized", readiness["blockers"])
         self.assertNotIn("attested_interactive_end_to_end_not_verified", readiness["blockers"])
