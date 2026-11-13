@@ -59,6 +59,11 @@ class McpReleaseContract(unittest.TestCase):
                 with self.subTest(gate=gate,invalid=invalid):
                     with self.assertRaisesRegex(McpReleaseError,"owner_central_rollout_flags_incomplete"):
                         validate(self.foundation,c)
+        self.assertEqual(self.config["vars"]["PRODUCT_DEVICE_WAKE_ENABLED"], "enabled")
+        c=copy.deepcopy(self.config)
+        c["vars"]["PRODUCT_DEVICE_WAKE_ENABLED"]="disabled"
+        with self.assertRaisesRegex(McpReleaseError,"product_device_wake_rollout_incomplete"):
+            validate(self.foundation,c)
         c=copy.deepcopy(self.config)
         c["vars"]["UNTRUSTED_SECOND_OWNER_AUTHORITY"]="enabled"
         with self.assertRaisesRegex(McpReleaseError,"mcp_auth_vars_not_canonical"):
