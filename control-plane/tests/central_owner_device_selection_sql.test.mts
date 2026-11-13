@@ -158,8 +158,10 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
       "previous attested binding prevails over subsequent multiple grants");
     assert.equal((await list()).count,0);
 
-    // Active use slides only the SAME already-attested binding. It must not
-    // mint another challenge, change target, or require Owner/Device ceremony.
+    // With exactly one currently eligible device, active use slides only the
+    // SAME already-attested binding after the normal grant/presence/readiness checks.
+    // It must not mint another challenge, change target, or require ceremony.
+    await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",[grantNote]);
     await db.query("update private.ordax_central_conversation_bindings set expires_at=now()+interval '5 minutes' where session_sha256=$1",[hash]);
     const beforeSlide=(await db.query("select expires_at from private.ordax_central_conversation_bindings where session_sha256=$1",[hash])).rows[0].expires_at;
     const challengeCountBefore=(await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where session_sha256=$1",[hash])).rows[0].total;
@@ -172,6 +174,7 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
       "continuous authorized use renews the binding lease by roughly 30 minutes");
     assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where session_sha256=$1",[hash])).rows[0].total,
       challengeCountBefore,"sliding renewal creates no new challenge");
+    await db.query("update public.ordax_remote_capability_grants set state='active' where grant_id=$1",[grantNote]);
 
     // After 30 minutes, the SAME Owner-selected and Device-confirmed
     // conversation must re-attest the SAME computer, not reopen Owner OAuth.
