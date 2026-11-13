@@ -128,7 +128,13 @@ export function createOwnerProjectBindingHandler(env: Env, deps: Dependencies = 
 
       // Wake is advisory only. The Runtime must authenticate and read the
       // canonical pending intent; no binding authority travels in the signal.
-      await wake(env, body.device_id.toLowerCase());
+      try {
+        await wake(env, body.device_id.toLowerCase());
+      } catch {
+        // Wake is best-effort only. The SQL intent is already committed and
+        // remains discoverable by the authenticated Device transport.
+        console.error(JSON.stringify({ event: "project_binding_wake_delivery_failed" }));
+      }
       return json({
         ok: true,
         schema: "ordax.owner-project-binding-intent/1",
