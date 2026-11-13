@@ -26,6 +26,8 @@ export interface ProductPostgresEnv {
   MCP_USAGE_METER_MODE?: string;
   /** High-entropy Cloudflare secret; required for retry fingerprints. */
   MCP_USAGE_FINGERPRINT_KEY?: string;
+  /** Separate source gate for Owner-intent + Device-confirmed Project binding. */
+  OWNER_PROJECT_BINDING_ENABLED?: string;
 }
 
 export type ProductMcpUsageRecording = Readonly<{
@@ -222,6 +224,18 @@ const RPC_SPECS = {
   ordax_owner_select_github_repository_v1: {
     keys: ["p_owner_user_id", "p_challenge_id", "p_repository_id"],
     casts: ["uuid", "uuid", "text"],
+  },
+  ordax_owner_create_project_binding_intent_v1: {
+    keys: ["p_owner_user_id", "p_project_id", "p_device_id", "p_intent_id", "p_expires_at"],
+    casts: ["uuid", "uuid", "uuid", "uuid", "timestamptz"],
+  },
+  ordax_device_project_binding_intents_v1: {
+    keys: ["p_device_id"],
+    casts: ["uuid"],
+  },
+  ordax_device_confirm_project_binding_v1: {
+    keys: ["p_device_id", "p_intent_id", "p_local_project_ref", "p_allowed_capabilities"],
+    casts: ["uuid", "uuid", "text", "text[]"],
   },
   // Staged read-only RPC: remains unavailable until the separately governed
   // PostgreSQL proposal is applied. No new grant authority is created here.
@@ -701,6 +715,51 @@ export async function selectOwnerGithubRepository(
     p_owner_user_id: input.ownerUserId,
     p_challenge_id: input.challengeId,
     p_repository_id: input.repositoryId,
+  });
+}
+
+export async function createOwnerProjectBindingIntent(
+  env: ProductPostgresEnv,
+  input: {
+    ownerUserId: string;
+    projectId: string;
+    deviceId: string;
+    intentId: string;
+    expiresAt: string;
+  },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_owner_create_project_binding_intent_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_project_id: input.projectId,
+    p_device_id: input.deviceId,
+    p_intent_id: input.intentId,
+    p_expires_at: input.expiresAt,
+  });
+}
+
+export async function readDeviceProjectBindingIntents(
+  env: ProductPostgresEnv,
+  input: { deviceId: string },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_device_project_binding_intents_v1", {
+    p_device_id: input.deviceId,
+  });
+}
+
+export async function confirmDeviceProjectBinding(
+  env: ProductPostgresEnv,
+  input: {
+    deviceId: string;
+    intentId: string;
+    localProjectRef: string;
+    allowedCapabilities: string[];
+  },
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_device_confirm_project_binding_v1", {
+    p_device_id: input.deviceId,
+    p_intent_id: input.intentId,
+    p_local_project_ref: input.localProjectRef,
+    p_allowed_capabilities: input.allowedCapabilities,
   });
 }
 
