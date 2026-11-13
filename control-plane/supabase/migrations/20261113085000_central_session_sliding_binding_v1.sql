@@ -190,7 +190,7 @@ begin
  if v_existing.device_id is not null then
    if v_existing.expires_at>v_now then
      update private.ordax_central_conversation_bindings b
-        set expires_at=pg_catalog.greatest(b.expires_at,v_now+interval '30 minutes')
+        set expires_at=greatest(b.expires_at,v_now+interval '30 minutes')
       where b.request_id=v_existing.request_id
         and b.owner_user_id=p_owner_user_id
         and b.client_id=p_client_id
