@@ -7,6 +7,13 @@ BASE_MIGRATION = ROOT / "control-plane/supabase/migrations/20261020091500_produc
 EXPIRED_STATE_MIGRATION = ROOT / "control-plane/supabase/migrations/20261113182849_product_action_expired_state_v1.sql"
 POSTFLIGHT = ROOT / "control-plane/supabase/tests/product_action_queued_expiration_postflight.sql"
 MCP_HTTP = ROOT / "control-plane/cloudflare/src/mcp_http.ts"
+STATUS_CONSUMERS = (
+    ROOT / "control-plane/cloudflare/src/product_mcp_attested_device_action.ts",
+    ROOT / "control-plane/cloudflare/src/product_mcp_attested_project_action.ts",
+    ROOT / "control-plane/cloudflare/src/product_mcp_attested_project_continuity.ts",
+    ROOT / "control-plane/cloudflare/src/product_mcp_attested_repository_catalog.ts",
+    ROOT / "control-plane/cloudflare/src/product_relay_submit.ts",
+)
 
 
 class ProductActionExpiryContractTests(unittest.TestCase):
@@ -16,6 +23,10 @@ class ProductActionExpiryContractTests(unittest.TestCase):
         cls.state_sql = EXPIRED_STATE_MIGRATION.read_text(encoding="utf-8").lower()
         cls.postflight = POSTFLIGHT.read_text(encoding="utf-8").lower()
         cls.mcp_http = MCP_HTTP.read_text(encoding="utf-8")
+        cls.status_consumers = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in STATUS_CONSUMERS
+        }
 
     def test_expiry_transitions_only_queued_actions_to_expired(self):
         sql = self.state_sql
@@ -100,6 +111,13 @@ class ProductActionExpiryContractTests(unittest.TestCase):
             'const pending = !["succeeded", "failed", "cancelled", "expired"].includes(status);',
             self.mcp_http,
         )
+
+    def test_all_product_receipt_consumers_accept_expired_authority_state(self):
+        expected = '["queued", "leased", "running", "succeeded", "failed", "cancelled", "expired"]'
+        for name, source in self.status_consumers.items():
+            compact = " ".join(source.split())
+            with self.subTest(name=name):
+                self.assertIn(expected, compact)
 
     def test_postflight_is_rollback_only_and_requires_distinct_expired_state(self):
         self.assertTrue(self.postflight.strip().endswith("rollback;"))
