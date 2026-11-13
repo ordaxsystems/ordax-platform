@@ -227,7 +227,8 @@
       "note": "Physical single-device validation is complete; production still requires the independent release_evidence proof set.",
       "legacy_public_worker_retired": true,
       "legacy_worker_retirement_observed_at": "2026-11-13",
-      "legacy_worker_retirement_scope": "ordax-control-plane-v3 absent; ordax-control-plane-v3-canary removed; canonical mcp.ordax.com.br remains on ordax-mcp"
+      "legacy_worker_retirement_scope": "ordax-control-plane-v3 absent; ordax-control-plane-v3-canary removed; canonical mcp.ordax.com.br remains on ordax-mcp",
+      "legacy_worker_retirement_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/43457462005"
     }
   }
 }
