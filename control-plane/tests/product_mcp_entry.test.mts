@@ -229,6 +229,7 @@ test("Trusted ingress manifest is the exact route inventory owned by the MCP rou
     "/v3/owner/project-scope",
     "/v3/owner/project-onboarding",
     "/v3/owner/project-onboarding/projects",
+    "/v3/owner/project-bindings/intents",
     "/v3/owner/github/authorization-challenges",
     "/v3/owner/github/authorization-completions",
     "/v3/owner/github/repository-candidates",
