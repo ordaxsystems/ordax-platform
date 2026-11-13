@@ -133,6 +133,8 @@ def validate(foundation:dict,config:dict)->bool:
     if vars.get("CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED") != "enabled" \
         or vars.get("CENTRAL_OWNER_SELECTION_ENABLED") != "enabled":
         raise McpReleaseError("owner_central_rollout_flags_incomplete")
+    if vars.get("PRODUCT_DEVICE_WAKE_ENABLED") != "enabled":
+        raise McpReleaseError("product_device_wake_rollout_incomplete")
     if vars != {
         "PRODUCT_AUTH_ISSUER":issuer,
         "PRODUCT_AUTH_AUDIENCE":"authenticated",
@@ -140,6 +142,7 @@ def validate(foundation:dict,config:dict)->bool:
         "PRODUCT_OWNER_OAUTH_CLIENT_ID":owner_client,
         "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED":"enabled",
         "CENTRAL_OWNER_SELECTION_ENABLED":"enabled",
+        "PRODUCT_DEVICE_WAKE_ENABLED":"enabled",
     }:
         raise McpReleaseError("mcp_auth_vars_not_canonical")
     hyperdrive=foundation.get("live_evidence",{}).get("hyperdrive",{})
