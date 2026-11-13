@@ -32,6 +32,7 @@ class PublicProbeClassification(unittest.TestCase):
             "oauth": (oauth_http, self.metadata if oauth_http == 200 else
                       {"code": 404, "message": "feature_disabled"}),
             "legacy_get": (404, {"error": "not_found"}),
+            "retired_canary": (404, None),
         }
 
     def probe(self, **kwargs):
@@ -47,12 +48,20 @@ class PublicProbeClassification(unittest.TestCase):
         self.assertEqual(p["oauth_state"], "BLOCKED_BY_AUTH_SERVER")
         self.assertEqual(p["ready_http"], 503)
         self.assertEqual(p["central_remote_actions"], "NOT_TESTED_BY_READ_ONLY_PROBE")
+        self.assertEqual(p["legacy_worker_retired"], "PASS")
 
     def test_valid_oauth_discovery_and_worker_ready_are_distinct_from_real_consent(self):
         p = self.probe(oauth_http=200, worker_ready_http=200)
         self.assertEqual(p["public_surface"], "PASS_CANONICAL")
         self.assertEqual(p["oauth_state"], "DISCOVERY_READY")
         self.assertEqual(p["central_remote_actions"], "NOT_TESTED_BY_READ_ONLY_PROBE")
+
+    def test_legacy_canary_must_remain_absent(self):
+        responses = self.responses()
+        responses["retired_canary"] = (200, {"service": "ordax-platform-mcp"})
+        p = analyze(self.issuer, self.worker, responses)
+        self.assertEqual(p["legacy_worker_retired"], "INCONCLUSIVE")
+        self.assertEqual(p["public_surface"], "INCONCLUSIVE")
 
     def test_public_surface_drift_is_not_treated_as_safe(self):
         for target, transform in [
