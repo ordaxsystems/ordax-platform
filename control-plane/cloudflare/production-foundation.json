@@ -1,5 +1,5 @@
 {
-  "version": 27,
+  "version": 28,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -222,13 +222,19 @@
       "interactive_computer_grant_authorized": true,
       "attested_interactive_end_to_end_verified": true,
       "canonical_remote_actions_verified": true,
-      "runtime_source_commit": "bbf7af01228c63562fbb8e2e605ed75e37303fb8",
+      "runtime_source_commit": "7a1be0cb24b2b32d0ef24ad953e2a3338fab2260",
       "platform_source_commit": "4732d40e4495bdfb7cbc60cd3652423847b64ffd",
       "note": "Physical single-device validation is complete; production still requires the independent release_evidence proof set.",
       "legacy_public_worker_retired": true,
       "legacy_worker_retirement_observed_at": "2026-11-13",
       "legacy_worker_retirement_scope": "ordax-control-plane-v3 absent; ordax-control-plane-v3-canary removed; canonical mcp.ordax.com.br remains on ordax-mcp",
-      "legacy_worker_retirement_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/43457462005"
+      "legacy_worker_retirement_run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/43457462005",
+      "runtime_physical_update_transaction": "8804f522f7784713827261ee141d5561",
+      "runtime_action_expiry_recovery_verified": true,
+      "runtime_action_expiry_recovery_verified_at": "2026-11-13",
+      "runtime_active_job_claim_latency_max_seconds": 11.916098,
+      "runtime_action_expired_after_verified_boot": 0,
+      "runtime_action_expiry_recovery_note": "With a 76.8s terminal job active, independent directory create/remove and file stat were claimed in 8.925s, 1.885s and 11.916s; no action_expired occurred after the verified 7a1be0c boot."
     },
     "release_evidence_progress": {
       "custom_domain_tls_run_url": {
