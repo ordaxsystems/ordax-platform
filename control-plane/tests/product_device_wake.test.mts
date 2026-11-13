@@ -3,11 +3,34 @@ import assert from "node:assert/strict";
 import {
   ProductDeviceWake,
   notifyProductDeviceWake,
+  scheduleProductDeviceWake,
   subscribeProductDeviceWake,
 } from "../cloudflare/src/product_device_wake.ts";
 import { handleProductDeviceTransport } from "../cloudflare/src/product_device_transport.ts";
 
 const DEVICE = "900943fd-8397-471e-bf05-c66ba4de7884";
+
+test("canonical wake scheduler is advisory and falls back when a request context fails", async () => {
+  const sent: string[] = [], tasks: Promise<void>[] = [];
+  let resolve!: () => void;
+  const pending = new Promise<void>(done => { resolve = done; });
+  const env = { PRODUCT_DEVICE_WAKE_ENABLED: "enabled", DEVICE_WAKE: {
+    idFromName: (id: string) => { assert.equal(id, DEVICE); return id; },
+    get: () => ({ fetch: async () => { await pending; sent.push("signal"); return Response.json({ok:true}); } }),
+  } } as any;
+  const quick = scheduleProductDeviceWake(env, DEVICE, task => { tasks.push(task); });
+  await quick;
+  assert.equal(sent.length, 0, "request response must not await queued DO");
+  assert.equal(tasks.length, 1);
+  resolve();
+  await Promise.all(tasks);
+  assert.deepEqual(sent, ["signal"]);
+  let awaited = false;
+  await scheduleProductDeviceWake(env, DEVICE, () => { throw Error("context unavailable"); });
+  awaited = true;
+  assert.equal(awaited, true);
+  assert.deepEqual(sent, ["signal", "signal"]);
+});
 
 test("unauthenticated wake subscribers cannot reach the signalling namespace", async () => {
   let called = false;

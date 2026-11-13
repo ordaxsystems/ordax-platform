@@ -77,6 +77,26 @@ export function subscribeProductDeviceWake(
   });
 }
 
+/** One advisory signal path for committed actions and device-attested session challenges.
+ * A Worker may retain the promise with waitUntil; without a request context it is awaited.
+ * The signal grants nothing and the Runtime must still authenticate against PostgreSQL.
+ */
+export async function scheduleProductDeviceWake(
+  env: ProductPostgresEnv, deviceId: string,
+  scheduleWake?: (wake: Promise<void>) => void,
+): Promise<void> {
+  const wake = notifyProductDeviceWake(env, deviceId);
+  if (scheduleWake) {
+    try {
+      scheduleWake(wake);
+      return;
+    } catch {
+      // A broken scheduler cannot silently drop the best-effort wake.
+    }
+  }
+  await wake;
+}
+
 export async function notifyProductDeviceWake(
   env: ProductPostgresEnv, deviceId: string,
 ): Promise<void> {

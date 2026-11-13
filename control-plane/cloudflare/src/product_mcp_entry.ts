@@ -215,6 +215,7 @@ type SessionRecoveryDependencies = Readonly<{
   resolve?: typeof resolveCentralSessionFromMcp;
   open?: typeof openCentralSessionFromMcp;
   wait?: (milliseconds: number) => Promise<void>;
+  scheduleWake?: (wake: Promise<void>) => void;
 }>;
 
 // The Runtime schedules Central attestation from the existing Product heartbeat,
@@ -252,7 +253,10 @@ export async function resolveOrBootstrapAttestedSession(
 
   // This is the same device-confirmed challenge normally opened by ordax_session.
   // PostgreSQL chooses an eligible target; no device_id from MCP arguments is used.
-  const opened = await (deps.open ?? openCentralSessionFromMcp)(request.clone(), env);
+  const opened = await (deps.open ?? openCentralSessionFromMcp)(
+    request.clone(), env,
+    ...(deps.scheduleWake ? [{ scheduleWake: deps.scheduleWake }] : []),
+  );
   if (!opened.ok) {
     const failed: unknown = await opened.clone().json().catch(() => null);
     const code = failed && typeof failed === "object" && !Array.isArray(failed)
@@ -396,12 +400,17 @@ export function createCanonicalProductMcpGateway(
     }
     if (url.pathname === "/mcp") {
       const toolName = await mcpToolName(request);
+      // This single request-owned scheduler serves SQL-committed action wakes
+      // and device-attested session challenges. No second queue or authority.
+      const wakeDependencies = context
+        ? { scheduleWake: (wake: Promise<void>) => context.waitUntil(wake) }
+        : {};
       // ordax_session is already a safe authenticated read tool. Its only new
       // side effect is opening/renewing a short-lived, server-selected device
       // challenge from the hidden provider correlation marker. This is session
       // coordination for the direct MCP path; it is not Central model relay.
       if (toolName === "ordax_session") {
-        try { await openCentralSessionFromMcp(request.clone(), env); } catch { /* fail closed */ }
+        try { await openCentralSessionFromMcp(request.clone(), env, wakeDependencies); } catch { /* fail closed */ }
       }
 
       let handlers = deniedHandlers;
@@ -413,7 +422,9 @@ export function createCanonicalProductMcpGateway(
         let trustFailure: string | null = null;
         let ownerChallengeId: string | null = null;
         try {
-          const resolved = await resolveOrBootstrapAttestedSession(request.clone(), env, recoveryDependencies);
+          const resolved = await resolveOrBootstrapAttestedSession(
+            request.clone(), env, { ...recoveryDependencies, ...wakeDependencies },
+          );
           if (resolved.ok) {
             trusted = Object.freeze({
               ownerUserId: resolved.ownerUserId,
@@ -433,12 +444,6 @@ export function createCanonicalProductMcpGateway(
         } catch {
           trusted = null;
         }
-        // The signalling Durable Object is advisory only. Schedule its wake
-        // on the *current request's* Worker lifetime after SQL commits; never
-        // block the persisted action receipt on a secondary channel.
-        const wakeDependencies = context
-          ? { scheduleWake: (wake: Promise<void>) => context.waitUntil(wake) }
-          : {};
         handlers = {
           ...reads,
           createAction: pending

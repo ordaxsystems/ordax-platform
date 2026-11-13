@@ -1,4 +1,5 @@
 import { authenticateProductMcpClientRequest, type ProductAuthEnv } from "./product_auth.ts";
+import { scheduleProductDeviceWake } from "./product_device_wake.ts";
 import { validChatGptSessionMarker } from "./product_central_admission.ts";
 import {
   confirmCentralDeviceSession,
@@ -48,7 +49,11 @@ export async function centralSessionMarker(request: Request): Promise<string | n
 export async function openCentralSessionFromMcp(
   request: Request,
   env: Env,
-  deps: { open?: typeof openCentralDeviceSession } = {},
+  deps: {
+    open?: typeof openCentralDeviceSession;
+    signalWake?: typeof scheduleProductDeviceWake;
+    scheduleWake?: (wake: Promise<void>) => void;
+  } = {},
 ): Promise<Response> {
   const marker = await centralSessionMarker(request);
   if (!marker) return json({ ok: false, error: "central_session_marker_required" }, 409);
@@ -67,6 +72,18 @@ export async function openCentralSessionFromMcp(
         : code === "central_device_target_missing" ? 403
         : code === "central_session_revoked" ? 403 : 503;
       return json({ ok: false, error: code }, status);
+    }
+    // SQL alone selects the eligible target. Notify its existing Runtime that
+    // a challenge is waiting; the wake contains no challenge ID, grant or token.
+    // Confirmation remains mandatory and the heartbeat fallback stays intact.
+    if (result.status === "pending" && isCanonicalUuid(result.device_id)) {
+      try {
+        await (deps.signalWake ?? scheduleProductDeviceWake)(
+          env, result.device_id, deps.scheduleWake,
+        );
+      } catch {
+        // Best-effort notification must never invalidate the SQL challenge.
+      }
     }
     return json(result, result.status === "pending" || result.status === "awaiting_owner" ? 202 : 200);
   } catch (error) {

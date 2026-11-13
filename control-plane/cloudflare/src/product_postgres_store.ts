@@ -1,5 +1,5 @@
 import { openPostgresSession } from "./data_postgres_driver.ts";
-import { notifyProductDeviceWake } from "./product_device_wake.ts";
+import { scheduleProductDeviceWake } from "./product_device_wake.ts";
 import { encodePostgresTextArrayLiteral, InvalidPostgresTextArrayError } from "./product_postgres_text_array.ts";
 import {
   canonicalRemoteClient,
@@ -637,21 +637,9 @@ export async function enqueueProductAction(
   // Even a replayed accepted enqueue is safe: the device must still claim
   // the actual lease through PostgreSQL. A missing DO never changes the RPC.
   if (recorded.ok && recorded.request_id) {
-    const wake = notifyProductDeviceWake(env, input.deviceId);
-    if (input.scheduleWake) {
-      try {
-        // Cloudflare's waitUntil owns this advisory side effect after the
-        // HTTP response. A stalled Durable Object cannot delay the already
-        // committed PostgreSQL receipt or manufacture a second enqueue.
-        input.scheduleWake(wake);
-      } catch {
-        // Non-Worker callers preserve the original awaited wake semantics.
-        // A broken scheduler must not discard an advisory signal silently.
-        await wake;
-      }
-    } else {
-      await wake;
-    }
+    // Identical, single signalling path also serves device-attested session
+    // challenges. No work or trust can be conveyed by this advisory message.
+    await scheduleProductDeviceWake(env, input.deviceId, input.scheduleWake);
   }
   return recorded;
 }

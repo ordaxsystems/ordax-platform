@@ -127,6 +127,44 @@ test("signed OAuth client opens challenge without trusting model device_id",asyn
   });
 });
 
+test("pending session uses one canonical wake for SQL-selected device, not the model argument", async () => {
+  await withIssuer(async () => {
+    const requests: string[] = [], scheduled: Promise<void>[] = [];
+    const response = await openCentralSessionFromMcp(mcpRequest(await token()), env, {
+      open: async () => ({ ok: true, status: "pending", device_id: device,
+        challenge_id: challenge }),
+      signalWake: async (_env, deviceId, scheduleWake) => {
+        requests.push(deviceId);
+        const signal = Promise.resolve();
+        scheduleWake?.(signal);
+      },
+      scheduleWake: (promise) => scheduled.push(promise),
+    });
+    assert.equal(response.status, 202);
+    assert.deepEqual(requests, [device]);
+    assert.equal(scheduled.length, 1);
+    await Promise.all(scheduled);
+  });
+});
+
+test("bound session, owner selection and failed challenge never signal a device", async () => {
+  await withIssuer(async () => {
+    const calls: string[] = [];
+    for (const result of [
+      { ok: true, status: "bound", device_id: device },
+      { ok: true, status: "awaiting_owner", device_id: device },
+      { ok: false, error: "central_device_runtime_not_ready" },
+      { ok: true, status: "pending", device_id: "not-a-canonical-device" },
+    ]) {
+      await openCentralSessionFromMcp(mcpRequest(await token()), env, {
+        open: async () => result as any,
+        signalWake: async (_env, deviceId) => { calls.push(deviceId); },
+      });
+    }
+    assert.deepEqual(calls, [], "only a valid SQL-selected pending device is signalled");
+  });
+});
+
 test("offline session availability is a conflict with canonical device state, not an argument error", async () => {
   await withIssuer(async () => {
     const response = await openCentralSessionFromMcp(mcpRequest(await token()), env, {
