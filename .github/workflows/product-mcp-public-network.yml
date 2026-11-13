@@ -35,7 +35,7 @@ jobs:
           python-version: "3.12"
       - name: Validate read-only probe classifications and canonical origin
         run: python -m unittest tests.test_live_product_mcp_probe
-      - name: Query actual Cloudflare Canary and Supabase OAuth discovery over HTTPS
+      - name: Query canonical OrdaX MCP and Supabase OAuth discovery over HTTPS
         run: python -m scripts.cloudflare.probe_live_product_mcp
       - name: Disallow false success labels
         run: |
