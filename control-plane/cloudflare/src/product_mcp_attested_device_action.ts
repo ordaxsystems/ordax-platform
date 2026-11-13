@@ -53,7 +53,7 @@ type Dependencies = Readonly<{
 }>;
 
 const QUEUE_TTL_MS = 2 * 60 * 1000;
-const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled"]);
+const ACTIVE_STATUSES = new Set(["queued", "leased", "running", "succeeded", "failed", "cancelled", "expired"]);
 const FULL_COMPUTER_CONTROL_MODE = "full-computer-control";
 const OBSERVE_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[OBSERVE_COMPUTER_CONTROL_MODE]);
 const INTERACTIVE_ACTIONS = new Set<string>(OWNER_DEVICE_COMPUTER_GRANT_PROFILES[INTERACTIVE_COMPUTER_CONTROL_MODE]);
