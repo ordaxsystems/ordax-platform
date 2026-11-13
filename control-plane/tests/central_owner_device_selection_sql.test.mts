@@ -202,6 +202,8 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     assert.equal((await db.query("select count(*)::int as total from public.ordax_remote_capability_grants")).rows[0].total,2,
       "session routing never modifies grant ledger");
 
+    await db.query("update public.ordax_remote_capability_grants set state='active' where grant_id=$1",[grantNote]);
+
     // A DIFFERENT provider session with two grants cannot reuse a prior ticket.
     await db.query("update public.ordax_remote_capability_grants set state='active' where grant_id=$1",
       [grantDesk]);
