@@ -76,6 +76,7 @@ def analyze(issuer: str, worker: str,
     metadata_status, metadata = responses["resource"]
     auth_status, auth = responses["oauth"]
     unsupported_status, _ = responses["legacy_get"]
+    retired_canary_status, _ = responses["retired_canary"]
     report: dict[str, str | int | None] = {
         "worker": worker,
         "issuer": issuer,
@@ -84,6 +85,8 @@ def analyze(issuer: str, worker: str,
         "resource_http": metadata_status,
         "oauth_discovery_http": auth_status,
         "legacy_get_http": unsupported_status,
+        "retired_canary_http": retired_canary_status,
+        "legacy_worker_retired": "INCONCLUSIVE",
         "public_surface": "INCONCLUSIVE",
         "oauth_state": "INCONCLUSIVE",
         "central_remote_actions": "NOT_TESTED_BY_READ_ONLY_PROBE",
@@ -96,9 +99,11 @@ def analyze(issuer: str, worker: str,
         or metadata_status != 200 or not isinstance(metadata, dict)
         or metadata.get("resource") != worker + "/mcp"
         or metadata.get("authorization_servers") != [issuer]
-        or unsupported_status != 404):
+        or unsupported_status != 404
+        or retired_canary_status != 404):
         return report
     report["public_surface"] = "PASS_CANONICAL"
+    report["legacy_worker_retired"] = "PASS"
 
     if auth_status == 200 and isinstance(auth, dict):
         report["oauth_state"] = "INVALID_DISCOVERY" if validate_metadata(auth, issuer) else "DISCOVERY_READY"
@@ -127,6 +132,7 @@ def main() -> int:
         "resource": worker + "/.well-known/oauth-protected-resource",
         "oauth": issuer.removesuffix("/auth/v1") + "/.well-known/oauth-authorization-server/auth/v1",
         "legacy_get": worker + "/v3/product/actions",
+        "retired_canary": "https://ordax-control-plane-v3-canary.ordaxsystems.workers.dev/health",
     }
     outcome = analyze(issuer, worker, {k: get_json(url) for k, url in urls.items()})
     print(json.dumps(outcome, sort_keys=True))
@@ -136,6 +142,7 @@ def main() -> int:
             handle.write("### LIVE canonical OrdaX MCP public surface\n\n")
             handle.write("| Check | Observed |\n|---|---|\n")
             for k in ("public_surface", "health_http", "resource_http", "legacy_get_http",
+                      "legacy_worker_retired", "retired_canary_http",
                       "oauth_state", "oauth_discovery_http", "ready_http", "central_remote_actions"):
                 handle.write(f"| {k} | {outcome[k]} |\n")
             handle.write("\n**This secret-free probe is not OAuth consent, device attestation, "
