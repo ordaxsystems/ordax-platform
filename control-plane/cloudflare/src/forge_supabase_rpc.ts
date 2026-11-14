@@ -55,29 +55,40 @@ async function rpc(
   fetchImpl:typeof fetch=fetch,
 ):Promise<Json>{
   const origin=apiOrigin(env);
-  if(!origin)throw new Error("forge_supabase_rpc_unconfigured");
+  if(!origin)return {ok:false,error:"forge_supabase_rpc_unconfigured"};
   const key=String(env.FORGE_SUPABASE_PUBLISHABLE_KEY);
-  const response=await fetchImpl(origin+"/rest/v1/rpc/ordax_forge_http_rpc_v1",{
-    method:"POST",
-    redirect:"error",
-    signal:AbortSignal.timeout(12_000),
-    headers:{
-      accept:"application/json",
-      "content-type":"application/json",
-      apikey:key,
-      authorization:bearer(authorization),
-    },
-    body:JSON.stringify({p_operation:operation,p_payload:payload}),
-  }).catch(()=>{throw new Error("forge_supabase_rpc_unavailable");});
+  let auth:string;
+  try{auth=bearer(authorization);}
+  catch{return {ok:false,error:"forge_supabase_rpc_auth_required"};}
+  let response:Response;
+  try{
+    response=await fetchImpl(origin+"/rest/v1/rpc/ordax_forge_http_rpc_v1",{
+      method:"POST",
+      redirect:"error",
+      signal:AbortSignal.timeout(12_000),
+      headers:{
+        accept:"application/json",
+        "content-type":"application/json",
+        apikey:key,
+        authorization:auth,
+      },
+      body:JSON.stringify({p_operation:operation,p_payload:payload}),
+    });
+  }catch{
+    return {ok:false,error:"forge_supabase_rpc_fetch_unavailable"};
+  }
   const declared=Number(response.headers.get("content-length")??0);
-  if(declared>MAX_RESPONSE_BYTES)throw new Error("forge_supabase_rpc_response_too_large");
+  if(declared>MAX_RESPONSE_BYTES)
+    return {ok:false,error:"forge_supabase_rpc_response_too_large"};
   const text=await response.text();
-  if(Buffer.byteLength(text)>MAX_RESPONSE_BYTES)
-    throw new Error("forge_supabase_rpc_response_too_large");
+  if(new TextEncoder().encode(text).byteLength>MAX_RESPONSE_BYTES)
+    return {ok:false,error:"forge_supabase_rpc_response_too_large"};
   let value:unknown=null;
   try{value=JSON.parse(text);}catch{}
-  if(!response.ok||!isJson(value))
-    throw new Error("forge_supabase_rpc_unavailable");
+  if(!response.ok)
+    return {ok:false,error:"forge_supabase_rpc_http_"+response.status};
+  if(!isJson(value))
+    return {ok:false,error:"forge_supabase_rpc_invalid_response"};
   return value;
 }
 

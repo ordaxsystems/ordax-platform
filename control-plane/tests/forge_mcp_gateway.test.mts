@@ -201,6 +201,26 @@ test("Forge MCP tools/list uses Supabase HTTPS RPC instead of Hyperdrive when co
   assert.equal(legacyResolves,0);
 });
 
+test("Forge Supabase transport exposes bounded fetch failure instead of opaque Worker 500",async()=>{
+  const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):
+    value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])):value;
+  const digest=createHash("sha256").update(JSON.stringify(canonical(CATALOG))).digest("hex");
+  let legacyWrites=0;
+  const gateway=createForgeMcpGateway({...env,
+    FORGE_SUPABASE_PUBLISHABLE_KEY:"sb_publishable_test"},{
+    authenticateOwner:(()=>ownerIdentity(FORGE_NATIVE_CLIENT)) as any,
+    register:async()=>{legacyWrites++;return {ok:true,instance_id:INSTANCE};},
+    fetchImpl:(async()=>{throw Error("network");}) as any,
+  });
+  const response=await gateway(request({
+    instance_id:INSTANCE,display_name:"Forge local",app_version:"0.2.0",
+    catalog:CATALOG,catalog_digest:digest,
+  },FORGE_INSTANCE_REGISTER_PATH));
+  assert.equal(response.status,400);
+  assert.deepEqual(await response.json(),{ok:false,error:"forge_supabase_rpc_fetch_unavailable"});
+  assert.equal(legacyWrites,0);
+});
+
 test("Forge MCP unauthenticated requests advertise the shared Supabase OAuth resource",async()=>{
   const gateway=createForgeMcpGateway(env,{
     authenticateMcp:async()=>({ok:false as const,error:"product_auth_required",status:401}),
