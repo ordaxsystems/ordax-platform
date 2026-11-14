@@ -63,6 +63,7 @@ class DirectOriginProbeContracts(unittest.TestCase):
             direct_postgres=True, db_user=user)
         self.assertIn('ORDAX_PROBE_DIRECT_POSTGRES = "1"', config)
         self.assertIn('ORDAX_PROBE_DB_USER = "' + user + '"', config)
+        self.assertIn('ORDAX_PROBE_DRIVER = "node_postgres"', config)
         self.assertNotIn("[[hyperdrive]]", config)
         self.assertNotIn('binding = "POSTGRES"', config)
         self.assertNotIn("password", config.lower())
@@ -76,6 +77,7 @@ class DirectOriginProbeContracts(unittest.TestCase):
                 name, None, probe.POOLER_ORIGIN, 5432,
                 direct_postgres=True, db_user="postgres")
         for mode in ("worker_direct_pooler", "worker_direct_pooler_transaction",
+                     "worker_direct_pooler_transaction_postgres_js",
                      "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
             with self.subTest(mode=mode), self.assertRaisesRegex(
                     probe.ProbeError, "hyperdrive_for_direct_worker_forbidden"):
@@ -95,6 +97,15 @@ class DirectOriginProbeContracts(unittest.TestCase):
             tls_ca=True)
         self.assertIn('ORDAX_PROBE_TLS_CA = "1"', direct_ca_config)
         self.assertNotIn("[[hyperdrive]]", direct_ca_config)
+        postgres_js_config = probe.worker_config(
+            name, None, probe.POOLER_ORIGIN, 6543,
+            direct_postgres=True, db_user=user, direct_driver="postgres_js")
+        self.assertIn('ORDAX_PROBE_DRIVER = "postgres_js"', postgres_js_config)
+        self.assertNotIn("[[hyperdrive]]", postgres_js_config)
+        with self.assertRaisesRegex(probe.ProbeError, "direct_worker_driver_invalid"):
+            probe.worker_config(
+                name, None, probe.POOLER_ORIGIN, 6543,
+                direct_postgres=True, db_user=user, direct_driver="unknown")
 
     def test_direct_worker_secret_is_stdin_only(self):
         deploy_ok = mock.Mock(returncode=0, stdout=b"", stderr=b"")
@@ -199,6 +210,44 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIsNone(args[1])
         self.assertEqual(args[2], probe.POOLER_ORIGIN)
         self.assertEqual(args[3], 6543)
+        self.assertEqual(kwargs["db_user"],
+                         "ordax_direct_diag_39478283587." + probe.PROJECT)
+        self.assertTrue(kwargs["direct_postgres_password"])
+
+    def test_direct_transaction_postgres_js_uses_same_6543_without_hyperdrive(self):
+        env = {
+            "CLOUDFLARE_API_TOKEN": "fake-cf",
+            "SUPABASE_ACCESS_TOKEN": "fake-db",
+            "GITHUB_RUN_ID": "39478283587",
+            "ORDAX_HYPERDRIVE_PROBE_MODE":
+                "worker_direct_pooler_transaction_postgres_js",
+        }
+        with mock.patch.dict(probe.os.environ, env, clear=True), \
+             mock.patch.object(probe, "require_unique_role"), \
+             mock.patch.object(probe, "create_role"), \
+             mock.patch.object(probe, "verify_pooler_credential") as preflight, \
+             mock.patch.object(probe, "create_hyperdrive") as create_hd, \
+             mock.patch.object(probe, "find_hyperdrive") as find_hd, \
+             mock.patch.object(probe, "deploy_worker") as deploy, \
+             mock.patch.object(
+                 probe, "check_worker",
+                 return_value={"ok": True, "phase": "complete"}), \
+             mock.patch.object(probe, "delete_role"), \
+             mock.patch.object(probe, "api", return_value=None), \
+             redirect_stdout(StringIO()):
+            probe.run()
+        preflight.assert_called_once_with(
+            "worker_direct_pooler_transaction_postgres_js",
+            "ordax_direct_diag_39478283587", mock.ANY)
+        create_hd.assert_not_called()
+        find_hd.assert_not_called()
+        deploy.assert_called_once()
+        args = deploy.call_args.args
+        kwargs = deploy.call_args.kwargs
+        self.assertIsNone(args[1])
+        self.assertEqual(args[2], probe.POOLER_ORIGIN)
+        self.assertEqual(args[3], 6543)
+        self.assertEqual(kwargs["direct_driver"], "postgres_js")
         self.assertEqual(kwargs["db_user"],
                          "ordax_direct_diag_39478283587." + probe.PROJECT)
         self.assertTrue(kwargs["direct_postgres_password"])
@@ -386,8 +435,9 @@ class DirectOriginProbeContracts(unittest.TestCase):
             "direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
             "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
             "pooler_session", "pooler_transaction", "worker_direct_pooler",
-            "worker_direct_pooler_transaction", "worker_direct_ipv6",
-            "worker_direct_ipv6_custom_ca"))
+            "worker_direct_pooler_transaction",
+            "worker_direct_pooler_transaction_postgres_js",
+            "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"))
         for mode in ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
                      "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
                      "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
@@ -402,6 +452,11 @@ class DirectOriginProbeContracts(unittest.TestCase):
             "scheme": "postgres", "database": "postgres",
             "user": role + "." + probe.PROJECT,
             "host": probe.POOLER_ORIGIN, "port": 6543})
+        self.assertEqual(
+            probe.origin_for_mode("worker_direct_pooler_transaction_postgres_js", role),
+            {"scheme": "postgres", "database": "postgres",
+             "user": role + "." + probe.PROJECT,
+             "host": probe.POOLER_ORIGIN, "port": 6543})
         for mode, port in (("pooler_session", 5432), ("pooler_transaction", 6543)):
             with self.subTest(mode=mode):
                 origin = probe.origin_for_mode(mode, role)
@@ -426,7 +481,8 @@ class DirectOriginProbeContracts(unittest.TestCase):
         for mode, port in (("pooler_session", "5432"),
                            ("pooler_transaction", "6543"),
                            ("worker_direct_pooler", "5432"),
-                           ("worker_direct_pooler_transaction", "6543")):
+                           ("worker_direct_pooler_transaction", "6543"),
+                           ("worker_direct_pooler_transaction_postgres_js", "6543")):
             with self.subTest(mode=mode), \
                  mock.patch.object(probe.shutil, "which", return_value="/usr/bin/psql"), \
                  mock.patch.object(probe.subprocess, "run", return_value=mock.Mock(
@@ -506,6 +562,7 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn("direct_ipv6_custom_ca_verify_ca", workflow)
         self.assertIn("worker_direct_pooler", workflow)
         self.assertIn("worker_direct_pooler_transaction", workflow)
+        self.assertIn("worker_direct_pooler_transaction_postgres_js", workflow)
         self.assertIn("worker_direct_ipv6", workflow)
         self.assertIn("worker_direct_ipv6_custom_ca", workflow)
         self.assertIn("ORDAX_HYPERDRIVE_PROBE_MODE: ${{ inputs.origin_mode }}", workflow)
@@ -624,6 +681,19 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertEqual(sleep.call_count, 5)
         self.assertNotIn("mock-secret", json.dumps(result))
 
+    def test_curl_worker_accepts_postgres_js_connect_or_query_phase(self):
+        failure = mock.Mock(returncode=0, stdout=(
+            b'{"ok":false,"phase":"connect_or_query","classification":"connection_closed"}'
+            + bytes([10]) + b"503"), stderr=b"")
+        with mock.patch.object(probe.shutil, "which", return_value="/usr/bin/curl"), \
+             mock.patch.object(probe.subprocess, "run", return_value=failure) as runner, \
+             mock.patch.object(probe.time, "sleep") as sleep:
+            result = probe.check_worker("ordax-direct-ipv6-diag-39478283587")
+        self.assertEqual(result, {"ok": False, "phase": "connect_or_query",
+                                  "classification": "connection_closed"})
+        self.assertEqual(runner.call_count, 6)
+        self.assertEqual(sleep.call_count, 5)
+
     def test_curl_worker_accepts_bounded_sqlstate_classification(self):
         failure = mock.Mock(returncode=0, stdout=(
             b'{"ok":false,"phase":"connect","classification":"sqlstate_58000"}'
@@ -671,6 +741,10 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn("ORDAX_PROBE_DIRECT_POSTGRES", text)
         self.assertIn("ORDAX_PROBE_DB_PASSWORD", text)
         self.assertIn("ORDAX_PROBE_TLS_CA", text)
+        self.assertIn("ORDAX_PROBE_DRIVER", text)
+        self.assertIn('import postgres from "postgres"', text)
+        self.assertIn('env.ORDAX_PROBE_DRIVER === "postgres_js"', text)
+        self.assertIn("fetch_types: false", text)
         self.assertIn("SUPABASE_2021_CA_CHAIN", text)
         self.assertIn("rejectUnauthorized: true", text)
         self.assertIn("servername", text)

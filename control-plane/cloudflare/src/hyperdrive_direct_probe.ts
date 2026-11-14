@@ -2,6 +2,7 @@
  * Uses the Hyperdrive binding of ONE ephemeral configuration and SELECT 1.
  */
 import { connect } from "cloudflare:sockets";
+import postgres from "postgres";
 import {
   openPostgresSession,
   type DatabaseTlsTrust,
@@ -15,6 +16,7 @@ type Env = {
   ORDAX_PROBE_DB_USER?: string;
   ORDAX_PROBE_DB_PASSWORD?: string;
   ORDAX_PROBE_TLS_CA?: string;
+  ORDAX_PROBE_DRIVER?: string;
 };
 
 // Public Supabase 2021 trust chain observed from the project endpoint.
@@ -142,6 +144,31 @@ function probeTlsTrust(env: Env): DatabaseTlsTrust | undefined {
   };
 }
 
+async function probePostgresJs(connectionString: string): Promise<
+  { ok: boolean; phase: "complete" | "connect_or_query"; classification?: string }
+> {
+  const sql = postgres(connectionString, {
+    max: 1,
+    prepare: true,
+    fetch_types: false,
+    connect_timeout: 8,
+    idle_timeout: 1,
+    max_lifetime: 10,
+  });
+  try {
+    const rows = await sql`select 1::int as ok`;
+    return { ok: rows[0]?.ok === 1, phase: "complete" };
+  } catch (error) {
+    return {
+      ok: false,
+      phase: "connect_or_query",
+      classification: safeError(error),
+    };
+  } finally {
+    await sql.end({ timeout: 1 }).catch(() => {});
+  }
+}
+
 async function probeOriginTcp(env: Env): Promise<boolean> {
   const port = Number(env.ORDAX_PROBE_ORIGIN_PORT);
   if (!env.ORDAX_PROBE_ORIGIN_HOST || !Number.isInteger(port)
@@ -250,6 +277,12 @@ export default {
         { status: 503 },
       );
     }
+    if (env.ORDAX_PROBE_DIRECT_POSTGRES === "1"
+        && env.ORDAX_PROBE_DRIVER === "postgres_js") {
+      const result = await probePostgresJs(connectionString);
+      return Response.json(result, { status: result.ok ? 200 : 503 });
+    }
+
     const client = openPostgresSession(connectionString, probeTlsTrust(env));
     let phase = "connect";
     try {

@@ -28,8 +28,9 @@ POOLER_ORIGIN = "aws-1-sa-east-1.pooler.supabase.com"
 ORIGIN_MODES = ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
                 "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
                 "pooler_session", "pooler_transaction", "worker_direct_pooler",
-                "worker_direct_pooler_transaction", "worker_direct_ipv6",
-                "worker_direct_ipv6_custom_ca")
+                "worker_direct_pooler_transaction",
+                "worker_direct_pooler_transaction_postgres_js",
+                "worker_direct_ipv6", "worker_direct_ipv6_custom_ca")
 CF_API = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}"
 DB_API = f"https://api.supabase.com/v1/projects/{PROJECT}/database/query"
 NAME_PREFIX = "ordax-direct-ipv6-diag-"
@@ -71,7 +72,7 @@ def api(method: str, url: str, token: str | None = None, body: dict | None = Non
                 report = json.loads(exc.read(8192))
                 phase = report.get("phase") if isinstance(report, dict) else None
                 label = report.get("classification") if isinstance(report, dict) else None
-                if phase in ("tcp", "tls", "connect", "query") and isinstance(label, str) and re.fullmatch(
+                if phase in ("tcp", "tls", "connect", "query", "connect_or_query") and isinstance(label, str) and re.fullmatch(
                     r"[a-z0-9_]{1,48}", label
                 ):
                     return {"ok": False, "phase": phase, "classification": label}
@@ -159,7 +160,8 @@ def origin_for_mode(mode: str, role: str) -> dict:
     return {"scheme": "postgres", "database": "postgres",
             "user": role + "." + PROJECT, "host": POOLER_ORIGIN,
             "port": 6543 if mode in (
-                "pooler_transaction", "worker_direct_pooler_transaction"
+                "pooler_transaction", "worker_direct_pooler_transaction",
+                "worker_direct_pooler_transaction_postgres_js",
             ) else 5432}
 
 
@@ -173,6 +175,7 @@ def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
     if mode not in (
         "pooler_session", "pooler_transaction", "worker_direct_pooler",
         "worker_direct_pooler_transaction",
+        "worker_direct_pooler_transaction_postgres_js",
     ):
         raise ProbeError("pooler_preflight_mode_invalid")
     if shutil.which("psql") is None:
@@ -204,6 +207,7 @@ def create_hyperdrive(token: str, name: str, role: str, credential: str,
                       mode: str = "direct_ipv6",
                       origin_host_override: str | None = None) -> str:
     if mode in ("worker_direct_pooler", "worker_direct_pooler_transaction",
+                "worker_direct_pooler_transaction_postgres_js",
                 "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
         raise ProbeError("hyperdrive_for_direct_worker_forbidden")
     origin = origin_for_mode(mode, role)
@@ -259,7 +263,8 @@ def find_hyperdrive(token: str, name: str) -> str | None:
 def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
                   origin_port: int, direct_postgres: bool = False,
                   db_user: str | None = None, tls_ca: bool = False,
-                  allow_direct_ipv6_literal: bool = False) -> str:
+                  allow_direct_ipv6_literal: bool = False,
+                  direct_driver: str = "node_postgres") -> str:
     if not re.fullmatch(r"ordax-direct-ipv6-diag-[0-9]{5,16}", name):
         raise ProbeError("worker_name_invalid")
     allowed_hosts = {ORIGIN, POOLER_ORIGIN}
@@ -290,9 +295,12 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
         expected_users = {expected_role, expected_role + "." + PROJECT}
         if hyperdrive_id is not None or db_user not in expected_users:
             raise ProbeError("direct_worker_config_invalid")
+        if direct_driver not in ("node_postgres", "postgres_js"):
+            raise ProbeError("direct_worker_driver_invalid")
         return (base
                 + 'ORDAX_PROBE_DIRECT_POSTGRES = "1"\n'
                 + f'ORDAX_PROBE_DB_USER = "{db_user}"\n'
+                + f'ORDAX_PROBE_DRIVER = "{direct_driver}"\n'
                 + ('ORDAX_PROBE_TLS_CA = "1"\n' if tls_ca else ''))
     if not isinstance(hyperdrive_id, str) or not re.fullmatch(r"[a-f0-9]{32}", hyperdrive_id):
         raise ProbeError("hyperdrive_id_invalid")
@@ -304,7 +312,8 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
 def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
                   origin_port: int, direct_postgres_password: str | None = None,
                   db_user: str | None = None, tls_ca: bool = False,
-                  allow_direct_ipv6_literal: bool = False):
+                  allow_direct_ipv6_literal: bool = False,
+                  direct_driver: str = "node_postgres"):
     direct_postgres = direct_postgres_password is not None
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", prefix="ordax-direct-probe-",
                                      dir=PROBE_DIR, encoding="utf-8", delete=False) as file:
@@ -312,6 +321,7 @@ def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
             name, hyperdrive_id, origin_host, origin_port,
             direct_postgres=direct_postgres, db_user=db_user, tls_ca=tls_ca,
             allow_direct_ipv6_literal=allow_direct_ipv6_literal,
+            direct_driver=direct_driver,
         ))
         config_path = Path(file.name)
     try:
@@ -377,7 +387,7 @@ def check_worker(name: str) -> dict:
                         return {"ok": True, "phase": "complete"}
                     phase = value.get("phase")
                     label = value.get("classification")
-                    if phase in ("tcp", "tls", "connect", "query") and isinstance(label, str) and re.fullmatch(
+                    if phase in ("tcp", "tls", "connect", "query", "connect_or_query") and isinstance(label, str) and re.fullmatch(
                         r"[a-z0-9_]{1,48}", label
                     ):
                         last_postgres_failure = {
@@ -421,6 +431,7 @@ def run():
     hd_id: str | None = None
     direct_worker = mode in (
         "worker_direct_pooler", "worker_direct_pooler_transaction",
+        "worker_direct_pooler_transaction_postgres_js",
         "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"
     )
     failures = []
@@ -433,6 +444,7 @@ def run():
         if mode in (
             "pooler_session", "pooler_transaction", "worker_direct_pooler",
             "worker_direct_pooler_transaction",
+            "worker_direct_pooler_transaction_postgres_js",
         ):
             verify_pooler_credential(mode, role, credential)
             print("ORDAX_DIRECT_POOLER_CREDENTIAL=VERIFIED", flush=True)
@@ -443,6 +455,11 @@ def run():
                 name, None, origin["host"], origin["port"],
                 direct_postgres_password=credential, db_user=origin["user"],
                 tls_ca=mode == "worker_direct_ipv6_custom_ca",
+                direct_driver=(
+                    "postgres_js"
+                    if mode == "worker_direct_pooler_transaction_postgres_js"
+                    else "node_postgres"
+                ),
             )
             print("ORDAX_DIRECT_HYPERDRIVE=NOT_USED", flush=True)
         else:

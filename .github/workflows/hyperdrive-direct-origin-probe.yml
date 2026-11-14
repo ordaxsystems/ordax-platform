@@ -17,6 +17,7 @@ on:
           - pooler_transaction
           - worker_direct_pooler
           - worker_direct_pooler_transaction
+          - worker_direct_pooler_transaction_postgres_js
           - worker_direct_ipv6
           - worker_direct_ipv6_custom_ca
 
@@ -44,8 +45,8 @@ jobs:
           node-version: "24"
       - name: Verify source and cleanup policy
         run: python -m unittest discover -s tests -p test_hyperdrive_direct_origin_probe.py -v
-      - name: Install pinned PostgreSQL dependency
-        run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Install pinned PostgreSQL dependencies
+        run: npm install --prefix control-plane/cloudflare --ignore-scripts --no-save --no-audit --no-fund --package-lock=false postgres@3.4.5
       - name: Create, probe, and clean isolated resources
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
