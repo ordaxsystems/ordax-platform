@@ -64,10 +64,12 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn('ORDAX_PROBE_DIRECT_POSTGRES = "1"', config)
         self.assertIn('ORDAX_PROBE_DB_USER = "' + user + '"', config)
         self.assertIn('ORDAX_PROBE_DRIVER = "node_postgres"', config)
+        self.assertIn('[secrets]', config)
+        self.assertIn('required = ["ORDAX_PROBE_DB_PASSWORD"]', config)
         self.assertNotIn("[[hyperdrive]]", config)
         self.assertNotIn('binding = "POSTGRES"', config)
-        self.assertNotIn("password", config.lower())
-        self.assertNotIn("secret", config.lower())
+        self.assertNotIn("synthetic-private-password", config)
+        self.assertNotIn("mock-secret", config)
         with self.assertRaisesRegex(probe.ProbeError, "direct_worker_config_invalid"):
             probe.worker_config(
                 name, "a" * 32, probe.POOLER_ORIGIN, 5432,
@@ -107,34 +109,37 @@ class DirectOriginProbeContracts(unittest.TestCase):
                 name, None, probe.POOLER_ORIGIN, 6543,
                 direct_postgres=True, db_user=user, direct_driver="unknown")
 
-    def test_direct_worker_secret_is_stdin_only(self):
+    def test_direct_worker_secret_is_atomic_tempfile_only(self):
         deploy_ok = mock.Mock(returncode=0, stdout=b"", stderr=b"")
-        secret_ok = mock.Mock(returncode=0, stdout=b"", stderr=b"")
         name = "ordax-direct-ipv6-diag-39478283587"
         user = "ordax_direct_diag_39478283587." + probe.PROJECT
-        with mock.patch.object(
-                probe.subprocess, "run",
-                side_effect=[deploy_ok, secret_ok]) as runner:
+        seen = {}
+
+        def run(command, **kwargs):
+            self.assertIn("--secrets-file", command)
+            secret_path = Path(command[command.index("--secrets-file") + 1])
+            config_path = Path(command[command.index("--config") + 1])
+            seen["secret_path"] = secret_path
+            seen["config_path"] = config_path
+            seen["payload"] = json.loads(secret_path.read_text("utf-8"))
+            seen["command"] = tuple(command)
+            seen["env"] = kwargs["env"]
+            return deploy_ok
+
+        with mock.patch.object(probe.subprocess, "run", side_effect=run) as runner:
             probe.deploy_worker(
                 name, None, probe.POOLER_ORIGIN, 5432,
                 direct_postgres_password="synthetic-private-password",
                 db_user=user)
-        self.assertEqual(runner.call_count, 2)
-        deploy_call, secret_call = runner.call_args_list
-        self.assertNotIn("synthetic-private-password",
-                         " ".join(deploy_call.args[0]))
-        self.assertNotIn("synthetic-private-password",
-                         " ".join(secret_call.args[0]))
-        self.assertEqual(secret_call.kwargs["input"],
-                         b"synthetic-private-password")
-        self.assertNotIn("synthetic-private-password",
-                         str(secret_call.kwargs["env"]))
-        self.assertNotIn("SUPABASE_ACCESS_TOKEN",
-                         deploy_call.kwargs["env"])
-        self.assertNotIn("SUPABASE_ACCESS_TOKEN",
-                         secret_call.kwargs["env"])
-        self.assertIn("secret", secret_call.args[0])
-        self.assertIn("ORDAX_PROBE_DB_PASSWORD", secret_call.args[0])
+        self.assertEqual(runner.call_count, 1)
+        self.assertEqual(seen["payload"], {
+            "ORDAX_PROBE_DB_PASSWORD": "synthetic-private-password"
+        })
+        self.assertNotIn("synthetic-private-password", " ".join(seen["command"]))
+        self.assertNotIn("synthetic-private-password", str(seen["env"]))
+        self.assertNotIn("SUPABASE_ACCESS_TOKEN", seen["env"])
+        self.assertFalse(seen["secret_path"].exists())
+        self.assertFalse(seen["config_path"].exists())
 
     def test_direct_worker_run_never_creates_or_searches_hyperdrive(self):
         env = {
@@ -745,6 +750,9 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn('import postgres from "postgres"', text)
         self.assertIn('env.ORDAX_PROBE_DRIVER === "postgres_js"', text)
         self.assertIn("fetch_types: false", text)
+        self.assertIn('"--secrets-file"', (ROOT / "scripts/cloudflare/probe_hyperdrive_direct_origin.py").read_text("utf-8"))
+        self.assertIn("secret_path.unlink(missing_ok=True)", (ROOT / "scripts/cloudflare/probe_hyperdrive_direct_origin.py").read_text("utf-8"))
+        self.assertNotIn('["npx", "--yes", "wrangler@4.141.0", "secret", "put"', (ROOT / "scripts/cloudflare/probe_hyperdrive_direct_origin.py").read_text("utf-8"))
         self.assertIn("SUPABASE_2021_CA_CHAIN", text)
         self.assertIn("rejectUnauthorized: true", text)
         self.assertIn("servername", text)

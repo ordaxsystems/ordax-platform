@@ -301,7 +301,8 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
                 + 'ORDAX_PROBE_DIRECT_POSTGRES = "1"\n'
                 + f'ORDAX_PROBE_DB_USER = "{db_user}"\n'
                 + f'ORDAX_PROBE_DRIVER = "{direct_driver}"\n'
-                + ('ORDAX_PROBE_TLS_CA = "1"\n' if tls_ca else ''))
+                + ('ORDAX_PROBE_TLS_CA = "1"\n' if tls_ca else '')
+                + '[secrets]\nrequired = ["ORDAX_PROBE_DB_PASSWORD"]\n')
     if not isinstance(hyperdrive_id, str) or not re.fullmatch(r"[a-f0-9]{32}", hyperdrive_id):
         raise ProbeError("hyperdrive_id_invalid")
     return (base
@@ -315,6 +316,8 @@ def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
                   allow_direct_ipv6_literal: bool = False,
                   direct_driver: str = "node_postgres"):
     direct_postgres = direct_postgres_password is not None
+    if direct_postgres and not direct_postgres_password:
+        raise ProbeError("direct_worker_secret_missing")
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", prefix="ordax-direct-probe-",
                                      dir=PROBE_DIR, encoding="utf-8", delete=False) as file:
         file.write(worker_config(
@@ -324,35 +327,36 @@ def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
             direct_driver=direct_driver,
         ))
         config_path = Path(file.name)
+    secret_path: Path | None = None
     try:
+        if direct_postgres:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", prefix="ordax-direct-probe-secret-",
+                dir=PROBE_DIR, encoding="utf-8", delete=False,
+            ) as secret_file:
+                json.dump({"ORDAX_PROBE_DB_PASSWORD": direct_postgres_password}, secret_file)
+                secret_path = Path(secret_file.name)
         # Captured output prevents Wrangler from leaking deployment metadata.
         wrangler_env = {key: value for key, value in os.environ.items()
                         if key in {"PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT",
                                    "CLOUDFLARE_API_TOKEN"}}
+        command = [
+            "npx", "--yes", "wrangler@4.141.0", "deploy",
+            "--config", str(config_path),
+        ]
+        if secret_path is not None:
+            command.extend(["--secrets-file", str(secret_path)])
         process = subprocess.run(
-            ["npx", "--yes", "wrangler@4.141.0", "deploy", "--config", str(config_path)],
-            cwd=PROBE_DIR, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            command, cwd=PROBE_DIR, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             check=False, timeout=120, env=wrangler_env)
         if process.returncode:
             raise ProbeError("isolated_worker_deploy_failed")
-        if direct_postgres:
-            if not direct_postgres_password:
-                raise ProbeError("direct_worker_secret_missing")
-            secret_env = {key: value for key, value in os.environ.items()
-                          if key in {"PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT",
-                                     "CLOUDFLARE_API_TOKEN"}}
-            secret = subprocess.run(
-                ["npx", "--yes", "wrangler@4.141.0", "secret", "put",
-                 "ORDAX_PROBE_DB_PASSWORD", "--config", str(config_path)],
-                cwd=PROBE_DIR, input=direct_postgres_password.encode("utf-8"),
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
-                timeout=90, env=secret_env)
-            if secret.returncode:
-                raise ProbeError("direct_worker_secret_put_failed")
     except (OSError, subprocess.TimeoutExpired):
         raise ProbeError("isolated_worker_deploy_unavailable") from None
     finally:
         config_path.unlink(missing_ok=True)
+        if secret_path is not None:
+            secret_path.unlink(missing_ok=True)
 
 
 def check_worker(name: str) -> dict:
