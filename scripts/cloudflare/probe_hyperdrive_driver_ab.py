@@ -102,12 +102,46 @@ def probe(worker: str, driver_path: str) -> dict:
                         raise ProbeFailure("response_failure_invalid")
                     item = {"driver": driver, "ok": False, "phase": phase,
                             "classification": classification}
-                    code = record.get("code")
-                    error_class = record.get("error_class")
-                    if isinstance(code, str) and re.fullmatch(r"[A-Z0-9_]{2,32}", code):
-                        item["code"] = code
-                    if error_class in ("Error", "TypeError", "PostgresError", "AggregateError"):
-                        item["error_class"] = error_class
+                    safe_classes = {"Error", "TypeError", "PostgresError", "AggregateError"}
+                    safe_named_codes = {
+                        "CONNECTION_CLOSED", "ECONNRESET", "ECONNREFUSED",
+                        "ETIMEDOUT", "EPIPE",
+                    }
+                    def safe_code(value):
+                        if not isinstance(value, str):
+                            return None
+                        value = value.upper()
+                        if re.fullmatch(r"[0-9A-Z]{5}", value):
+                            return value
+                        if re.fullmatch(r"20(?:08|09|10|11|12|13|14|15|16)", value):
+                            return value
+                        return value if value in safe_named_codes else None
+                    for source_key, target_key in (
+                        ("code", "code"), ("cause_code", "cause_code"),
+                    ):
+                        value = safe_code(record.get(source_key))
+                        if value:
+                            item[target_key] = value
+                    for source_key, target_key in (
+                        ("error_class", "error_class"), ("cause_class", "cause_class"),
+                    ):
+                        value = record.get(source_key)
+                        if value in safe_classes:
+                            item[target_key] = value
+                    for source_key, target_key, sanitizer in (
+                        ("nested_codes", "nested_codes", safe_code),
+                        ("nested_classes", "nested_classes",
+                         lambda value: value if value in safe_classes else None),
+                    ):
+                        raw_values = record.get(source_key)
+                        if isinstance(raw_values, list) and len(raw_values) <= 4:
+                            values = []
+                            for raw in raw_values:
+                                value = sanitizer(raw)
+                                if value and value not in values:
+                                    values.append(value)
+                            if values:
+                                item[target_key] = values
                     return item
         except (OSError, subprocess.TimeoutExpired, UnicodeError, ValueError):
             status = "unreachable"

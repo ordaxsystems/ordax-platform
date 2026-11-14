@@ -33,6 +33,9 @@ class HyperdriveDriverAbTest(TestCase):
             self.assertNotIn(forbidden, worker)
         self.assertIn('"/pg"', worker)
         self.assertIn('"/postgres-js"', worker)
+        self.assertIn("cause_code", worker)
+        self.assertIn("nested_codes", worker)
+        self.assertNotIn("console.log", worker)
 
     def test_error_only_whitelisted(self):
         mockproc = mock.Mock(returncode=0, stdout=json.dumps({
@@ -50,20 +53,35 @@ class HyperdriveDriverAbTest(TestCase):
         raw = {"driver": "postgres_js", "ok": False,
                "phase": "connect_or_query", "classification": "other",
                "code": "CONNECTION_CLOSED", "error_class": "PostgresError",
+               "cause_code": "2015", "cause_class": "Error",
+               "nested_codes": ["58000", "ECONNRESET"],
+               "nested_classes": ["Error", "AggregateError"],
                "secret": "postgres://mock-secret"}
         response = mock.Mock(returncode=0, stdout=json.dumps(raw).encode() + bytes([10]) + b"503", stderr=b"password hidden")
         with mock.patch.object(ab.subprocess, "run", return_value=response):
             report = ab.probe("ordax-hyperdrive-ab-39494974328", "/postgres-js")
         self.assertEqual(report.get("code"), "CONNECTION_CLOSED")
         self.assertEqual(report.get("error_class"), "PostgresError")
+        self.assertEqual(report.get("cause_code"), "2015")
+        self.assertEqual(report.get("cause_class"), "Error")
+        self.assertEqual(report.get("nested_codes"), ["58000", "ECONNRESET"])
+        self.assertEqual(report.get("nested_classes"), ["Error", "AggregateError"])
         self.assertNotIn("mock-secret", json.dumps(report))
         raw["code"] = "bad token mock-secret"
         raw["error_class"] = "SecretError"
+        raw["cause_code"] = "PRIVATE_SECRET"
+        raw["cause_class"] = "SecretError"
+        raw["nested_codes"] = ["PRIVATE_SECRET", "bad token mock-secret"]
+        raw["nested_classes"] = ["SecretError"]
         response.stdout = json.dumps(raw).encode() + bytes([10]) + b"503"
         with mock.patch.object(ab.subprocess, "run", return_value=response):
             report = ab.probe("ordax-hyperdrive-ab-39494974328", "/postgres-js")
         self.assertNotIn("code", report)
         self.assertNotIn("error_class", report)
+        self.assertNotIn("cause_code", report)
+        self.assertNotIn("cause_class", report)
+        self.assertNotIn("nested_codes", report)
+        self.assertNotIn("nested_classes", report)
 
     def test_success_and_protected_path(self):
         mockproc = mock.Mock(returncode=0, stdout=b'{"driver":"postgres_js","ok":true,"phase":"complete"}' + bytes([10]) + b"200", stderr=b"")
