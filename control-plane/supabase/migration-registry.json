@@ -1197,6 +1197,18 @@
         "blob_sha": "92ee131ccb257e78ab93c683b192b2b1baa08087"
       },
       "ledger_name": "owner_github_installation_authority_v1"
+    },
+    {
+      "name": "20261113235000_owner_project_device_binding_authority_v1",
+      "applied_version": "20261114000316",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261113235000_owner_project_device_binding_authority_v1.sql",
+        "blob_sha": "de556507828ba53c2a69e234c353e01d07335e16"
+      },
+      "ledger_name": "owner_project_device_binding_authority_v1"
     }
   ]
 }
