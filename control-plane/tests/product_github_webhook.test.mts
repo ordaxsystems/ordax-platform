@@ -50,11 +50,18 @@ test("GitHub webhook signature verification uses raw HMAC SHA-256 bytes", async 
   assert.equal(await verifyGithubWebhookSignature("short", raw, signed), false);
 });
 
-test("destructive GitHub provider events normalize only installation/repository identity", () => {
+test("destructive GitHub provider events normalize only provider authority identity", () => {
+  assert.deepEqual(githubAuthorityRevocation("github_app_authorization", {
+    action:"revoked",sender:{id:999,login:"drop-me"},
+  }), {
+    event:"github_app_authorization",action:"revoked",
+    installationId:null,githubUserId:"999",repositoryIds:[],
+  });
   assert.deepEqual(githubAuthorityRevocation("installation", {
     action:"suspend",installation:{id:12345},sender:{id:999},
   }), {
-    event:"installation",action:"suspend",installationId:"12345",repositoryIds:[],
+    event:"installation",action:"suspend",installationId:"12345",
+    githubUserId:null,repositoryIds:[],
   });
   assert.deepEqual(githubAuthorityRevocation("installation_repositories", {
     action:"added",installation:{id:12345},
@@ -62,19 +69,21 @@ test("destructive GitHub provider events normalize only installation/repository 
     repositories_added:[{id:88}],
   }), {
     event:"installation_repositories",action:"added",
-    installationId:"12345",repositoryIds:["7","9"],
+    installationId:"12345",githubUserId:null,repositoryIds:["7","9"],
   });
   assert.deepEqual(githubAuthorityRevocation("repository", {
     action:"renamed",installation:{id:12345},
     repository:{id:77,full_name:"new/name"},changes:{repository:{name:{from:"old"}}},
   }), {
-    event:"repository",action:"renamed",installationId:"12345",repositoryIds:["77"],
+    event:"repository",action:"renamed",installationId:"12345",
+    githubUserId:null,repositoryIds:["77"],
   });
   for (const value of [
     ["installation",{action:"unsuspend",installation:{id:1}}],
     ["installation_repositories",{action:"added",installation:{id:1},repositories_removed:[]}],
     ["repository",{action:"edited",installation:{id:1},repository:{id:2}}],
     ["repository",{action:"deleted",repository:{id:2}}],
+    ["github_app_authorization",{action:"revoked",sender:{id:"unsafe-number"}}],
   ] as const) {
     assert.equal(githubAuthorityRevocation(value[0],value[1]),null);
   }
@@ -133,13 +142,41 @@ test("signed destructive delivery reaches exactly one normalized revocation RPC"
   assert.deepEqual(calls[0].event,"installation_repositories");
   assert.deepEqual(calls[0].action,"removed");
   assert.deepEqual(calls[0].installationId,"12345");
+  assert.equal(calls[0].githubUserId,null);
   assert.deepEqual(calls[0].repositoryIds,["42","44"]);
   assert.match(calls[0].payloadSha256,/^[0-9a-f]{64}$/);
   assert.equal("sender" in calls[0],false);
   assert.equal("repository_full_name" in calls[0],false);
 });
 
-test("signed non-destructive and user-token events are acknowledged without database mutation", async () => {
+test("signed user authorization revocation reaches the same monotonic revocation RPC", async () => {
+  const calls:any[]=[];
+  const handler=createProductGithubWebhookHandler({
+    PRODUCT_GITHUB_APP_WEBHOOK_ENABLED:"enabled",
+    PRODUCT_GITHUB_APP_WEBHOOK_SECRET:SECRET,
+  },{
+    applyRevocation:async(_env,input)=>{
+      calls.push(input);
+      return {ok:true,replayed:false,delivery_id:DELIVERY,
+        connection_count:2,binding_count:2,grant_count:3,action_count:1,intent_count:1};
+    },
+  });
+  const response=await handler(await request("github_app_authorization",{
+    action:"revoked",sender:{id:999,login:"owner-login",email:"drop@example.invalid"},
+  }));
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{ok:true,accepted:true,replayed:false});
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].event,"github_app_authorization");
+  assert.equal(calls[0].action,"revoked");
+  assert.equal(calls[0].installationId,null);
+  assert.equal(calls[0].githubUserId,"999");
+  assert.deepEqual(calls[0].repositoryIds,[]);
+  assert.equal("login" in calls[0],false);
+  assert.equal("email" in calls[0],false);
+});
+
+test("signed non-destructive events are acknowledged without database mutation", async () => {
   let calls=0;
   const handler=createProductGithubWebhookHandler({
     PRODUCT_GITHUB_APP_WEBHOOK_ENABLED:"enabled",
@@ -152,7 +189,6 @@ test("signed non-destructive and user-token events are acknowledged without data
     ["repository",{action:"unarchived",installation:{id:123},repository:{id:44}}],
     ["installation_repositories",{action:"added",installation:{id:123},
       repositories_added:[{id:44}],repositories_removed:[]}],
-    ["github_app_authorization",{action:"revoked",sender:{id:999}}],
   ] as const){
     const response=await handler(await request(event,payload as any));
     assert.equal(response.status,202,event);
