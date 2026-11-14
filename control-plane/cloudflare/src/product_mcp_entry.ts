@@ -76,6 +76,7 @@ import {
   handleProductGithubWebhook,
   PRODUCT_GITHUB_WEBHOOK_PATH,
 } from "./product_github_webhook.ts";
+import {createForgeMcpGateway,FORGE_MCP_HOSTNAME} from "./forge_mcp_gateway.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 
@@ -338,6 +339,9 @@ export function createCanonicalProductMcpGateway(
     context?: { waitUntil(promise: Promise<unknown>): void },
   ): Promise<Response> => {
     const url = new URL(request.url);
+    if (url.hostname === FORGE_MCP_HOSTNAME) {
+      return createForgeMcpGateway(env)(request);
+    }
     if (url.hostname === PRODUCT_TRUSTED_CLIENT_HOSTNAME && !isProductTrustedClientPath(url.pathname)) {
       return respond({ ok: false, error: "not_found" }, 404);
     }
