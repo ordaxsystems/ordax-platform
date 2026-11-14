@@ -13,6 +13,7 @@ on:
           - pooler_session
           - pooler_transaction
           - worker_direct_pooler
+          - worker_direct_ipv6
 
 permissions:
   contents: read

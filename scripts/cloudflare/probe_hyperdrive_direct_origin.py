@@ -25,7 +25,7 @@ POOLER_ORIGIN = "aws-1-sa-east-1.pooler.supabase.com"
 # Each mode gets its own short-lived role, config and Worker, never the Product
 # MCP database role or live Hyperdrive. Compare paths before any production cutover.
 ORIGIN_MODES = ("direct_ipv6", "direct_ipv6_default_tls", "pooler_session",
-                "pooler_transaction", "worker_direct_pooler")
+                "pooler_transaction", "worker_direct_pooler", "worker_direct_ipv6")
 CF_API = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}"
 DB_API = f"https://api.supabase.com/v1/projects/{PROJECT}/database/query"
 NAME_PREFIX = "ordax-direct-ipv6-diag-"
@@ -132,7 +132,7 @@ def delete_role(token: str, role: str):
 def origin_for_mode(mode: str, role: str) -> dict:
     if mode not in ORIGIN_MODES:
         raise ProbeError("origin_mode_not_allowlisted")
-    if mode in ("direct_ipv6", "direct_ipv6_default_tls"):
+    if mode in ("direct_ipv6", "direct_ipv6_default_tls", "worker_direct_ipv6"):
         return {"scheme": "postgres", "database": "postgres",
                 "user": role, "host": ORIGIN, "port": 5432}
     return {"scheme": "postgres", "database": "postgres",
@@ -176,7 +176,7 @@ def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
 
 def create_hyperdrive(token: str, name: str, role: str, credential: str,
                       mode: str = "direct_ipv6") -> str:
-    if mode == "worker_direct_pooler":
+    if mode in ("worker_direct_pooler", "worker_direct_ipv6"):
         raise ProbeError("hyperdrive_for_direct_worker_forbidden")
     origin = origin_for_mode(mode, role)
     origin["password"] = credential
@@ -224,9 +224,10 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
             f'ORDAX_PROBE_ORIGIN_HOST = "{origin_host}"\n'
             f'ORDAX_PROBE_ORIGIN_PORT = "{origin_port}"\n')
     if direct_postgres:
-        expected_user = r"ordax_direct_diag_[0-9]{5,16}[.]" + re.escape(PROJECT)
-        if hyperdrive_id is not None or not isinstance(db_user, str) or not re.fullmatch(
-                expected_user, db_user):
+        run_id = name.removeprefix(NAME_PREFIX)
+        expected_role = ROLE_PREFIX + run_id
+        expected_users = {expected_role, expected_role + "." + PROJECT}
+        if hyperdrive_id is not None or db_user not in expected_users:
             raise ProbeError("direct_worker_config_invalid")
         return (base
                 + 'ORDAX_PROBE_DIRECT_POSTGRES = "1"\n'
@@ -350,7 +351,7 @@ def run():
     role_ownership = False
     deploy_attempted = False
     hd_id: str | None = None
-    direct_worker = mode == "worker_direct_pooler"
+    direct_worker = mode in ("worker_direct_pooler", "worker_direct_ipv6")
     failures = []
     try:
         require_unique_role(db, role)

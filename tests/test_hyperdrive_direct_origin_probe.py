@@ -61,11 +61,18 @@ class DirectOriginProbeContracts(unittest.TestCase):
             probe.worker_config(
                 name, None, probe.POOLER_ORIGIN, 5432,
                 direct_postgres=True, db_user="postgres")
-        with self.assertRaisesRegex(
-                probe.ProbeError, "hyperdrive_for_direct_worker_forbidden"):
-            probe.create_hyperdrive(
-                "fake-token", name, "ordax_direct_diag_39478283587",
-                "mock-secret", "worker_direct_pooler")
+        for mode in ("worker_direct_pooler", "worker_direct_ipv6"):
+            with self.subTest(mode=mode), self.assertRaisesRegex(
+                    probe.ProbeError, "hyperdrive_for_direct_worker_forbidden"):
+                probe.create_hyperdrive(
+                    "fake-token", name, "ordax_direct_diag_39478283587",
+                    "mock-secret", mode)
+        direct_config = probe.worker_config(
+            name, None, probe.ORIGIN, 5432,
+            direct_postgres=True, db_user="ordax_direct_diag_39478283587")
+        self.assertIn('ORDAX_PROBE_DB_USER = "ordax_direct_diag_39478283587"',
+                      direct_config)
+        self.assertNotIn("[[hyperdrive]]", direct_config)
 
     def test_direct_worker_secret_is_stdin_only(self):
         deploy_ok = mock.Mock(returncode=0, stdout=b"", stderr=b"")
@@ -138,6 +145,37 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn("ORDAX_DIRECT_HYPERDRIVE_CLEANUP=NOT_CREATED",
                       output.getvalue())
 
+    def test_direct_ipv6_worker_skips_pooler_and_hyperdrive(self):
+        env = {
+            "CLOUDFLARE_API_TOKEN": "fake-cf",
+            "SUPABASE_ACCESS_TOKEN": "fake-db",
+            "GITHUB_RUN_ID": "39478283587",
+            "ORDAX_HYPERDRIVE_PROBE_MODE": "worker_direct_ipv6",
+        }
+        with mock.patch.dict(probe.os.environ, env, clear=True), \
+             mock.patch.object(probe, "require_unique_role"), \
+             mock.patch.object(probe, "create_role"), \
+             mock.patch.object(probe, "verify_pooler_credential") as preflight, \
+             mock.patch.object(probe, "create_hyperdrive") as create_hd, \
+             mock.patch.object(probe, "find_hyperdrive") as find_hd, \
+             mock.patch.object(probe, "deploy_worker") as deploy, \
+             mock.patch.object(
+                 probe, "check_worker",
+                 return_value={"ok": True, "phase": "complete"}), \
+             mock.patch.object(probe, "delete_role"), \
+             mock.patch.object(probe, "api", return_value=None):
+            probe.run()
+        preflight.assert_not_called()
+        create_hd.assert_not_called()
+        find_hd.assert_not_called()
+        args = deploy.call_args.args
+        kwargs = deploy.call_args.kwargs
+        self.assertIsNone(args[1])
+        self.assertEqual(args[2], probe.ORIGIN)
+        self.assertEqual(args[3], 5432)
+        self.assertEqual(kwargs["db_user"], "ordax_direct_diag_39478283587")
+        self.assertTrue(kwargs["direct_postgres_password"])
+
     def test_role_is_login_only_and_ddl_empty_receipts_allowed(self):
         with mock.patch.object(probe, "api", return_value=None) as api:
             probe.create_role("fake-db-token", "ordax_direct_diag_39478283587", "mock-secret")
@@ -179,8 +217,8 @@ class DirectOriginProbeContracts(unittest.TestCase):
         role = "ordax_direct_diag_39478283587"
         self.assertEqual(probe.ORIGIN_MODES, (
             "direct_ipv6", "direct_ipv6_default_tls", "pooler_session",
-            "pooler_transaction", "worker_direct_pooler"))
-        for mode in ("direct_ipv6", "direct_ipv6_default_tls"):
+            "pooler_transaction", "worker_direct_pooler", "worker_direct_ipv6"))
+        for mode in ("direct_ipv6", "direct_ipv6_default_tls", "worker_direct_ipv6"):
             self.assertEqual(probe.origin_for_mode(mode, role), {
                 "scheme": "postgres", "database": "postgres", "user": role,
                 "host": probe.ORIGIN, "port": 5432})
@@ -288,6 +326,7 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn("pooler_session", workflow)
         self.assertIn("direct_ipv6_default_tls", workflow)
         self.assertIn("worker_direct_pooler", workflow)
+        self.assertIn("worker_direct_ipv6", workflow)
         self.assertIn("ORDAX_HYPERDRIVE_PROBE_MODE: ${{ inputs.origin_mode }}", workflow)
         self.assertIn("github.ref == 'refs/heads/main'", workflow)
         self.assertIn("environment: cloudflare-v3", workflow)
