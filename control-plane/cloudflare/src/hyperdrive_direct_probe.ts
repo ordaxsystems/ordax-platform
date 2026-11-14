@@ -7,6 +7,13 @@ type Env = { POSTGRES: { connectionString: string } };
 
 function safeError(error: unknown): string {
   const msg = error instanceof Error ? error.message.toLowerCase() : "";
+  // Cloudflare documents these Hyperdrive runtime messages. Map only exact
+  // bounded categories; never return provider text, hostnames or credentials.
+  if (msg.includes("internal error")) return "hyperdrive_internal_error";
+  if (msg.includes("generic error")) return "hyperdrive_generic_error";
+  if (msg.includes("failed to acquire a connection from the pool")) {
+    return "hyperdrive_pool_acquire_failed";
+  }
   if (msg.includes("connection terminated unexpectedly")) return "connection_terminated";
   if (msg.includes("authentication") || msg.includes("password")) return "authentication_failed";
   if (msg.includes("tls") || msg.includes("certificate")) return "tls_failure";

@@ -286,6 +286,10 @@ class DirectOriginProbeContracts(unittest.TestCase):
         text = (ROOT / "control-plane/cloudflare/src/hyperdrive_direct_probe.ts").read_text("utf-8")
         self.assertIn("select 1::int as ok", text)
         self.assertIn('openPostgresSession(env.POSTGRES.connectionString)', text)
+        self.assertIn("hyperdrive_internal_error", text)
+        self.assertIn("hyperdrive_generic_error", text)
+        self.assertIn("hyperdrive_pool_acquire_failed", text)
+        self.assertNotIn("return msg", text)
         self.assertNotIn('from "pg"', text)
         for forbidden in ("INSERT INTO", "UPDATE ", "DELETE FROM", "CREATE TABLE",
                           "ordax_", "/mcp", "oauth", "product_device", "env.DB"):
