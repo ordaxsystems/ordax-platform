@@ -26,6 +26,17 @@ export interface OrdaxMcpHandlers {
     toolName: string;
     requestFingerprint: string;
   }>) => Promise<void>;
+  /** Request-scoped projection of the same durable, Device-attested Central
+   * conversation binding used by action routing. This is routing authority
+   * only; capability authorization is still checked independently per action. */
+  sessionDeviceBinding?: Readonly<{
+    state: "bound";
+    device_id: string;
+    attested: true;
+    routing_authority: "central_conversation_binding";
+    dispatch_target_resolved: true;
+    capability_authorization: "checked_per_action";
+  }>;
 }
 
 interface ToolSpec {
@@ -69,9 +80,9 @@ const REPLACEMENTS = {
 };
 
 const TOOLS: ToolSpec[] = [
-  { name: "ordax_session", description: "Inspect the authenticated ORDAX Product session, the signed non-secret OAuth client_id for exact Owner grant selection, and the canonical MCP tool catalog (names, count, revision). Compare mcp_tool_names with the tools available to this conversation; if different, refresh the MCP connection. This does not grant device authority." },
+  { name: "ordax_session", description: "Inspect the authenticated ORDAX Product session, the signed non-secret OAuth client_id, the durable Device-attested conversation binding when one exists, and the canonical MCP tool catalog (names, count, revision). device_binding resolves routing only; each action still requires its current capability grant. Compare mcp_tool_names with the tools available to this conversation; if different, refresh the MCP connection." },
   { name: "ordax_profile", description: "Return the authenticated OrdaX account subject id for connector identity display. Compatibility tool: not an OS Profile, Profile Pack, Space or preferences." },
-  { name: "ordax_targets", description: "List OAuth-scoped ORDAX devices, reported presence and Owner grants. Each complete target has a nonauthoritative connection_diagnostic: online and granted does not prove action dispatch or Runtime attestation. A partially outdated profile retains its old permissions; new capabilities need explicit Owner reauthorization. Never select an execution target solely from discovery." },
+  { name: "ordax_targets", description: "List OAuth-scoped ORDAX devices, reported presence and Owner grants. client_device_routing is only a grant-catalog preflight and never overrides a durable ordax_session.device_binding. Each complete target has a nonauthoritative connection_diagnostic: online and granted does not prove action dispatch or Runtime attestation. A partially outdated profile retains its old permissions; new capabilities need explicit Owner reauthorization. Never select an execution target solely from discovery." },
   { name: "ordax_action_status", description: "Read the status/result of an existing ORDAX request_id. Keep the original ID and poll until terminal; never re-enqueue a potentially non-idempotent command just because status is queued or temporarily unavailable. Optional wait_for_completion_ms long-polls up to 20 seconds without re-executing.", properties: { request_id: STRING, wait_for_completion_ms: { ...WAIT, default: 0, description: "Optional verified status long-poll, 0-20000 milliseconds; default 0 for immediate read." } }, required: ["request_id"] },
   { name: "app_intelligence_catalog", description: "Read the compact version-bound App Intelligence catalog from the connected ORDAX device. Use this only to discover which app semantics are available; it grants no execution authority.", action: "intelligence.app_catalog", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "app_intelligence_detail", description: "Read declarative instructions, intents, parameters and examples for one exact app_id from the connected ORDAX device. This never grants permission to execute the app.", action: "intelligence.app_detail", properties: { device_id: DEVICE, space_id: SPACE, app_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "app_id"] },
@@ -611,9 +622,12 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
       ? { state: "no_device_action_grant",
           owner_action: "authorize_in_ordax_owner_permissions" }
       : { state: "multiple_action_grant_candidates",
-          owner_action: "review_oauth_client_device_grants" };
+          owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
+          owner_action_scope: "new_unbound_session_only" };
   return { ok: true, targets: targetsWithDiagnostics, client_device_routing: {
     ...routing, basis: "current_oauth_client_target_catalog",
+    authoritative_for_current_session: false,
+    current_session_authority: "ordax_session.device_binding",
     attested: false, dispatch_authorized: false,
   } };
 }
@@ -1006,6 +1020,20 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       ? session as JsonObject : null;
     const signedClientId = authenticated && identity?.client_kind === "product-mcp"
       && isCanonicalUuid(identity.client_id) ? identity.client_id.toLowerCase() : null;
+    const rawBinding = handlers.sessionDeviceBinding;
+    const deviceBinding = authenticated && rawBinding?.state === "bound"
+      && isCanonicalUuid(rawBinding.device_id) && rawBinding.attested === true
+      && rawBinding.routing_authority === "central_conversation_binding"
+      && rawBinding.dispatch_target_resolved === true
+      && rawBinding.capability_authorization === "checked_per_action"
+      ? {
+          state: "bound" as const,
+          device_id: rawBinding.device_id.toLowerCase(),
+          attested: true as const,
+          routing_authority: "central_conversation_binding" as const,
+          dispatch_target_resolved: true as const,
+          capability_authorization: "checked_per_action" as const,
+        } : null;
     // Derived from the same filtered catalog as tools/list, never a second inventory.
     const toolNames = toolDefinitions(allowedTools).map((tool) => String(tool.name));
     return textToolResult(
@@ -1014,6 +1042,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
             ok: true,
             authenticated: true,
             ...(signedClientId ? { client_id: signedClientId, client_kind: "product-mcp" } : {}),
+            ...(deviceBinding ? { device_binding: deviceBinding } : {}),
             mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
             mcp_tool_count: toolNames.length,
             mcp_tool_names: toolNames,

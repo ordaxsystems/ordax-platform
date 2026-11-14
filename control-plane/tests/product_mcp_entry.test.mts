@@ -492,6 +492,57 @@ test("session reports the expanded canonical computer tool count", async () => {
   assert.ok(!names.includes("project_create"));
 });
 
+test("session projects only the canonical Device-attested conversation binding", async () => {
+  const { handlers } = fakeHandlers();
+  const owner = "11111111-1111-4111-8111-111111111111";
+  const client = "22222222-2222-4222-8222-222222222222";
+  const device = "33333333-3333-4333-8333-333333333333";
+  handlers.session = async () => Response.json({ ok: true, session: {
+    subject_id: owner, client_kind: "product-mcp", client_id: client,
+  } });
+  let opened = 0;
+  let resolved = 0;
+  const gateway = createCanonicalProductMcpGateway(
+    ENV, handlers, fetch, PRODUCT_MCP_DIRECT_TOOLS, {
+      open: async () => {
+        opened++;
+        return Response.json({ ok: true, status: "bound", device_id: device });
+      },
+      resolve: async () => {
+        resolved++;
+        return { ok: true as const, ownerUserId: owner, clientId: client,
+          deviceId: device, requestId: null, expiresAt: "infinity" };
+      },
+    },
+  );
+  const response = await gateway(request("ordax_session"));
+  const json = await response.json() as any;
+  assert.equal(json.result.structuredContent.authenticated, true);
+  assert.equal(json.result.structuredContent.client_id, client);
+  assert.deepEqual(json.result.structuredContent.device_binding, {
+    state: "bound", device_id: device, attested: true,
+    routing_authority: "central_conversation_binding",
+    dispatch_target_resolved: true,
+    capability_authorization: "checked_per_action",
+  });
+  assert.equal(opened, 1);
+  assert.equal(resolved, 1);
+});
+
+test("session never invents Device authority when canonical binding is unresolved", async () => {
+  const { handlers } = fakeHandlers();
+  const gateway = createCanonicalProductMcpGateway(
+    ENV, handlers, fetch, PRODUCT_MCP_DIRECT_TOOLS, {
+      open: async () => Response.json({ ok: true, status: "awaiting_owner" }, { status: 202 }),
+      resolve: async () => ({ ok: false as const, error: "central_session_unbound" }),
+    },
+  );
+  const response = await gateway(request("ordax_session"));
+  const json = await response.json() as any;
+  assert.equal(json.result.structuredContent.authenticated, true);
+  assert.equal("device_binding" in json.result.structuredContent, false);
+});
+
 test("restricted MCP projection reports only allowed names in session diagnostics", async () => {
   const { handlers } = fakeHandlers();
   const allowed = new Set(["ordax_session", "ordax_targets"]);

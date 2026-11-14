@@ -453,11 +453,35 @@ export function createCanonicalProductMcpGateway(
       // side effect is opening/renewing a short-lived, server-selected device
       // challenge from the hidden provider correlation marker. This is session
       // coordination for the direct MCP path; it is not Central model relay.
+      let sessionDeviceBinding: OrdaxMcpHandlers["sessionDeviceBinding"];
       if (toolName === "ordax_session") {
-        try { await openCentralSessionFromMcp(request.clone(), env, wakeDependencies); } catch { /* fail closed */ }
+        try {
+          await (recoveryDependencies.open ?? openCentralSessionFromMcp)(
+            request.clone(), env, wakeDependencies,
+          );
+        } catch { /* fail closed */ }
+        // Project only the SAME durable binding authority that action routing
+        // resolves. A target-list candidate never becomes session authority.
+        try {
+          const resolved = await (recoveryDependencies.resolve ?? resolveCentralSessionFromMcp)(
+            request.clone(), env,
+          );
+          if (resolved.ok) {
+            sessionDeviceBinding = Object.freeze({
+              state: "bound",
+              device_id: resolved.deviceId,
+              attested: true,
+              routing_authority: "central_conversation_binding",
+              dispatch_target_resolved: true,
+              capability_authorization: "checked_per_action",
+            });
+          }
+        } catch { /* authenticated identity still remains observable fail-closed */ }
       }
 
-      let handlers = deniedHandlers;
+      let handlers: OrdaxMcpHandlers = sessionDeviceBinding
+        ? { ...deniedHandlers, sessionDeviceBinding }
+        : deniedHandlers;
       if (toolName && allowedTools.has(toolName)
         && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName) || ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
           || ATTESTED_SPECIAL_TOOLS.has(toolName))) {

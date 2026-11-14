@@ -104,6 +104,8 @@ test("client-scoped target routing reports only non-discovery device grants, nev
   assert.equal(result.client_device_routing.reported_online,false);
   assert.equal(result.client_device_routing.attested,false);
   assert.equal(result.client_device_routing.dispatch_authorized,false);
+  assert.equal(result.client_device_routing.authoritative_for_current_session,false);
+  assert.equal(result.client_device_routing.current_session_authority,"ordax_session.device_binding");
   assert.deepEqual(result.targets[0].connection_diagnostic, {
     state: "device_action_grant_required", attested: false, dispatch_proven: false,
     owner_action: "authorize_in_ordax_owner_permissions",
@@ -129,7 +131,8 @@ test("routing never promotes discovery, expired, project or incomplete grants",a
     .body.result.structuredContent;
   assert.deepEqual(onlyDiscovery.client_device_routing,{
     state:"no_device_action_grant",owner_action:"authorize_in_ordax_owner_permissions",
-    basis:"current_oauth_client_target_catalog",attested:false,dispatch_authorized:false
+    basis:"current_oauth_client_target_catalog",authoritative_for_current_session:false,
+    current_session_authority:"ordax_session.device_binding",attested:false,dispatch_authorized:false
   });
   assert.equal(onlyDiscovery.targets[0].connection_diagnostic.state,"device_action_grant_required");
   const partial=(await listTargets([{device_id:desktop,grant_groups:Array(128).fill(discovery)}]))
@@ -250,6 +253,10 @@ test("multiple action targets remain ambiguous, never automatically selected",as
   }));
   const result=(await listTargets(targets)).body.result.structuredContent;
   assert.equal(result.client_device_routing.state,"multiple_action_grant_candidates");
-  assert.equal(result.client_device_routing.owner_action,"review_oauth_client_device_grants");
+  assert.equal(result.client_device_routing.owner_action,
+    "select_device_for_new_unbound_session_in_ordax_owner");
+  assert.equal(result.client_device_routing.owner_action_scope,"new_unbound_session_only");
+  assert.equal(result.client_device_routing.authoritative_for_current_session,false);
+  assert.equal(result.client_device_routing.current_session_authority,"ordax_session.device_binding");
   assert.equal("candidate_device_id" in result.client_device_routing,false);
 });
