@@ -313,12 +313,50 @@ def validate_interactive_candidate(foundation:dict,config:dict)->bool:
     return True
 
 
+def validate_maintenance_upgrade(foundation:dict,config:dict)->bool:
+    """Allow safe maintenance of an already-published canonical Worker.
+
+    This never converts missing first-release evidence into production readiness.
+    It exists so a known canonical Worker cannot remain stale while fixes that
+    preserve the same authority boundary pass the full candidate suite.
+    """
+    if not validate_interactive_candidate(foundation,config):
+        raise McpReleaseError("mcp_maintenance_candidate_not_ready")
+    release=foundation["mcp_release"]
+    evidence=release.get("verified_evidence") or {}
+    worker_version=evidence.get("worker_version_id")
+    try:
+        canonical=str(uuid.UUID(str(worker_version)))
+    except (ValueError,AttributeError,TypeError):
+        return False
+    if worker_version!=canonical:
+        return False
+    validation=release.get("validation_evidence") or {}
+    for key in (
+        "attested_interactive_end_to_end_verified",
+        "canonical_remote_actions_verified",
+        "legacy_public_worker_retired",
+    ):
+        if validation.get(key) is not True:
+            return False
+    if validation.get("production_release_authority") is not False:
+        raise McpReleaseError("mcp_maintenance_cannot_expand_release_authority")
+    # The initial release proof ledger remains intact and blocked. Maintenance
+    # may only replace the already-existing canonical Worker after candidate
+    # validation; it cannot create a second Worker, authority, or legacy path.
+    if release.get("worker_name")!="ordax-mcp" or release.get("hostname")!="mcp.ordax.com.br":
+        raise McpReleaseError("mcp_maintenance_target_not_canonical")
+    return True
+
+
 def main()->int:
     parser=argparse.ArgumentParser()
     parser.add_argument("--inspect",action="store_true",
         help="Allow a blocked production candidate for CI/audit; NEVER authorizes production deploy.")
     parser.add_argument("--validation-candidate",action="store_true",
         help="Validate the canonical attested interactive candidate for dry-run checks only.")
+    parser.add_argument("--maintenance-upgrade",action="store_true",
+        help="Allow updating an already-published canonical Worker without weakening first-release evidence gates.")
     opt=parser.parse_args()
     try:
         data=json.loads(FOUNDATION.read_text("utf-8"))
@@ -328,6 +366,12 @@ def main()->int:
             if not validate_interactive_candidate(data,config):
                 raise McpReleaseError("mcp_interactive_candidate_not_ready")
             print("ORDAX_MCP_ATTESTED_INTERACTIVE_CANDIDATE=ELIGIBLE")
+            return 0
+        if opt.maintenance_upgrade:
+            if not validate_maintenance_upgrade(data,config):
+                print("ORDAX_MCP_MAINTENANCE_UPGRADE=BLOCKED")
+                return 3
+            print("ORDAX_MCP_MAINTENANCE_UPGRADE=ELIGIBLE")
             return 0
         ready=validate(data,config)
     except (ValueError,KeyError,TypeError,OSError) as error:
