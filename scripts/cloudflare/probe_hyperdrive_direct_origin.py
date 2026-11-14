@@ -29,6 +29,7 @@ ORIGIN_MODES = ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca
                 "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
                 "pooler_session", "pooler_transaction", "worker_direct_pooler",
                 "worker_direct_pooler_transaction",
+                "worker_direct_pooler_transaction_nodejs_compat_v2",
                 "worker_direct_pooler_transaction_postgres_js",
                 "worker_direct_ipv6", "worker_direct_ipv6_custom_ca")
 CF_API = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}"
@@ -161,6 +162,7 @@ def origin_for_mode(mode: str, role: str) -> dict:
             "user": role + "." + PROJECT, "host": POOLER_ORIGIN,
             "port": 6543 if mode in (
                 "pooler_transaction", "worker_direct_pooler_transaction",
+                "worker_direct_pooler_transaction_nodejs_compat_v2",
                 "worker_direct_pooler_transaction_postgres_js",
             ) else 5432}
 
@@ -175,6 +177,7 @@ def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
     if mode not in (
         "pooler_session", "pooler_transaction", "worker_direct_pooler",
         "worker_direct_pooler_transaction",
+        "worker_direct_pooler_transaction_nodejs_compat_v2",
         "worker_direct_pooler_transaction_postgres_js",
     ):
         raise ProbeError("pooler_preflight_mode_invalid")
@@ -207,6 +210,7 @@ def create_hyperdrive(token: str, name: str, role: str, credential: str,
                       mode: str = "direct_ipv6",
                       origin_host_override: str | None = None) -> str:
     if mode in ("worker_direct_pooler", "worker_direct_pooler_transaction",
+                "worker_direct_pooler_transaction_nodejs_compat_v2",
                 "worker_direct_pooler_transaction_postgres_js",
                 "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
         raise ProbeError("hyperdrive_for_direct_worker_forbidden")
@@ -264,7 +268,8 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
                   origin_port: int, direct_postgres: bool = False,
                   db_user: str | None = None, tls_ca: bool = False,
                   allow_direct_ipv6_literal: bool = False,
-                  direct_driver: str = "node_postgres") -> str:
+                  direct_driver: str = "node_postgres",
+                  compatibility_flag: str = "nodejs_compat") -> str:
     if not re.fullmatch(r"ordax-direct-ipv6-diag-[0-9]{5,16}", name):
         raise ProbeError("worker_name_invalid")
     allowed_hosts = {ORIGIN, POOLER_ORIGIN}
@@ -281,10 +286,12 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
         )
     if not origin_allowed or origin_port not in (5432, 6543):
         raise ProbeError("worker_origin_invalid")
+    if compatibility_flag not in ("nodejs_compat", "nodejs_compat_v2"):
+        raise ProbeError("worker_compatibility_flag_invalid")
     base = (f'name = "{name}"\n'
             'main = "src/hyperdrive_direct_probe.ts"\n'
             'compatibility_date = "2026-11-14"\n'
-            'compatibility_flags = ["nodejs_compat"]\n'
+            f'compatibility_flags = ["{compatibility_flag}"]\n'
             'workers_dev = true\npreview_urls = false\n'
             '[vars]\n'
             f'ORDAX_PROBE_ORIGIN_HOST = "{origin_host}"\n'
@@ -314,7 +321,8 @@ def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
                   origin_port: int, direct_postgres_password: str | None = None,
                   db_user: str | None = None, tls_ca: bool = False,
                   allow_direct_ipv6_literal: bool = False,
-                  direct_driver: str = "node_postgres"):
+                  direct_driver: str = "node_postgres",
+                  compatibility_flag: str = "nodejs_compat"):
     direct_postgres = direct_postgres_password is not None
     if direct_postgres and not direct_postgres_password:
         raise ProbeError("direct_worker_secret_missing")
@@ -325,6 +333,7 @@ def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
             direct_postgres=direct_postgres, db_user=db_user, tls_ca=tls_ca,
             allow_direct_ipv6_literal=allow_direct_ipv6_literal,
             direct_driver=direct_driver,
+            compatibility_flag=compatibility_flag,
         ))
         config_path = Path(file.name)
     secret_path: Path | None = None
@@ -435,6 +444,7 @@ def run():
     hd_id: str | None = None
     direct_worker = mode in (
         "worker_direct_pooler", "worker_direct_pooler_transaction",
+        "worker_direct_pooler_transaction_nodejs_compat_v2",
         "worker_direct_pooler_transaction_postgres_js",
         "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"
     )
@@ -448,6 +458,7 @@ def run():
         if mode in (
             "pooler_session", "pooler_transaction", "worker_direct_pooler",
             "worker_direct_pooler_transaction",
+            "worker_direct_pooler_transaction_nodejs_compat_v2",
             "worker_direct_pooler_transaction_postgres_js",
         ):
             verify_pooler_credential(mode, role, credential)
@@ -463,6 +474,11 @@ def run():
                     "postgres_js"
                     if mode == "worker_direct_pooler_transaction_postgres_js"
                     else "node_postgres"
+                ),
+                compatibility_flag=(
+                    "nodejs_compat_v2"
+                    if mode == "worker_direct_pooler_transaction_nodejs_compat_v2"
+                    else "nodejs_compat"
                 ),
             )
             print("ORDAX_DIRECT_HYPERDRIVE=NOT_USED", flush=True)
