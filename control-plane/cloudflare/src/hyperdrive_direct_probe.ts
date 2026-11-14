@@ -6,6 +6,13 @@ import { openPostgresSession } from "./data_postgres_driver.ts";
 type Env = { POSTGRES: { connectionString: string } };
 
 function safeError(error: unknown): string {
+  const code = error && typeof error === "object" && "code" in error
+    ? String((error as { code?: unknown }).code ?? "").toUpperCase()
+    : "";
+  // SQLSTATE is a five-character public protocol identifier. Returning only
+  // this bounded code reveals the error class without reflecting provider
+  // messages, hosts, connection strings, credentials or arbitrary fields.
+  if (/^[0-9A-Z]{5}$/.test(code)) return "sqlstate_" + code;
   const msg = error instanceof Error ? error.message.toLowerCase() : "";
   // Cloudflare documents these Hyperdrive runtime messages. Map only exact
   // bounded categories; never return provider text, hostnames or credentials.
