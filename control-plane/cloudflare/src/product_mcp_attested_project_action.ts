@@ -304,8 +304,11 @@ export function createAttestedProjectActionHandler(
         return grantRequired(body.action);
       }
 
-      const opId = retryDigest ?? operationId().toLowerCase();
-      if (retryDigest === undefined && !isCanonicalUuid(opId))
+      // Project reads are observational and must remain fresh. Only writes use
+      // the stable retry digest to protect physical effects from duplicate replay.
+      const stableRetry = accessMode === "write" ? retryDigest : undefined;
+      const opId = stableRetry ?? operationId().toLowerCase();
+      if (stableRetry === undefined && !isCanonicalUuid(opId))
         return json({ ok: false, error: "product_action_unavailable" }, 503);
       const payload: Json = {
         ...body.arguments,
