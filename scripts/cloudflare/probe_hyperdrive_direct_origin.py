@@ -120,7 +120,8 @@ def current_direct_ipv6(token: str) -> str:
         parsed = ipaddress.ip_address(address)
     except ValueError:
         raise ProbeError("direct_origin_ip_invalid") from None
-    if parsed.version != 6 or parsed.is_unspecified or parsed.is_loopback:
+    if (parsed.version != 6 or parsed.is_unspecified or parsed.is_loopback
+            or not parsed.is_global):
         raise ProbeError("direct_origin_ip_invalid")
     return parsed.compressed
 
@@ -207,7 +208,8 @@ def create_hyperdrive(token: str, name: str, role: str, credential: str,
             parsed = ipaddress.ip_address(origin_host_override)
         except ValueError:
             raise ProbeError("origin_override_invalid") from None
-        if parsed.version != 6 or parsed.is_unspecified or parsed.is_loopback:
+        if (parsed.version != 6 or parsed.is_unspecified or parsed.is_loopback
+                or not parsed.is_global):
             raise ProbeError("origin_override_invalid")
         origin["host"] = parsed.compressed
     origin["password"] = credential
@@ -250,11 +252,23 @@ def find_hyperdrive(token: str, name: str) -> str | None:
 
 def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
                   origin_port: int, direct_postgres: bool = False,
-                  db_user: str | None = None, tls_ca: bool = False) -> str:
+                  db_user: str | None = None, tls_ca: bool = False,
+                  allow_direct_ipv6_literal: bool = False) -> str:
     if not re.fullmatch(r"ordax-direct-ipv6-diag-[0-9]{5,16}", name):
         raise ProbeError("worker_name_invalid")
     allowed_hosts = {ORIGIN, POOLER_ORIGIN}
-    if origin_host not in allowed_hosts or origin_port not in (5432, 6543):
+    origin_allowed = origin_host in allowed_hosts
+    if not origin_allowed and allow_direct_ipv6_literal:
+        try:
+            parsed_origin = ipaddress.ip_address(origin_host)
+        except ValueError:
+            parsed_origin = None
+        origin_allowed = bool(
+            parsed_origin is not None and parsed_origin.version == 6
+            and parsed_origin.is_global and not parsed_origin.is_unspecified
+            and not parsed_origin.is_loopback
+        )
+    if not origin_allowed or origin_port not in (5432, 6543):
         raise ProbeError("worker_origin_invalid")
     base = (f'name = "{name}"\n'
             'main = "src/hyperdrive_direct_probe.ts"\n'
@@ -283,13 +297,15 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
 
 def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
                   origin_port: int, direct_postgres_password: str | None = None,
-                  db_user: str | None = None, tls_ca: bool = False):
+                  db_user: str | None = None, tls_ca: bool = False,
+                  allow_direct_ipv6_literal: bool = False):
     direct_postgres = direct_postgres_password is not None
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", prefix="ordax-direct-probe-",
                                      dir=PROBE_DIR, encoding="utf-8", delete=False) as file:
         file.write(worker_config(
             name, hyperdrive_id, origin_host, origin_port,
             direct_postgres=direct_postgres, db_user=db_user, tls_ca=tls_ca,
+            allow_direct_ipv6_literal=allow_direct_ipv6_literal,
         ))
         config_path = Path(file.name)
     try:
@@ -427,7 +443,10 @@ def run():
                 ),
             )
             print("ORDAX_DIRECT_HYPERDRIVE=CREATED", flush=True)
-            deploy_worker(name, hd_id, origin["host"], origin["port"])
+            deploy_worker(
+                name, hd_id, origin["host"], origin["port"],
+                allow_direct_ipv6_literal=mode == "direct_ip_custom_ca_verify_ca",
+            )
         print("ORDAX_DIRECT_WORKER=DEPLOYED", flush=True)
         response = check_worker(name)
         print("ORDAX_DIRECT_PROBE=" + json.dumps(response, sort_keys=True, separators=(",", ":")), flush=True)

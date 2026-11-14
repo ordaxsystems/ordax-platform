@@ -40,6 +40,20 @@ class DirectOriginProbeContracts(unittest.TestCase):
             probe.worker_config(
                 "ordax-direct-ipv6-diag-39478283587", "a" * 32,
                 "attacker.example", 5432)
+        with self.assertRaisesRegex(probe.ProbeError, "worker_origin_invalid"):
+            probe.worker_config(
+                "ordax-direct-ipv6-diag-39478283587", "a" * 32,
+                "2600:1f18::5", 5432)
+        literal = probe.worker_config(
+            "ordax-direct-ipv6-diag-39478283587", "a" * 32,
+            "2600:1f18::5", 5432, allow_direct_ipv6_literal=True)
+        self.assertIn('ORDAX_PROBE_ORIGIN_HOST = "2600:1f18::5"', literal)
+        for invalid in ("127.0.0.1", "::1", "2001:db8::5", "not-an-ip"):
+            with self.subTest(invalid=invalid), \
+                 self.assertRaisesRegex(probe.ProbeError, "worker_origin_invalid"):
+                probe.worker_config(
+                    "ordax-direct-ipv6-diag-39478283587", "a" * 32,
+                    invalid, 5432, allow_direct_ipv6_literal=True)
 
     def test_direct_worker_config_has_no_hyperdrive_or_password(self):
         name = "ordax-direct-ipv6-diag-39478283587"
@@ -291,9 +305,9 @@ class DirectOriginProbeContracts(unittest.TestCase):
                 "fake-token", "ordax-direct-ipv6-diag-39478283587",
                 "ordax_direct_diag_39478283587", "mock-secret",
                 "direct_ip_custom_ca_verify_ca",
-                origin_host_override="2001:db8::5"))
+                origin_host_override="2600:1f18::5"))
         direct_ip_payload = direct_ip.call_args.args[3]
-        self.assertEqual(direct_ip_payload["origin"]["host"], "2001:db8::5")
+        self.assertEqual(direct_ip_payload["origin"]["host"], "2600:1f18::5")
         self.assertEqual(direct_ip_payload["mtls"], {
             "sslmode": "verify-ca",
             "ca_certificate_id": "00ed2880-f686-4831-ba18-b8981d6ed48a",
@@ -302,8 +316,8 @@ class DirectOriginProbeContracts(unittest.TestCase):
             probe.create_hyperdrive(
                 "fake-token", "ordax-direct-ipv6-diag-39478283587",
                 "ordax_direct_diag_39478283587", "mock-secret",
-                "direct_ipv6", origin_host_override="2001:db8::5")
-        for invalid in ("127.0.0.1", "::", "::1", "not-an-ip"):
+                "direct_ipv6", origin_host_override="2600:1f18::5")
+        for invalid in ("127.0.0.1", "::", "::1", "2001:db8::5", "not-an-ip"):
             with self.subTest(invalid=invalid), self.assertRaises(probe.ProbeError):
                 probe.create_hyperdrive(
                     "fake-token", "ordax-direct-ipv6-diag-39478283587",
