@@ -11,26 +11,49 @@ type Env = {
 };
 
 function safeError(error: unknown): string {
-  const code = error && typeof error === "object" && "code" in error
-    ? String((error as { code?: unknown }).code ?? "").toUpperCase()
-    : "";
-  // SQLSTATE is a five-character public protocol identifier. Returning only
-  // this bounded code reveals the error class without reflecting provider
-  // messages, hosts, connection strings, credentials or arbitrary fields.
-  if (/^[0-9A-Z]{5}$/.test(code)) return "sqlstate_" + code;
-  const msg = error instanceof Error ? error.message.toLowerCase() : "";
-  // Cloudflare documents these Hyperdrive runtime messages. Map only exact
-  // bounded categories; never return provider text, hostnames or credentials.
-  if (msg.includes("internal error")) return "hyperdrive_internal_error";
-  if (msg.includes("generic error")) return "hyperdrive_generic_error";
+  const record = error && typeof error === "object"
+    ? error as Record<string, unknown> : {};
+  const cause = record.cause && typeof record.cause === "object"
+    ? record.cause as Record<string, unknown> : {};
+  const code = String(record.code ?? "").toUpperCase();
+  const providerCode = String(cause.code ?? "").toUpperCase();
+  const msg = [record.message, record.detail, cause.message, cause.detail]
+    .filter((value): value is string => typeof value === "string")
+    .map(value => value.toLowerCase()).join(" ");
+
+  // A SQLSTATE 58000 is Hyperdrive's envelope for provider-specific runtime
+  // failures. Inspect only allowlisted categories BEFORE returning the generic
+  // SQLSTATE so the diagnostic can distinguish a provider failure without
+  // reflecting any message, hostname, connection string or credential.
   if (msg.includes("failed to acquire a connection from the pool")) {
     return "hyperdrive_pool_acquire_failed";
   }
+  if (msg.includes("server connection attempt failed")) {
+    return "hyperdrive_server_connection_failed";
+  }
+  if (msg.includes("server return error and closed connection")) {
+    return "hyperdrive_server_closed_connection";
+  }
+  if (msg.includes("failed to connect to the provided database")) {
+    return "hyperdrive_database_connect_failed";
+  }
+  if (msg.includes("internal error")) return "hyperdrive_internal_error";
+  if (msg.includes("generic error")) return "hyperdrive_generic_error";
   if (msg.includes("connection terminated unexpectedly")) return "connection_terminated";
   if (msg.includes("authentication") || msg.includes("password")) return "authentication_failed";
   if (msg.includes("tls") || msg.includes("certificate")) return "tls_failure";
   if (msg.includes("timeout")) return "timeout";
   if (msg.includes("network") || msg.includes("connection")) return "connection_failed";
+
+  // Cloudflare documents provider connection codes 2008..2016. Expose only
+  // that finite allowlist if a wrapped cause carries one.
+  if (/^20(?:08|09|10|11|12|13|14|15|16)$/.test(providerCode)) {
+    return "hyperdrive_code_" + providerCode;
+  }
+
+  // SQLSTATE is a five-character public protocol identifier. Returning only
+  // this bounded code reveals the error class without arbitrary provider data.
+  if (/^[0-9A-Z]{5}$/.test(code)) return "sqlstate_" + code;
   return "unclassified";
 }
 

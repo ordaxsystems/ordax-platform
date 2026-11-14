@@ -338,8 +338,14 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn("hyperdrive_internal_error", text)
         self.assertIn("hyperdrive_generic_error", text)
         self.assertIn("hyperdrive_pool_acquire_failed", text)
+        self.assertIn("hyperdrive_server_connection_failed", text)
+        self.assertIn("hyperdrive_database_connect_failed", text)
+        self.assertIn('"hyperdrive_code_" + providerCode', text)
+        self.assertIn('/^20(?:08|09|10|11|12|13|14|15|16)$/.test(providerCode)', text)
         self.assertIn('"sqlstate_" + code', text)
         self.assertIn('/^[0-9A-Z]{5}$/.test(code)', text)
+        self.assertLess(text.index("hyperdrive_internal_error"),
+                        text.index('"sqlstate_" + code'))
         self.assertNotIn("return msg", text)
         self.assertNotIn('from "pg"', text)
         for forbidden in ("INSERT INTO", "UPDATE ", "DELETE FROM", "CREATE TABLE",
