@@ -56,6 +56,36 @@ class HyperdriveEgressRepairTests(TestCase):
         self.assertNotIn("::/0", added["dbAllowedCidrsV6"])
         self.assertEqual(OLD["dbAllowedCidrs"], ["203.0.113.4/32"])
 
+    def test_merge_treats_broader_existing_network_as_already_covered(self):
+        open_acl = {"dbAllowedCidrs": ["0.0.0.0/0"],
+                    "dbAllowedCidrsV6": ["::/0"]}
+        self.assertEqual(mod.merge(open_acl), open_acl)
+
+        covered_v4 = next(iter(mod.CF_V4))
+        covered_v6 = next(iter(mod.CF_V6))
+        partial = {"dbAllowedCidrs": [covered_v4],
+                   "dbAllowedCidrsV6": [covered_v6]}
+        merged = mod.merge(partial)
+        self.assertEqual(len(merged["dbAllowedCidrs"]), len(mod.CF_V4))
+        self.assertEqual(len(merged["dbAllowedCidrsV6"]), len(mod.CF_V6))
+        self.assertEqual(merged["dbAllowedCidrs"].count(covered_v4), 1)
+        self.assertEqual(merged["dbAllowedCidrsV6"].count(covered_v6), 1)
+
+    def test_open_acl_never_triggers_redundant_network_write(self):
+        open_acl = {"dbAllowedCidrs": ["0.0.0.0/0"],
+                    "dbAllowedCidrsV6": ["::/0"]}
+        with mock.patch.dict(os.environ, {"SUPABASE_ACCESS_TOKEN": "synthetic"}), \
+             mock.patch.object(mod, "policy", return_value=(open_acl, "applied")), \
+             mock.patch.object(mod, "official_cloudflare_networks"), \
+             mock.patch.object(mod, "clear_cloudflare_bans", return_value=0), \
+             mock.patch.object(mod, "wait_ready", return_value=False), \
+             mock.patch.object(mod, "update_policy") as update:
+            with self.assertRaisesRegex(
+                    mod.RepairFailure,
+                    "covered_network_and_bans_repaired_but_postgres_unavailable"):
+                mod.run()
+        update.assert_not_called()
+
     def test_policy_reads_current_shape_and_never_logs_cidrs(self):
         response = {"entitlement": "allowed", "status": "applied",
                     "config": OLD}

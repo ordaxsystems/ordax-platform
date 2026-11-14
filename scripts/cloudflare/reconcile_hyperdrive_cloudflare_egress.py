@@ -116,14 +116,27 @@ def official_cloudflare_networks() -> None:
 def merge(current: dict) -> dict:
     if len(CF_V4) != 15 or len(CF_V6) != 7:
         raise RepairFailure("cloudflare_network_snapshot_invalid")
+    current_by_family = {
+        4: tuple(ipaddress.ip_network(value, strict=True)
+                 for value in current["dbAllowedCidrs"]),
+        6: tuple(ipaddress.ip_network(value, strict=True)
+                 for value in current["dbAllowedCidrsV6"]),
+    }
+    missing = {4: set(), 6: set()}
     for nets, family in ((CF_V4, 4), (CF_V6, 6)):
         for cidr in nets:
             net = ipaddress.ip_network(cidr, strict=True)
             if net.version != family or net.prefixlen == 0:
                 raise RepairFailure("unsafe_cloudflare_network")
+            # Network restrictions are semantic, not string-set membership.
+            # A broader existing ACL (including /0) already covers a provider
+            # range and must never trigger redundant writes or rollback churn.
+            if not any(net.subnet_of(allowed)
+                       for allowed in current_by_family[family]):
+                missing[family].add(cidr)
     return {
-        "dbAllowedCidrs": sorted(set(current["dbAllowedCidrs"]) | CF_V4),
-        "dbAllowedCidrsV6": sorted(set(current["dbAllowedCidrsV6"]) | CF_V6),
+        "dbAllowedCidrs": sorted(set(current["dbAllowedCidrs"]) | missing[4]),
+        "dbAllowedCidrsV6": sorted(set(current["dbAllowedCidrsV6"]) | missing[6]),
     }
 
 
