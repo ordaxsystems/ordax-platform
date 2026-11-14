@@ -64,7 +64,17 @@ test("MCP retry correlation remains stable for the exact semantic retry", async 
     }),
   );
 
+  const changedWaitOnly = await verifiedMcpRetryDigest(
+    sessionPayload, "7", params("computer_terminal_exec", {
+      device_id: "22222222-2222-4222-8222-222222222222",
+      argv: ["cmd", "/c", "echo", "stable"],
+      timeout_seconds: 30,
+      wait_for_completion_ms: 20000,
+    }),
+  );
+
   assert.equal(first, reordered);
+  assert.equal(first, changedWaitOnly, "response wait policy cannot create a second device effect");
   assert.notEqual(first, numericId, "JSON-RPC id type remains part of retry identity");
 });
 
