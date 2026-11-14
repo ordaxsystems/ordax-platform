@@ -270,14 +270,30 @@ class DirectOriginProbeContracts(unittest.TestCase):
             "ca_certificate_id": "00ed2880-f686-4831-ba18-b8981d6ed48a",
         })
 
+        with mock.patch.object(probe, "api", return_value={
+            "success": True, "result": {"id": "d" * 32},
+        }) as verify_ca:
+            self.assertEqual("d" * 32, probe.create_hyperdrive(
+                "fake-token", "ordax-direct-ipv6-diag-39478283587",
+                "ordax_direct_diag_39478283587", "mock-secret",
+                "direct_ipv6_custom_ca_verify_ca"))
+        verify_ca_payload = verify_ca.call_args.args[3]
+        self.assertEqual(verify_ca_payload["origin"]["host"], probe.ORIGIN)
+        self.assertEqual(verify_ca_payload["mtls"], {
+            "sslmode": "verify-ca",
+            "ca_certificate_id": "00ed2880-f686-4831-ba18-b8981d6ed48a",
+        })
+
     def test_isolated_pooler_modes_pin_hostname_port_and_tenant_user(self):
         role = "ordax_direct_diag_39478283587"
         self.assertEqual(probe.ORIGIN_MODES, (
             "direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
-            "pooler_session", "pooler_transaction", "worker_direct_pooler",
-            "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"))
+            "direct_ipv6_custom_ca_verify_ca", "pooler_session", "pooler_transaction",
+            "worker_direct_pooler", "worker_direct_ipv6",
+            "worker_direct_ipv6_custom_ca"))
         for mode in ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
-                     "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
+                     "direct_ipv6_custom_ca_verify_ca", "worker_direct_ipv6",
+                     "worker_direct_ipv6_custom_ca"):
             self.assertEqual(probe.origin_for_mode(mode, role), {
                 "scheme": "postgres", "database": "postgres", "user": role,
                 "host": probe.ORIGIN, "port": 5432})
@@ -385,6 +401,7 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn("pooler_session", workflow)
         self.assertIn("direct_ipv6_default_tls", workflow)
         self.assertIn("direct_ipv6_custom_ca", workflow)
+        self.assertIn("direct_ipv6_custom_ca_verify_ca", workflow)
         self.assertIn("worker_direct_pooler", workflow)
         self.assertIn("worker_direct_ipv6", workflow)
         self.assertIn("worker_direct_ipv6_custom_ca", workflow)

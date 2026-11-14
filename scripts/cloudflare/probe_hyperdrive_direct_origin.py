@@ -25,8 +25,9 @@ POOLER_ORIGIN = "aws-1-sa-east-1.pooler.supabase.com"
 # Each mode gets its own short-lived role, config and Worker, never the Product
 # MCP database role or live Hyperdrive. Compare paths before any production cutover.
 ORIGIN_MODES = ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
-                "pooler_session", "pooler_transaction", "worker_direct_pooler",
-                "worker_direct_ipv6", "worker_direct_ipv6_custom_ca")
+                "direct_ipv6_custom_ca_verify_ca", "pooler_session", "pooler_transaction",
+                "worker_direct_pooler", "worker_direct_ipv6",
+                "worker_direct_ipv6_custom_ca")
 CF_API = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}"
 DB_API = f"https://api.supabase.com/v1/projects/{PROJECT}/database/query"
 NAME_PREFIX = "ordax-direct-ipv6-diag-"
@@ -134,7 +135,8 @@ def origin_for_mode(mode: str, role: str) -> dict:
     if mode not in ORIGIN_MODES:
         raise ProbeError("origin_mode_not_allowlisted")
     if mode in ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
-                "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
+                "direct_ipv6_custom_ca_verify_ca", "worker_direct_ipv6",
+                "worker_direct_ipv6_custom_ca"):
         return {"scheme": "postgres", "database": "postgres",
                 "user": role, "host": ORIGIN, "port": 5432}
     return {"scheme": "postgres", "database": "postgres",
@@ -190,9 +192,12 @@ def create_hyperdrive(token: str, name: str, role: str, credential: str,
     # Supabase/Hyperdrive documents TLS "require" as the default. This explicit
     # diagnostic mode omits the optional mTLS/TLS block to prove whether the
     # API field itself is involved in an internal Hyperdrive failure.
-    if mode == "direct_ipv6_custom_ca":
+    if mode in ("direct_ipv6_custom_ca", "direct_ipv6_custom_ca_verify_ca"):
         body["mtls"] = {
-            "sslmode": "verify-full",
+            "sslmode": (
+                "verify-ca" if mode == "direct_ipv6_custom_ca_verify_ca"
+                else "verify-full"
+            ),
             "ca_certificate_id": "00ed2880-f686-4831-ba18-b8981d6ed48a",
         }
     elif mode != "direct_ipv6_default_tls":
