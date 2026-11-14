@@ -203,6 +203,33 @@ test("project-scoped retries reuse their PostgreSQL key after a lost response", 
   assert.equal(keys.length, 2);
 });
 
+test("project-scoped reads stay fresh when a retry digest is reused", async () => {
+  const digest = "d".repeat(64);
+  const ids = [
+    "88888888-8888-4888-8888-888888888881",
+    "88888888-8888-4888-8888-888888888882",
+  ];
+  const keys: string[] = [];
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject,
+    listTargets: async () => catalog(grantGroup("process.status", "read")),
+    enqueue: async (_env, input) => {
+      keys.push(input.idempotencyKey);
+      return { ok: true, replayed: false,
+        request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => ids.shift() ?? assert.fail("unexpected third project read"),
+  });
+  const args = { process_id: "99999999-9999-4999-8999-999999999999" };
+  assert.equal((await handler(actionRequest("process.status", args), digest)).status, 202);
+  assert.equal((await handler(actionRequest("process.status", args), digest)).status, 202);
+  assert.deepEqual(keys, [
+    "mcp-project-read-88888888-8888-4888-8888-888888888881",
+    "mcp-project-read-88888888-8888-4888-8888-888888888882",
+  ]);
+});
+
 test("attested project action forwards the Worker wake scheduler without altering SQL project scope", async () => {
   const scheduleWake = (_wake: Promise<void>) => {};
   let received: any = null;

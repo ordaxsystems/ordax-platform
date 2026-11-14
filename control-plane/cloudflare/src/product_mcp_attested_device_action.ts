@@ -538,8 +538,12 @@ export function createAttestedDeviceActionHandler(
         return grantRequired(body.action);
       }
 
-      const opId = retryDigest ?? operationId().toLowerCase();
-      if (retryDigest === undefined && !isCanonicalUuid(opId))
+      // Reads are observational and must execute fresh even when the MCP client
+      // retries or reuses the same JSON-RPC call identity. Writes keep stable
+      // retry correlation so uncertain transports remain at-most-once.
+      const stableRetry = accessMode === "write" ? retryDigest : undefined;
+      const opId = stableRetry ?? operationId().toLowerCase();
+      if (stableRetry === undefined && !isCanonicalUuid(opId))
         return json({ ok: false, error: "product_action_unavailable" }, 503);
       const result: ProductActionEnqueueResult = await enqueue(env, {
         ownerUserId: identity.ownerUserId,
