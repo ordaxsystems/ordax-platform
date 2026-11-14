@@ -118,7 +118,7 @@ A setup redirect `installation_id` is never accepted as proof. Repository candid
 
 ## Account and Runtime release state
 
-The Account GitHub bridge is implemented in `ordax-os` #2558. The Owner binding-intent bridge is being added separately in `ordax-os` #2560 and is guarded by its own `ORDAX_MCP_OWNER_PROJECT_DEVICE_BINDING_ENABLED` flag.
+The Account GitHub bridge is implemented in `ordax-os` #2558. The Owner binding-intent bridge is implemented in `ordax-os` #2560 (`9e8a060cd89814858c828c0aaa3452e332305a01`) and is guarded by its own `ORDAX_MCP_OWNER_PROJECT_DEVICE_BINDING_ENABLED` flag.
 
 The Account browser must never submit `local_project_ref`, local path, capability ceiling or grant information. Its only binding action is the Owner request for `project_id + device_id`.
 
@@ -129,7 +129,7 @@ Until the Device Agent path is proven end-to-end, both the Platform binding flag
 ## Remaining boundary after backend binding
 
 - compose the Device Agent/Runtime polling + local Project registration confirmation against the new Device transport;
-- complete Account #2560 and keep its binding-intent flag off until that Runtime proof exists;
+- keep the Account #2560 binding-intent flag off until that Runtime proof exists;
 - configure and verify the real GitHub App/callback release without exposing provider credentials;
 - handle GitHub installation/repository revocation and rename so stale `ordax_project_connections` cannot authorize new work;
 - expose grants only as later explicit Owner decisions after `ready_without_grants`;
