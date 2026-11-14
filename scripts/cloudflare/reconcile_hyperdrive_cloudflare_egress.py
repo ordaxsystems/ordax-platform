@@ -312,6 +312,17 @@ def inspect_only(token: str) -> None:
     print("ORDAX_NETWORK_STATUS=" + status, flush=True)
     print("ORDAX_NETWORK_RESTRICTIONS_IPV4_COUNT=" + str(len(allowed_v4)), flush=True)
     print("ORDAX_NETWORK_RESTRICTIONS_IPV6_COUNT=" + str(len(allowed_v6)), flush=True)
+    # Reveal policy shape only, never addresses/CIDRs. Prefix lengths and
+    # default-route booleans are sufficient to prove whether the firewall can
+    # exclude Hyperdrive while keeping the actual ACL private.
+    print("ORDAX_NETWORK_RESTRICTIONS_IPV4_MIN_PREFIXLEN="
+          + str(min((n.prefixlen for n in allowed_v4), default=-1)), flush=True)
+    print("ORDAX_NETWORK_RESTRICTIONS_IPV6_MIN_PREFIXLEN="
+          + str(min((n.prefixlen for n in allowed_v6), default=-1)), flush=True)
+    print("ORDAX_NETWORK_RESTRICTIONS_IPV4_DEFAULT_ROUTE=" + str(
+        any(n.prefixlen == 0 for n in allowed_v4)).lower(), flush=True)
+    print("ORDAX_NETWORK_RESTRICTIONS_IPV6_DEFAULT_ROUTE=" + str(
+        any(n.prefixlen == 0 for n in allowed_v6)).lower(), flush=True)
     print("ORDAX_NETWORK_CLOUDFLARE_IPV4_COVERED=" + str(
         all(covered(x, allowed_v4) for x in CF_V4)).lower(), flush=True)
     print("ORDAX_NETWORK_CLOUDFLARE_IPV6_COVERED=" + str(

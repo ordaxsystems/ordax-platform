@@ -225,6 +225,10 @@ class HyperdriveEgressRepairTests(TestCase):
         output = capture.getvalue()
         self.assertIn("ORDAX_NETWORK_INSPECTION=COMPLETE_NO_CHANGES", output)
         self.assertIn("ORDAX_NETWORK_CLOUDFLARE_IPV4_COVERED=true", output)
+        self.assertIn("ORDAX_NETWORK_RESTRICTIONS_IPV4_MIN_PREFIXLEN=13", output)
+        self.assertIn("ORDAX_NETWORK_RESTRICTIONS_IPV6_MIN_PREFIXLEN=29", output)
+        self.assertIn("ORDAX_NETWORK_RESTRICTIONS_IPV4_DEFAULT_ROUTE=false", output)
+        self.assertIn("ORDAX_NETWORK_RESTRICTIONS_IPV6_DEFAULT_ROUTE=false", output)
         self.assertIn("ORDAX_NETWORK_BANS_IPV4_COUNT=2", output)
         self.assertIn("ORDAX_NETWORK_BANS_CLOUDFLARE_OVERLAP=1", output)
         self.assertNotIn("173.245.48.3", output)
@@ -233,6 +237,21 @@ class HyperdriveEgressRepairTests(TestCase):
         self.assertEqual(read.call_args.args[:2], (
             "POST", "https://api.supabase.com/v1/projects/" + mod.PROJECT + "/network-bans/retrieve"))
         update.assert_not_called()
+
+    def test_inspection_reports_default_routes_without_cidr_values(self):
+        open_acl = {"dbAllowedCidrs": ["0.0.0.0/0"], "dbAllowedCidrsV6": ["::/0"]}
+        with mock.patch.object(mod, "policy", return_value=(open_acl, "applied")), \
+             mock.patch.object(mod, "request",
+                               return_value={"banned_ipv4_addresses": []}), \
+             redirect_stdout(StringIO()) as capture:
+            mod.inspect_only("synthetic")
+        output = capture.getvalue()
+        self.assertIn("ORDAX_NETWORK_RESTRICTIONS_IPV4_MIN_PREFIXLEN=0", output)
+        self.assertIn("ORDAX_NETWORK_RESTRICTIONS_IPV6_MIN_PREFIXLEN=0", output)
+        self.assertIn("ORDAX_NETWORK_RESTRICTIONS_IPV4_DEFAULT_ROUTE=true", output)
+        self.assertIn("ORDAX_NETWORK_RESTRICTIONS_IPV6_DEFAULT_ROUTE=true", output)
+        self.assertNotIn("0.0.0.0/0", output)
+        self.assertNotIn("::/0", output)
 
     def test_inspection_accepts_one_documented_response_envelope(self):
         with mock.patch.object(mod, "policy", return_value=(OLD, "applied")), \
