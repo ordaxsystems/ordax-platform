@@ -977,11 +977,16 @@ export async function verifiedMcpRetryDigest(
     ? (session as JsonObject).client_id : null;
   if (!validChatGptSessionMarker(marker) || !isCanonicalUuid(clientId)) return null;
   // Preserve JSON-RPC type: numeric 1 and string "1" are distinct request IDs.
+  // wait_for_completion_ms controls only how long the caller observes the
+  // already-enqueued action. It is not part of the device effect and therefore
+  // must not create a second write when a retry changes only its wait budget.
+  const effectArgs: JsonObject = { ...(args as JsonObject) };
+  delete effectArgs.wait_for_completion_ms;
   // Canonical argument ordering keeps byte-equivalent retries stable without
   // allowing a reused request ID to collide with a different action payload.
   const bytes = new TextEncoder().encode(JSON.stringify([
     "ordax-mcp-enqueue-retry-v2", clientId.toLowerCase(), marker, typeof requestId, requestId,
-    name, canonicalRetryValue(args),
+    name, canonicalRetryValue(effectArgs),
   ]));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, "0")).join("");
