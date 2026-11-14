@@ -51,6 +51,17 @@ test("Forge catalog validator accepts the App-owned MCP projection and rejects d
   assert.equal(validForgeCatalog([...CATALOG,{...CATALOG[0],name:"forge_work_send"}]),false);
 });
 
+test("Forge MCP initialize matches the ChatGPT-compatible OrdaX MCP protocol",async()=>{
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,
+  });
+  const response=await gateway(request({jsonrpc:"2.0",id:1,method:"initialize",params:{}}));
+  assert.equal(response.status,200);
+  const body:any=await response.json();
+  assert.equal(body.result.protocolVersion,"2025-06-18");
+  assert.deepEqual(body.result.capabilities,{tools:{listChanged:false}});
+});
+
 test("Forge MCP tools/list projects the instance catalog without duplicating it in Platform",async()=>{
   const gateway=createForgeMcpGateway(env,{
     authenticateMcp:mcpIdentity as any,
