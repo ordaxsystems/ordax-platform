@@ -940,26 +940,48 @@ async function waitForAction(source: Request, requestId: string, timeoutMs: numb
   }
 }
 
-/** Stable per signed OAuth client, ChatGPT session marker and JSON-RPC call ID.
- * The digest is only a deduplication hint; the PostgreSQL enqueue RPC remains
- * responsible for ownership, current grants, payload conflicts and replay.
- * No bearer token, marker or user-provided key is persisted or forwarded. */
-async function verifiedMcpRetryDigest(
+function canonicalRetryValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalRetryValue);
+  if (value && typeof value === "object") {
+    const source = value as JsonObject;
+    const canonical: JsonObject = {};
+    for (const key of Object.keys(source).sort()) canonical[key] = canonicalRetryValue(source[key]);
+    return canonical;
+  }
+  return value;
+}
+
+/** Stable per signed OAuth client, ChatGPT session marker, JSON-RPC call ID
+ * and exact tool call. JSON-RPC permits sequential request ID reuse, so an ID
+ * alone cannot distinguish a retry from a later, different tool invocation.
+ * The tool name and canonical arguments participate only in this in-memory
+ * digest; neither content nor marker is persisted or forwarded. PostgreSQL
+ * remains responsible for ownership, current grants, payload conflicts and
+ * replay, and this digest never grants authority. */
+export async function verifiedMcpRetryDigest(
   sessionPayload: JsonObject,
   requestId: string | number,
   params: unknown,
 ): Promise<string | null> {
   if (!params || typeof params !== "object" || Array.isArray(params)) return null;
-  const meta = (params as JsonObject)._meta;
-  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const object = params as JsonObject;
+  const meta = object._meta;
+  const name = object.name;
+  const args = object.arguments;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)
+    || typeof name !== "string" || !name
+    || !args || typeof args !== "object" || Array.isArray(args)) return null;
   const marker = (meta as JsonObject)["openai/session"];
   const session = sessionPayload.session;
   const clientId = session && typeof session === "object" && !Array.isArray(session)
     ? (session as JsonObject).client_id : null;
   if (!validChatGptSessionMarker(marker) || !isCanonicalUuid(clientId)) return null;
   // Preserve JSON-RPC type: numeric 1 and string "1" are distinct request IDs.
+  // Canonical argument ordering keeps byte-equivalent retries stable without
+  // allowing a reused request ID to collide with a different action payload.
   const bytes = new TextEncoder().encode(JSON.stringify([
-    "ordax-mcp-enqueue-retry-v1", clientId.toLowerCase(), marker, typeof requestId, requestId,
+    "ordax-mcp-enqueue-retry-v2", clientId.toLowerCase(), marker, typeof requestId, requestId,
+    name, canonicalRetryValue(args),
   ]));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), x => x.toString(16).padStart(2, "0")).join("");
