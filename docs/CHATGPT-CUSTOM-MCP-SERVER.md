@@ -44,6 +44,49 @@ ChatGPT do usuário
 
 O ChatGPT não acessa `localhost` diretamente e não recebe uma credencial mestra do dispositivo. Descoberta do target, autorização de capability e permissão local são etapas distintas.
 
+## Forge MCP
+
+O **Forge MCP** é um segundo servidor MCP personalizado para o mesmo usuário OrdaX, mas não é um segundo backend de identidade nem um túnel para uma máquina específica.
+
+Configuração canônica:
+
+| Campo | Valor |
+| --- | --- |
+| Nome | Forge MCP |
+| Tipo | Servidor MCP personalizado |
+| URL do servidor | `https://forge-mcp.ordax.com.br/mcp` |
+| Transporte | Streamable HTTP |
+| Autenticação | OAuth |
+| Authorization Server | `https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1` |
+| OAuth | descoberta automática / DCR; não preencher Client ID ou Client Secret manualmente |
+| Worker | `ordax-mcp` |
+| Autoridade persistente | PostgreSQL |
+
+Fluxo conceitual:
+
+```text
+ChatGPT do usuário
+  -> mesmo OAuth OrdaX/Supabase
+  -> https://forge-mcp.ordax.com.br/mcp
+  -> gateway Forge no mesmo Worker ordax-mcp
+  -> binding persistente user + OAuth client -> Forge instance
+  -> fila/lease/receipt PostgreSQL
+  -> conexão outbound do Forge instalado
+  -> projetos / Tasks / Runs / memória / continuidade
+```
+
+Regras de produto:
+
+- o usuário **não** instala `cloudflared`, não autoriza zona Cloudflare e não recebe token de Tunnel;
+- `forge-mcp.ordax.com.br` é um custom domain do mesmo Worker `ordax-mcp`; Cloudflare é infraestrutura de edge, não login do usuário;
+- OAuth é o mesmo Supabase do OrdaX MCP, portanto a conta é a mesma; o consentimento do Forge continua separado porque é outro cliente/superfície MCP;
+- o Forge instalado se conecta **outbound** à Platform; nenhuma porta pública, certificado Cloudflare ou CNAME por máquina faz parte do produto;
+- a Platform não mantém uma cópia manual do catálogo Forge. Cada instância Forge registra o catálogo MCP canônico e seu SHA-256; `tools/list` projeta esse catálogo e adiciona somente `forge_connection_status` e `forge_action_status`;
+- enquanto nenhuma instância Forge estiver registrada/conectada, o servidor continua instalável e expõe somente essas duas ferramentas de estado;
+- OrdaX MCP continua responsável por computador/Runtime; Forge MCP continua responsável por projetos, Tasks, Runs, memória e continuidade do Forge. Não fundir as autoridades.
+
+O antigo Cloudflare Access app, o CNAME `cfargotunnel.com` e o Tunnel por máquina foram retirados em 14/11/2026. Não recriá-los como fallback.
+
 ## Atualização
 
 A URL do servidor é estável. Uma nova versão do Worker, Control Plane, Runtime ou implementação de uma tool **não exige criar `/mcp-v2`, `/mcp-v3`, reinstalar o servidor ou trocar a URL**.
