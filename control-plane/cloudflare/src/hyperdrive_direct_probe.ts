@@ -123,8 +123,9 @@ function probeConnectionString(env: Env): string | null {
     if (!user || !password || !host || !Number.isInteger(port)
         || port < 1 || port > 65535) return null;
     const sslMode = env.ORDAX_PROBE_TLS_CA === "1" ? "" : "?sslmode=require";
+    const authorityHost = host.includes(":") ? `[${host}]` : host;
     return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}`
-      + `@${host}:${port}/postgres${sslMode}`;
+      + `@${authorityHost}:${port}/postgres${sslMode}`;
   }
   const connectionString = (env.POSTGRES?.connectionString ?? "").trim();
   return connectionString || null;
@@ -168,12 +169,17 @@ export default {
     if (request.method !== "GET" || new URL(request.url).pathname !== "/") {
       return new Response("Not found", { status: 404 });
     }
-    const tcpReachable = await probeOriginTcp(env);
-    if (!tcpReachable) {
-      return Response.json(
-        { ok: false, phase: "tcp", classification: "origin_tcp_unreachable" },
-        { status: 503 },
-      );
+    // Raw Worker TCP egress and Hyperdrive egress are different networks.
+    // Never use a Worker-socket preflight to decide whether Hyperdrive can reach
+    // the database. It is authoritative only for direct-Postgres probe modes.
+    if (env.ORDAX_PROBE_DIRECT_POSTGRES === "1") {
+      const tcpReachable = await probeOriginTcp(env);
+      if (!tcpReachable) {
+        return Response.json(
+          { ok: false, phase: "tcp", classification: "origin_tcp_unreachable" },
+          { status: 503 },
+        );
+      }
     }
     const connectionString = probeConnectionString(env);
     if (!connectionString) {
