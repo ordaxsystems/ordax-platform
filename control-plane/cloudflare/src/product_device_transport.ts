@@ -8,11 +8,13 @@
 import {
   authenticateProductDevice,
   commitProjectWorkspaceResource,
+  confirmDeviceProjectBinding,
   bindProductActionRuntimeProvenance,
   claimProductAction,
   progressProductAction,
   recordProductPresence,
   renewProductActionLease,
+  readDeviceProjectBindingIntents,
   resolveOrchestratorReadAuthorization,
   verifyProjectWorkspaceResource,
   reportProductAction,
@@ -24,6 +26,7 @@ import {
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { projectWorkspaceGrantProjection } from "./project_workspace_grant_contract.ts";
+import { canonicalGithubRepositoryFullName } from "./product_owner_project_scope.ts";
 import { canonicalDeviceWorkspaceConfirmation } from "./project_workspace_issue_contract.ts";
 import { subscribeProductDeviceWake } from "./product_device_wake.ts";
 
@@ -33,6 +36,7 @@ type RuntimeProvenance = { runtimeKind: RuntimeKind; agentVersion: string };
 export const PRODUCT_DEVICE_TRANSPORT_PREFIX = "/v3/device/transport";
 const HEX64 = /^[0-9a-f]{64}$/;
 const RUNTIME_KINDS = new Set<RuntimeKind>(["ordax-os", "desktop-agent", "mobile-client", "other"]);
+const LOCAL_PROJECT_REF_RE = /^project-[1-9][0-9]*$/;
 
 function respond(value: unknown, status = 200): Response {
   return Response.json(value, {
@@ -465,6 +469,126 @@ async function report(request: Request, env: ProductPostgresEnv, deviceId: strin
   return respond(committed);
 }
 
+
+function exactKeys(value: Json, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length
+    && actual.every((key, index) => key === expected[index]);
+}
+
+export function deviceProjectBindingIntentsResponse(raw: Json, deviceId: string): Json {
+  if (raw.ok === false && raw.error === "device_not_active") {
+    return { ok: false, error: "device_not_active" };
+  }
+  if (raw.ok !== true || raw.device_id !== deviceId || !Array.isArray(raw.intents)
+      || raw.intents.length > 16) {
+    throw new Error("product_postgres_invalid_response");
+  }
+  const seen = new Set<string>();
+  const intents = raw.intents.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("product_postgres_invalid_response");
+    }
+    const item = entry as Json;
+    const repository = canonicalGithubRepositoryFullName(item.repository_full_name);
+    if (!isCanonicalUuid(item.intent_id) || seen.has(item.intent_id)
+        || !isCanonicalUuid(item.project_id) || !isCanonicalUuid(item.space_id)
+        || repository === null || typeof item.expires_at !== "string"
+        || !Number.isFinite(Date.parse(item.expires_at))) {
+      throw new Error("product_postgres_invalid_response");
+    }
+    seen.add(item.intent_id);
+    return {
+      intent_id: item.intent_id,
+      project_id: item.project_id,
+      space_id: item.space_id,
+      repository_full_name: repository,
+      expires_at: item.expires_at,
+    };
+  });
+  return {
+    ok: true,
+    schema: "ordax.device-project-binding-intents/1",
+    device_id: deviceId,
+    intents,
+  };
+}
+
+export function deviceProjectBindingConfirmationResponse(
+  raw: Json,
+  deviceId: string,
+  intentId: string,
+): Json {
+  const errors = new Set([
+    "project_device_binding_confirmation_invalid",
+    "project_device_binding_intent_not_active",
+    "project_device_binding_authority_changed",
+    "github_repository_changed",
+    "project_device_binding_conflict",
+  ]);
+  if (raw.ok === false && typeof raw.error === "string" && errors.has(raw.error)) {
+    return { ok: false, error: raw.error };
+  }
+  if (raw.ok !== true || !isCanonicalUuid(raw.binding_id)
+      || !isCanonicalUuid(raw.project_id) || !isCanonicalUuid(raw.space_id)
+      || raw.device_id !== deviceId || raw.state !== "active"
+      || raw.next_state !== "ready_without_grants") {
+    throw new Error("product_postgres_invalid_response");
+  }
+  return {
+    ok: true,
+    schema: "ordax.device-project-binding-confirmed/1",
+    intent_id: intentId,
+    binding_id: raw.binding_id,
+    project_id: raw.project_id,
+    space_id: raw.space_id,
+    device_id: deviceId,
+    state: "active",
+    next_state: "ready_without_grants",
+  };
+}
+
+async function projectBindingIntents(
+  request: Request,
+  env: ProductPostgresEnv,
+  deviceId: string,
+): Promise<Response> {
+  const body = await readBoundedJsonObject(request, 128);
+  if (!body || Object.keys(body).length !== 0) {
+    return respond({ ok: false, error: "project_binding_intents_invalid" }, 400);
+  }
+  const result = deviceProjectBindingIntentsResponse(
+    await readDeviceProjectBindingIntents(env, { deviceId }),
+    deviceId,
+  );
+  return respond(result, result.ok === true ? 200 : 409);
+}
+
+async function projectBindingConfirm(
+  request: Request,
+  env: ProductPostgresEnv,
+  deviceId: string,
+): Promise<Response> {
+  const body = await readBoundedJsonObject(request, 4096);
+  if (!body || !exactKeys(body, ["intent_id", "local_project_ref", "confirm"])) {
+    return respond({ ok: false, error: "project_device_binding_confirmation_invalid" }, 400);
+  }
+  const intentId = typeof body.intent_id === "string" ? body.intent_id.toLowerCase() : "";
+  const localProjectRef = typeof body.local_project_ref === "string" ? body.local_project_ref : "";
+  if (!isCanonicalUuid(intentId) || !LOCAL_PROJECT_REF_RE.test(localProjectRef)
+      || body.confirm !== "bind_local_project") {
+    return respond({ ok: false, error: "project_device_binding_confirmation_invalid" }, 400);
+  }
+  const result = deviceProjectBindingConfirmationResponse(
+    await confirmDeviceProjectBinding(env, { deviceId, intentId, localProjectRef }),
+    deviceId,
+    intentId,
+  );
+  if (result.ok === true) return respond(result);
+  return respond(result, result.error === "project_device_binding_confirmation_invalid" ? 400 : 409);
+}
+
 export async function handleProductDeviceTransport(
   request: Request,
   env: ProductPostgresEnv,
@@ -517,6 +641,20 @@ export async function handleProductDeviceTransport(
         if (env.WORKSPACE_RESOURCE_VERIFIER_ENABLED !== "enabled")
           return respond({ ok: false, error: "not_found" }, 404);
         return workspaceResourceProof(request, env, deviceId);
+      };
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/project-binding-intents":
+      execute = async deviceId => {
+        if (env.OWNER_PROJECT_DEVICE_BINDING_ENABLED !== "enabled")
+          return respond({ ok: false, error: "not_found" }, 404);
+        return projectBindingIntents(request, env, deviceId);
+      };
+      break;
+    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/project-binding-confirm":
+      execute = async deviceId => {
+        if (env.OWNER_PROJECT_DEVICE_BINDING_ENABLED !== "enabled")
+          return respond({ ok: false, error: "not_found" }, 404);
+        return projectBindingConfirm(request, env, deviceId);
       };
       break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/progress":

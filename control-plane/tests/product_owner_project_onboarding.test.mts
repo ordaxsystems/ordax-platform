@@ -4,13 +4,16 @@ import {
   createOwnerProjectOnboardingHandler,
   onboardingStateResponse,
   ownerProjectCreationResponse,
+  ownerProjectDeviceBindingIntentResponse,
 } from "../cloudflare/src/product_owner_project_onboarding.ts";
 
 const OWNER = "11111111-1111-4111-8111-111111111111";
 const DEVICE = "22222222-2222-4222-8222-222222222222";
 const SPACE = "33333333-3333-4333-8333-333333333333";
 const PROJECT = "44444444-4444-4444-8444-444444444444";
+const INTENT = "55555555-5555-4555-8555-555555555555";
 const ENV = Object.freeze({});
+const BINDING_ENV = Object.freeze({ OWNER_PROJECT_DEVICE_BINDING_ENABLED: "enabled" });
 
 const authenticated = async () => ({
   ok: true as const,
@@ -27,6 +30,14 @@ function stateRequest(device = DEVICE) {
     "https://mcp.example/v3/owner/project-onboarding?device_id=" + device,
     { headers: { authorization: "Bearer test" } },
   );
+}
+
+function bindingIntentRequest(body: Record<string, unknown>) {
+  return new Request("https://mcp.example/v3/owner/project-onboarding/device-binding-intents", {
+    method: "POST",
+    headers: { authorization: "Bearer test", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 function createRequest(body: Record<string, unknown>) {
@@ -178,6 +189,96 @@ test("Project creation cannot smuggle repository identity, grants or metadata", 
   assert.equal(calls, 0);
 });
 
+test("Project device binding intent is Owner-confirmed but never accepts local identity or grants", async () => {
+  let observed: unknown = null;
+  const now = Date.parse("2026-11-13T23:50:00.000Z");
+  const handler = createOwnerProjectOnboardingHandler(BINDING_ENV, {
+    authenticate: authenticated,
+    randomUUID: () => INTENT,
+    now: () => now,
+    createBindingIntent: async (_env, input) => {
+      observed = input;
+      return {
+        ok: true,
+        intent_id: INTENT,
+        project_id: PROJECT,
+        device_id: DEVICE,
+        expires_at: new Date(now + 5 * 60 * 1000).toISOString(),
+        next_state: "awaiting_device_confirmation",
+        repository_full_name: "drop",
+        local_project_ref: "drop",
+      };
+    },
+  });
+  const response = await handler(bindingIntentRequest({
+    project_id: PROJECT,
+    device_id: DEVICE,
+    confirm: "bind_project_device",
+  }));
+  assert.equal(response.status, 201);
+  assert.deepEqual(observed, {
+    ownerUserId: OWNER,
+    projectId: PROJECT,
+    deviceId: DEVICE,
+    intentId: INTENT,
+    expiresAt: "2026-11-13T23:55:00.000Z",
+  });
+  assert.deepEqual(await response.json(), {
+    ok: true,
+    schema: "ordax.owner-project-device-binding-intent/1",
+    intent_id: INTENT,
+    project_id: PROJECT,
+    device_id: DEVICE,
+    expires_at: "2026-11-13T23:55:00.000Z",
+    next_state: "awaiting_device_confirmation",
+  });
+});
+
+test("Project device binding intent rejects browser-supplied local refs, capability ceilings and provider identity", async () => {
+  let calls = 0;
+  const handler = createOwnerProjectOnboardingHandler(BINDING_ENV, {
+    authenticate: authenticated,
+    createBindingIntent: async () => {
+      calls += 1;
+      throw Error("must not reach SQL");
+    },
+  });
+  const base = { project_id: PROJECT, device_id: DEVICE, confirm: "bind_project_device" };
+  for (const extra of [
+    { local_project_ref: "project-1" },
+    { allowed_capabilities: ["terminal.exec"] },
+    { repository_full_name: "ordaxsystems/ordax-platform" },
+    { repository_id: "123" },
+    { installation_id: "456" },
+    { space_id: SPACE },
+    { grant_profile: "project-native-terminal" },
+  ]) {
+    const response = await handler(bindingIntentRequest({ ...base, ...extra }));
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      ok: false, error: "project_device_binding_intent_invalid",
+    });
+  }
+  assert.equal(calls, 0);
+});
+
+test("Project device binding endpoints stay hidden until their independent release flag is enabled", async () => {
+  let calls = 0;
+  const handler = createOwnerProjectOnboardingHandler(ENV, {
+    authenticate: authenticated,
+    createBindingIntent: async () => {
+      calls += 1;
+      throw Error("must not reach SQL");
+    },
+  });
+  const response = await handler(bindingIntentRequest({
+    project_id: PROJECT, device_id: DEVICE, confirm: "bind_project_device",
+  }));
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { ok: false, error: "not_found" });
+  assert.equal(calls, 0);
+});
+
 test("Owner onboarding rejects malformed or duplicate query identity before SQL", async () => {
   let calls = 0;
   const handler = createOwnerProjectOnboardingHandler(ENV, {
@@ -233,5 +334,44 @@ test("SQL envelopes are sanitized and fail closed on drift", () => {
     { ok: false, error: "POSTGRES_PASSWORD=never" },
   ]) {
     assert.throws(() => ownerProjectCreationResponse(invalid as any, SPACE), /product_postgres_invalid_response/);
+  }
+});
+
+
+test("Binding intent SQL envelope is sanitized and requires exact requested identities", () => {
+  assert.deepEqual(ownerProjectDeviceBindingIntentResponse({
+    ok: true,
+    intent_id: INTENT,
+    project_id: PROJECT,
+    device_id: DEVICE,
+    expires_at: "2026-11-13T23:55:00.000Z",
+    next_state: "awaiting_device_confirmation",
+    repository_full_name: "drop",
+    installation_id: "drop",
+  }, PROJECT, DEVICE), {
+    ok: true,
+    schema: "ordax.owner-project-device-binding-intent/1",
+    intent_id: INTENT,
+    project_id: PROJECT,
+    device_id: DEVICE,
+    expires_at: "2026-11-13T23:55:00.000Z",
+    next_state: "awaiting_device_confirmation",
+  });
+  for (const invalid of [
+    { ok: true, intent_id: "bad", project_id: PROJECT, device_id: DEVICE,
+      expires_at: "2026-11-13T23:55:00.000Z", next_state: "awaiting_device_confirmation" },
+    { ok: true, intent_id: INTENT, project_id: SPACE, device_id: DEVICE,
+      expires_at: "2026-11-13T23:55:00.000Z", next_state: "awaiting_device_confirmation" },
+    { ok: true, intent_id: INTENT, project_id: PROJECT, device_id: SPACE,
+      expires_at: "2026-11-13T23:55:00.000Z", next_state: "awaiting_device_confirmation" },
+    { ok: true, intent_id: INTENT, project_id: PROJECT, device_id: DEVICE,
+      expires_at: "bad", next_state: "awaiting_device_confirmation" },
+    { ok: true, intent_id: INTENT, project_id: PROJECT, device_id: DEVICE,
+      expires_at: "2026-11-13T23:55:00.000Z", next_state: "ready_without_grants" },
+  ]) {
+    assert.throws(
+      () => ownerProjectDeviceBindingIntentResponse(invalid as any, PROJECT, DEVICE),
+      /product_postgres_invalid_response/,
+    );
   }
 });

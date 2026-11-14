@@ -9,6 +9,8 @@ import {
   canonicalDeviceLeaseSeconds,
   canonicalDeviceActionProgress,
   isProductReportJsonbSafe,
+  deviceProjectBindingIntentsResponse,
+  deviceProjectBindingConfirmationResponse,
   handleProductDeviceTransport,
 } from "../cloudflare/src/product_device_transport.ts";
 import { createCanonicalProductMcpGateway } from "../cloudflare/src/product_mcp_entry.ts";
@@ -60,7 +62,10 @@ test("staged workspace routes preserve auth-first secrecy even while disabled", 
     { WORKSPACE_RESOURCE_VERIFIER_ENABLED: "enabled" },
     { WORKSPACE_RESOURCE_ISSUANCE_ENABLED: "enabled" },
   ];
-  for (const urlPath of ["/workspace-confirm", "/workspace-proof"]) {
+  for (const urlPath of [
+    "/workspace-confirm", "/workspace-proof",
+    "/project-binding-intents", "/project-binding-confirm",
+  ]) {
     for (const flags of variants) {
       const response = await handleProductDeviceTransport(
         new Request("https://mcp.example/v3/device/transport" + urlPath, { method: "POST" }),
@@ -81,8 +86,12 @@ test("enabled and recognized device paths always retain PostgreSQL authenticatio
   const flags = {
     WORKSPACE_RESOURCE_VERIFIER_ENABLED: "enabled",
     WORKSPACE_RESOURCE_ISSUANCE_ENABLED: "enabled",
+    OWNER_PROJECT_DEVICE_BINDING_ENABLED: "enabled",
   };
-  for (const urlPath of [...recognized, "/workspace-proof", "/workspace-confirm"]) {
+  for (const urlPath of [
+    ...recognized, "/workspace-proof", "/workspace-confirm",
+    "/project-binding-intents", "/project-binding-confirm",
+  ]) {
     const response = await handleProductDeviceTransport(
       new Request("https://mcp.example/v3/device/transport" + urlPath, { method: "POST" }),
       { ...fakeEnv, ...flags },
@@ -219,4 +228,105 @@ test("device progress rejects malformed percentages and messages instead of reco
   const source = fs.readFileSync(SRC, "utf8");
   assert.match(source, /const progress = canonicalDeviceActionProgress\(body\)/);
   assert.doesNotMatch(source, /Number\(body\.progress_percent\)|String\(body\.message\)/);
+});
+
+
+test("Project binding intent projection exposes only bounded Device-local coordination state", () => {
+  const device = "22222222-2222-4222-8222-222222222222";
+  const intent = "55555555-5555-4555-8555-555555555555";
+  const project = "44444444-4444-4444-8444-444444444444";
+  const space = "33333333-3333-4333-8333-333333333333";
+  const raw = {
+    ok: true,
+    device_id: device,
+    intents: [{
+      intent_id: intent,
+      project_id: project,
+      space_id: space,
+      repository_full_name: "OrdaXSystems/OrdaX-Platform",
+      expires_at: "2026-11-14T00:00:00.000Z",
+      owner_user_id: "drop",
+      installation_id: "drop",
+      repository_id: "drop",
+      allowed_capabilities: ["drop"],
+    }],
+  };
+  assert.deepEqual(deviceProjectBindingIntentsResponse(raw, device), {
+    ok: true,
+    schema: "ordax.device-project-binding-intents/1",
+    device_id: device,
+    intents: [{
+      intent_id: intent,
+      project_id: project,
+      space_id: space,
+      repository_full_name: "ordaxsystems/ordax-platform",
+      expires_at: "2026-11-14T00:00:00.000Z",
+    }],
+  });
+  for (const invalid of [
+    { ...raw, device_id: space },
+    { ...raw, intents: [{ ...raw.intents[0], intent_id: "bad" }] },
+    { ...raw, intents: [{ ...raw.intents[0], repository_full_name: "bad path/repo/x" }] },
+    { ...raw, intents: Array.from({ length: 17 }, () => raw.intents[0]) },
+    { ...raw, intents: [raw.intents[0], raw.intents[0]] },
+  ]) {
+    assert.throws(() => deviceProjectBindingIntentsResponse(invalid as any, device),
+      /product_postgres_invalid_response/);
+  }
+});
+
+test("Project binding confirmation projection cannot manufacture grants or local paths", () => {
+  const device = "22222222-2222-4222-8222-222222222222";
+  const intent = "55555555-5555-4555-8555-555555555555";
+  const raw = {
+    ok: true,
+    binding_id: "66666666-6666-4666-8666-666666666666",
+    project_id: "44444444-4444-4444-8444-444444444444",
+    space_id: "33333333-3333-4333-8333-333333333333",
+    device_id: device,
+    state: "active",
+    next_state: "ready_without_grants",
+    local_project_ref: "drop",
+    allowed_capabilities: ["drop"],
+    grant_id: "drop",
+  };
+  const result = deviceProjectBindingConfirmationResponse(raw, device, intent);
+  assert.deepEqual(result, {
+    ok: true,
+    schema: "ordax.device-project-binding-confirmed/1",
+    intent_id: intent,
+    binding_id: raw.binding_id,
+    project_id: raw.project_id,
+    space_id: raw.space_id,
+    device_id: device,
+    state: "active",
+    next_state: "ready_without_grants",
+  });
+  assert.equal("local_project_ref" in result, false);
+  assert.equal("allowed_capabilities" in result, false);
+  assert.equal("grant_id" in result, false);
+  assert.equal("grant_profile" in result, false);
+
+  for (const error of [
+    "project_device_binding_confirmation_invalid",
+    "project_device_binding_intent_not_active",
+    "project_device_binding_authority_changed",
+    "github_repository_changed",
+    "project_device_binding_conflict",
+  ]) {
+    assert.deepEqual(deviceProjectBindingConfirmationResponse(
+      { ok: false, error }, device, intent,
+    ), { ok: false, error });
+  }
+});
+
+test("Project binding transport is independently gated and accepts only opaque project-N refs", () => {
+  const source = fs.readFileSync(SRC, "utf8");
+  assert.match(source, /OWNER_PROJECT_DEVICE_BINDING_ENABLED/);
+  assert.match(source, /LOCAL_PROJECT_REF_RE = \/\^project-\[1-9\]\[0-9\]\*\$\//);
+  assert.match(source, /project-binding-intents/);
+  assert.match(source, /project-binding-confirm/);
+  assert.match(source, /exactKeys\(body, \["intent_id", "local_project_ref", "confirm"\]\)/);
+  assert.match(source, /body\.confirm !== "bind_local_project"/);
+  assert.doesNotMatch(source, /local_project_path|workspace_path|repository_id.*project-binding-confirm/);
 });

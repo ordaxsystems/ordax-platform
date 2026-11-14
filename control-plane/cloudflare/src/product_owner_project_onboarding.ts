@@ -8,6 +8,7 @@ import {
 import { canonicalGithubRepositoryFullName } from "./product_owner_project_scope.ts";
 import {
   createOwnerProject,
+  createOwnerProjectDeviceBindingIntent,
   ProductPostgresError,
   readOwnerProjectOnboardingState,
   type ProductPostgresEnv,
@@ -22,11 +23,16 @@ type Dependencies = Readonly<{
   authenticate?: (request: Request, env: ProductAuthEnv) => Promise<ProductIdentity>;
   readState?: typeof readOwnerProjectOnboardingState;
   createProject?: typeof createOwnerProject;
+  createBindingIntent?: typeof createOwnerProjectDeviceBindingIntent;
+  randomUUID?: () => string;
+  now?: () => number;
 }>;
 
 export const PRODUCT_OWNER_PROJECT_ONBOARDING_PATH = "/v3/owner/project-onboarding";
 export const PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH =
   PRODUCT_OWNER_PROJECT_ONBOARDING_PATH + "/projects";
+export const PRODUCT_OWNER_PROJECT_DEVICE_BINDING_INTENTS_PATH =
+  PRODUCT_OWNER_PROJECT_ONBOARDING_PATH + "/device-binding-intents";
 
 const PROJECT_KINDS = new Set([
   "general", "development", "creative", "legal", "business", "research",
@@ -52,6 +58,16 @@ const PUBLIC_PROJECT_ERRORS = new Set([
   "project_name_invalid",
   "project_kind_invalid",
   "project_metadata_invalid",
+]);
+const PUBLIC_BINDING_INTENT_ERRORS = new Set([
+  "project_device_binding_intent_invalid",
+  "product_owner_auth_ineligible",
+  "device_not_owned",
+  "project_not_found",
+  "space_admin_required",
+  "github_repository_required",
+  "github_repository_ambiguous",
+  "project_device_already_bound",
 ]);
 
 const json = (body: unknown, status = 200) => Response.json(body, {
@@ -176,6 +192,51 @@ export function ownerProjectCreationResponse(raw: Json, requestedSpaceId: string
   };
 }
 
+export function ownerProjectDeviceBindingIntentResponse(
+  raw: Json,
+  requestedProjectId: string,
+  requestedDeviceId: string,
+): Json {
+  if (raw.ok === false && typeof raw.error === "string"
+      && PUBLIC_BINDING_INTENT_ERRORS.has(raw.error)) {
+    return { ok: false, error: raw.error };
+  }
+  if (raw.ok !== true || !isCanonicalUuid(raw.intent_id)
+      || raw.project_id !== requestedProjectId || raw.device_id !== requestedDeviceId
+      || raw.next_state !== "awaiting_device_confirmation"
+      || typeof raw.expires_at !== "string"
+      || !Number.isFinite(Date.parse(raw.expires_at))) {
+    throw new Error("product_postgres_invalid_response");
+  }
+  return {
+    ok: true,
+    schema: "ordax.owner-project-device-binding-intent/1",
+    intent_id: raw.intent_id,
+    project_id: requestedProjectId,
+    device_id: requestedDeviceId,
+    expires_at: raw.expires_at,
+    next_state: "awaiting_device_confirmation",
+  };
+}
+
+function bindingIntentStatus(result: Json): number {
+  if (result.ok === true) return 201;
+  switch (result.error) {
+    case "device_not_owned":
+    case "product_owner_auth_ineligible":
+    case "space_admin_required":
+      return 403;
+    case "project_not_found":
+      return 404;
+    case "github_repository_required":
+    case "github_repository_ambiguous":
+    case "project_device_already_bound":
+      return 409;
+    default:
+      return 400;
+  }
+}
+
 function stateStatus(result: Json): number {
   if (result.ok === true) return 200;
   if (result.error === "device_not_owned" || result.error === "product_owner_auth_ineligible") return 403;
@@ -197,11 +258,15 @@ export function createOwnerProjectOnboardingHandler(env: Env, deps: Dependencies
   const authenticate = deps.authenticate ?? authenticateProductRequest;
   const readState = deps.readState ?? readOwnerProjectOnboardingState;
   const createProject = deps.createProject ?? createOwnerProject;
+  const createBindingIntent = deps.createBindingIntent ?? createOwnerProjectDeviceBindingIntent;
+  const randomUUID = deps.randomUUID ?? (() => crypto.randomUUID());
+  const now = deps.now ?? Date.now;
 
   return async function handleOwnerProjectOnboarding(request: Request): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname !== PRODUCT_OWNER_PROJECT_ONBOARDING_PATH
-        && url.pathname !== PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH) {
+        && url.pathname !== PRODUCT_OWNER_PROJECT_ONBOARDING_PROJECTS_PATH
+        && url.pathname !== PRODUCT_OWNER_PROJECT_DEVICE_BINDING_INTENTS_PATH) {
       return json({ ok: false, error: "not_found" }, 404);
     }
 
@@ -221,6 +286,55 @@ export function createOwnerProjectOnboardingHandler(env: Env, deps: Dependencies
         const raw = await readState(env, { ownerUserId: identity.ownerUserId, deviceId });
         const result = onboardingStateResponse(raw, deviceId);
         return json(result, stateStatus(result));
+      } catch (error) {
+        if (error instanceof Error && error.message === "product_postgres_invalid_response") {
+          return json({ ok: false, error: "product_postgres_invalid_response" }, 503);
+        }
+        return publicDatabaseError(error);
+      }
+    }
+
+    if (url.pathname === PRODUCT_OWNER_PROJECT_DEVICE_BINDING_INTENTS_PATH) {
+      // Authenticate first, then keep the staged boundary indistinguishable from
+      // an absent route until the SQL + Runtime confirmation path are released.
+      if (env.OWNER_PROJECT_DEVICE_BINDING_ENABLED !== "enabled") {
+        return json({ ok: false, error: "not_found" }, 404);
+      }
+      if (request.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
+      if (url.search !== "") {
+        return json({ ok: false, error: "project_device_binding_intent_invalid" }, 400);
+      }
+      let body: unknown;
+      try {
+        body = await readBoundedJsonObject(request, 4096);
+      } catch {
+        return json({ ok: false, error: "project_device_binding_intent_invalid" }, 400);
+      }
+      if (!exactObjectKeys(body, ["project_id", "device_id", "confirm"])) {
+        return json({ ok: false, error: "project_device_binding_intent_invalid" }, 400);
+      }
+      const record = body as Json;
+      const projectId = typeof record.project_id === "string" ? record.project_id.toLowerCase() : "";
+      const deviceId = typeof record.device_id === "string" ? record.device_id.toLowerCase() : "";
+      if (!isCanonicalUuid(projectId) || !isCanonicalUuid(deviceId)
+          || record.confirm !== "bind_project_device") {
+        return json({ ok: false, error: "project_device_binding_intent_invalid" }, 400);
+      }
+      const intentId = randomUUID().toLowerCase();
+      const expiresAt = new Date(now() + 5 * 60 * 1000).toISOString();
+      if (!isCanonicalUuid(intentId)) {
+        return json({ ok: false, error: "project_device_binding_intent_invalid" }, 503);
+      }
+      try {
+        const raw = await createBindingIntent(env, {
+          ownerUserId: identity.ownerUserId,
+          projectId,
+          deviceId,
+          intentId,
+          expiresAt,
+        });
+        const result = ownerProjectDeviceBindingIntentResponse(raw, projectId, deviceId);
+        return json(result, bindingIntentStatus(result));
       } catch (error) {
         if (error instanceof Error && error.message === "product_postgres_invalid_response") {
           return json({ ok: false, error: "product_postgres_invalid_response" }, 503);
