@@ -164,6 +164,61 @@ async function probeOriginTcp(env: Env): Promise<boolean> {
   }
 }
 
+async function probePostgresTls(env: Env): Promise<
+  "ok" | "ssl_request_rejected" | "tls_upgrade_failed"
+> {
+  const port = Number(env.ORDAX_PROBE_ORIGIN_PORT);
+  const hostname = (env.ORDAX_PROBE_ORIGIN_HOST ?? "").trim();
+  if (!hostname || !Number.isInteger(port) || port < 1 || port > 65535) {
+    return "tls_upgrade_failed";
+  }
+
+  const socket = connect(
+    { hostname, port },
+    { secureTransport: "starttls", allowHalfOpen: false },
+  );
+  let secureSocket: ReturnType<typeof connect> | null = null;
+  try {
+    await Promise.race([
+      socket.opened,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("tls_probe_open_timeout")), 5000)),
+    ]);
+
+    // PostgreSQL SSLRequest: length=8, code=80877103 (0x04D2162F).
+    const writer = socket.writable.getWriter();
+    await writer.write(new Uint8Array([0, 0, 0, 8, 4, 210, 22, 47]));
+    writer.releaseLock();
+
+    const reader = socket.readable.getReader();
+    const reply = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("ssl_request_timeout")), 5000)),
+    ]);
+    reader.releaseLock();
+    if (reply.done || !reply.value?.byteLength || reply.value[0] !== 83) {
+      return "ssl_request_rejected";
+    }
+
+    secureSocket = socket.startTls();
+    await Promise.race([
+      secureSocket.opened,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("tls_upgrade_timeout")), 5000)),
+    ]);
+    return "ok";
+  } catch {
+    return "tls_upgrade_failed";
+  } finally {
+    if (secureSocket) {
+      await secureSocket.close().catch(() => {});
+    } else {
+      await socket.close().catch(() => {});
+    }
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method !== "GET" || new URL(request.url).pathname !== "/") {
@@ -177,6 +232,13 @@ export default {
       if (!tcpReachable) {
         return Response.json(
           { ok: false, phase: "tcp", classification: "origin_tcp_unreachable" },
+          { status: 503 },
+        );
+      }
+      const tls = await probePostgresTls(env);
+      if (tls !== "ok") {
+        return Response.json(
+          { ok: false, phase: "tls", classification: tls },
           { status: 503 },
         );
       }

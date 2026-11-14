@@ -545,6 +545,17 @@ class DirectOriginProbeContracts(unittest.TestCase):
                                   "classification": "origin_tcp_unreachable"})
         self.assertNotIn("mock-secret", json.dumps(status))
 
+    def test_worker_tls_failure_diagnostic_is_strictly_allowlisted(self):
+        uri = "https://ordax-direct-ipv6-diag-39478283587.ordaxsystems.workers.dev/"
+        error = urllib.error.HTTPError(uri, 503, "private trace", {}, BytesIO(
+            b'{"ok":false,"phase":"tls","classification":"tls_upgrade_failed",'
+            b'"secret":"mock-secret"}'))
+        with mock.patch.object(probe.OPENER, "open", side_effect=error):
+            status = probe.api("GET", uri)
+        self.assertEqual(status, {"ok": False, "phase": "tls",
+                                  "classification": "tls_upgrade_failed"})
+        self.assertNotIn("mock-secret", json.dumps(status))
+
     def test_successful_probe_always_deletes_every_ephemeral_resource(self):
         calls = []
         fake_env = {"CLOUDFLARE_API_TOKEN": "fake-cf-secret",
@@ -669,6 +680,11 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn("socket.opened", text)
         self.assertIn('if (env.ORDAX_PROBE_DIRECT_POSTGRES === "1")', text)
         self.assertIn("origin_tcp_unreachable", text)
+        self.assertIn('secureTransport: "starttls"', text)
+        self.assertIn("socket.startTls()", text)
+        self.assertIn("new Uint8Array([0, 0, 0, 8, 4, 210, 22, 47])", text)
+        self.assertIn("ssl_request_rejected", text)
+        self.assertIn("tls_upgrade_failed", text)
         self.assertIn("hyperdrive_internal_error", text)
         self.assertIn("hyperdrive_generic_error", text)
         self.assertIn("hyperdrive_pool_acquire_failed", text)

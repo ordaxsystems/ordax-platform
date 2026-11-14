@@ -71,7 +71,7 @@ def api(method: str, url: str, token: str | None = None, body: dict | None = Non
                 report = json.loads(exc.read(8192))
                 phase = report.get("phase") if isinstance(report, dict) else None
                 label = report.get("classification") if isinstance(report, dict) else None
-                if phase in ("tcp", "connect", "query") and isinstance(label, str) and re.fullmatch(
+                if phase in ("tcp", "tls", "connect", "query") and isinstance(label, str) and re.fullmatch(
                     r"[a-z0-9_]{1,48}", label
                 ):
                     return {"ok": False, "phase": phase, "classification": label}
@@ -377,7 +377,7 @@ def check_worker(name: str) -> dict:
                         return {"ok": True, "phase": "complete"}
                     phase = value.get("phase")
                     label = value.get("classification")
-                    if phase in ("tcp", "connect", "query") and isinstance(label, str) and re.fullmatch(
+                    if phase in ("tcp", "tls", "connect", "query") and isinstance(label, str) and re.fullmatch(
                         r"[a-z0-9_]{1,48}", label
                     ):
                         last_postgres_failure = {
