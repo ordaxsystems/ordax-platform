@@ -47,6 +47,15 @@ function boundedClass(value: unknown): string | undefined {
   return typeof value === "string" && SAFE_CLASSES.has(value) ? value : undefined;
 }
 
+function hyperdriveProviderCode(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  // Hyperdrive-specific runtime errors use SQLSTATE 58000 and retain the
+  // provider reason as one of the documented 2008-2016 numeric codes.
+  // Extract only that allowlisted number; never expose the message itself.
+  const match = value.match(/\b(20(?:08|09|10|11|12|13|14|15|16))\b/);
+  return match?.[1];
+}
+
 function safeError(err: unknown): SafeErrorReceipt {
   const record = err && typeof err === "object" ? err as Record<string, unknown> : {};
   const cause = record.cause && typeof record.cause === "object"
@@ -55,7 +64,9 @@ function safeError(err: unknown): SafeErrorReceipt {
   // Never expose message, stack, connection URI, host, query or credentials.
   const code = boundedCode(record.code);
   const errorClass = boundedClass(record.name);
-  const causeCode = boundedCode(cause.code);
+  const causeCode = boundedCode(cause.code)
+    ?? hyperdriveProviderCode(record.message)
+    ?? hyperdriveProviderCode(cause.message);
   const causeClass = boundedClass(cause.name);
   const nested = Array.isArray(record.errors) ? record.errors.slice(0, 4) : [];
   const nestedCodes = [...new Set(nested
