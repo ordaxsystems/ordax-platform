@@ -28,7 +28,8 @@ POOLER_ORIGIN = "aws-1-sa-east-1.pooler.supabase.com"
 ORIGIN_MODES = ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
                 "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
                 "pooler_session", "pooler_transaction", "worker_direct_pooler",
-                "worker_direct_ipv6", "worker_direct_ipv6_custom_ca")
+                "worker_direct_pooler_transaction", "worker_direct_ipv6",
+                "worker_direct_ipv6_custom_ca")
 CF_API = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}"
 DB_API = f"https://api.supabase.com/v1/projects/{PROJECT}/database/query"
 NAME_PREFIX = "ordax-direct-ipv6-diag-"
@@ -157,7 +158,9 @@ def origin_for_mode(mode: str, role: str) -> dict:
                 "user": role, "host": ORIGIN, "port": 5432}
     return {"scheme": "postgres", "database": "postgres",
             "user": role + "." + PROJECT, "host": POOLER_ORIGIN,
-            "port": 6543 if mode == "pooler_transaction" else 5432}
+            "port": 6543 if mode in (
+                "pooler_transaction", "worker_direct_pooler_transaction"
+            ) else 5432}
 
 
 def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
@@ -167,7 +170,10 @@ def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
     ROLE or ALTER ROLE. A direct psql SELECT 1 rules out that misleading
     precondition; it never performs SQL writes or exposes the password.
     """
-    if mode not in ("pooler_session", "pooler_transaction", "worker_direct_pooler"):
+    if mode not in (
+        "pooler_session", "pooler_transaction", "worker_direct_pooler",
+        "worker_direct_pooler_transaction",
+    ):
         raise ProbeError("pooler_preflight_mode_invalid")
     if shutil.which("psql") is None:
         raise ProbeError("pooler_probe_cli_missing")
@@ -197,8 +203,8 @@ def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
 def create_hyperdrive(token: str, name: str, role: str, credential: str,
                       mode: str = "direct_ipv6",
                       origin_host_override: str | None = None) -> str:
-    if mode in ("worker_direct_pooler", "worker_direct_ipv6",
-                "worker_direct_ipv6_custom_ca"):
+    if mode in ("worker_direct_pooler", "worker_direct_pooler_transaction",
+                "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
         raise ProbeError("hyperdrive_for_direct_worker_forbidden")
     origin = origin_for_mode(mode, role)
     if origin_host_override is not None:
@@ -414,7 +420,8 @@ def run():
     deploy_attempted = False
     hd_id: str | None = None
     direct_worker = mode in (
-        "worker_direct_pooler", "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"
+        "worker_direct_pooler", "worker_direct_pooler_transaction",
+        "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"
     )
     failures = []
     try:
@@ -423,7 +430,10 @@ def run():
         role_ownership = True  # Even an ambiguous CREATE needs safe cleanup.
         create_role(db, role, credential)
         print("ORDAX_DIRECT_ROLE=CREATED_LOGIN_ONLY", flush=True)
-        if mode in ("pooler_session", "pooler_transaction", "worker_direct_pooler"):
+        if mode in (
+            "pooler_session", "pooler_transaction", "worker_direct_pooler",
+            "worker_direct_pooler_transaction",
+        ):
             verify_pooler_credential(mode, role, credential)
             print("ORDAX_DIRECT_POOLER_CREDENTIAL=VERIFIED", flush=True)
         print("ORDAX_DIRECT_ORIGIN_MODE=" + mode, flush=True)

@@ -75,8 +75,8 @@ class DirectOriginProbeContracts(unittest.TestCase):
             probe.worker_config(
                 name, None, probe.POOLER_ORIGIN, 5432,
                 direct_postgres=True, db_user="postgres")
-        for mode in ("worker_direct_pooler", "worker_direct_ipv6",
-                     "worker_direct_ipv6_custom_ca"):
+        for mode in ("worker_direct_pooler", "worker_direct_pooler_transaction",
+                     "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
             with self.subTest(mode=mode), self.assertRaisesRegex(
                     probe.ProbeError, "hyperdrive_for_direct_worker_forbidden"):
                 probe.create_hyperdrive(
@@ -166,6 +166,42 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn("ORDAX_DIRECT_HYPERDRIVE=NOT_USED", output.getvalue())
         self.assertIn("ORDAX_DIRECT_HYPERDRIVE_CLEANUP=NOT_CREATED",
                       output.getvalue())
+
+    def test_direct_transaction_pooler_uses_6543_without_hyperdrive(self):
+        env = {
+            "CLOUDFLARE_API_TOKEN": "fake-cf",
+            "SUPABASE_ACCESS_TOKEN": "fake-db",
+            "GITHUB_RUN_ID": "39478283587",
+            "ORDAX_HYPERDRIVE_PROBE_MODE": "worker_direct_pooler_transaction",
+        }
+        with mock.patch.dict(probe.os.environ, env, clear=True), \
+             mock.patch.object(probe, "require_unique_role"), \
+             mock.patch.object(probe, "create_role"), \
+             mock.patch.object(probe, "verify_pooler_credential") as preflight, \
+             mock.patch.object(probe, "create_hyperdrive") as create_hd, \
+             mock.patch.object(probe, "find_hyperdrive") as find_hd, \
+             mock.patch.object(probe, "deploy_worker") as deploy, \
+             mock.patch.object(
+                 probe, "check_worker",
+                 return_value={"ok": True, "phase": "complete"}), \
+             mock.patch.object(probe, "delete_role"), \
+             mock.patch.object(probe, "api", return_value=None), \
+             redirect_stdout(StringIO()):
+            probe.run()
+        preflight.assert_called_once_with(
+            "worker_direct_pooler_transaction",
+            "ordax_direct_diag_39478283587", mock.ANY)
+        create_hd.assert_not_called()
+        find_hd.assert_not_called()
+        deploy.assert_called_once()
+        args = deploy.call_args.args
+        kwargs = deploy.call_args.kwargs
+        self.assertIsNone(args[1])
+        self.assertEqual(args[2], probe.POOLER_ORIGIN)
+        self.assertEqual(args[3], 6543)
+        self.assertEqual(kwargs["db_user"],
+                         "ordax_direct_diag_39478283587." + probe.PROJECT)
+        self.assertTrue(kwargs["direct_postgres_password"])
 
     def test_direct_ipv6_worker_skips_pooler_and_hyperdrive(self):
         env = {
@@ -350,7 +386,8 @@ class DirectOriginProbeContracts(unittest.TestCase):
             "direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
             "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
             "pooler_session", "pooler_transaction", "worker_direct_pooler",
-            "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"))
+            "worker_direct_pooler_transaction", "worker_direct_ipv6",
+            "worker_direct_ipv6_custom_ca"))
         for mode in ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
                      "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
                      "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
@@ -361,6 +398,10 @@ class DirectOriginProbeContracts(unittest.TestCase):
             "scheme": "postgres", "database": "postgres",
             "user": role + "." + probe.PROJECT,
             "host": probe.POOLER_ORIGIN, "port": 5432})
+        self.assertEqual(probe.origin_for_mode("worker_direct_pooler_transaction", role), {
+            "scheme": "postgres", "database": "postgres",
+            "user": role + "." + probe.PROJECT,
+            "host": probe.POOLER_ORIGIN, "port": 6543})
         for mode, port in (("pooler_session", 5432), ("pooler_transaction", 6543)):
             with self.subTest(mode=mode):
                 origin = probe.origin_for_mode(mode, role)
@@ -384,7 +425,8 @@ class DirectOriginProbeContracts(unittest.TestCase):
     def test_pooler_preflight_uses_exact_tenant_credentials_without_argv_leak(self):
         for mode, port in (("pooler_session", "5432"),
                            ("pooler_transaction", "6543"),
-                           ("worker_direct_pooler", "5432")):
+                           ("worker_direct_pooler", "5432"),
+                           ("worker_direct_pooler_transaction", "6543")):
             with self.subTest(mode=mode), \
                  mock.patch.object(probe.shutil, "which", return_value="/usr/bin/psql"), \
                  mock.patch.object(probe.subprocess, "run", return_value=mock.Mock(
@@ -463,6 +505,7 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn("direct_ipv6_custom_ca", workflow)
         self.assertIn("direct_ipv6_custom_ca_verify_ca", workflow)
         self.assertIn("worker_direct_pooler", workflow)
+        self.assertIn("worker_direct_pooler_transaction", workflow)
         self.assertIn("worker_direct_ipv6", workflow)
         self.assertIn("worker_direct_ipv6_custom_ca", workflow)
         self.assertIn("ORDAX_HYPERDRIVE_PROBE_MODE: ${{ inputs.origin_mode }}", workflow)
