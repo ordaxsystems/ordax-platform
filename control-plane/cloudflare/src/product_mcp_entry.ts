@@ -72,6 +72,10 @@ import {
   PRODUCT_OWNER_GITHUB_REPOSITORY_CANDIDATES_PATH,
   PRODUCT_OWNER_GITHUB_REPOSITORY_SELECTIONS_PATH,
 } from "./product_owner_github_authorization.ts";
+import {
+  handleProductGithubWebhook,
+  PRODUCT_GITHUB_WEBHOOK_PATH,
+} from "./product_github_webhook.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 
@@ -336,6 +340,11 @@ export function createCanonicalProductMcpGateway(
     const url = new URL(request.url);
     if (url.hostname === PRODUCT_TRUSTED_CLIENT_HOSTNAME && !isProductTrustedClientPath(url.pathname)) {
       return respond({ ok: false, error: "not_found" }, 404);
+    }
+    // GitHub webhook is intentionally NOT in the workers.dev trusted-client
+    // allowlist. Only the canonical branded ingress can reach this signed path.
+    if (url.pathname === PRODUCT_GITHUB_WEBHOOK_PATH) {
+      return handleProductGithubWebhook(request, env);
     }
     const metadata = url.pathname === "/.well-known/oauth-protected-resource";
     if (request.method === "GET" && url.pathname === "/health") {
