@@ -189,6 +189,7 @@ test("Forge MCP tools/list uses Supabase HTTPS RPC instead of Hyperdrive when co
       assert.deepEqual(sent.p_payload,{});
       assert.equal(init.headers.authorization,"Bearer test");
       assert.equal(init.headers.apikey,"sb_publishable_test");
+      assert.equal(init.redirect,"manual");
       return Response.json(resolution());
     }) as any,
   });
@@ -218,6 +219,29 @@ test("Forge Supabase transport exposes bounded fetch failure instead of opaque W
   },FORGE_INSTANCE_REGISTER_PATH));
   assert.equal(response.status,400);
   assert.deepEqual(await response.json(),{ok:false,error:"forge_supabase_rpc_fetch_unavailable"});
+  assert.equal(legacyWrites,0);
+});
+
+test("Forge Supabase transport blocks redirects without forwarding the bearer",async()=>{
+  const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):
+    value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])):value;
+  const digest=createHash("sha256").update(JSON.stringify(canonical(CATALOG))).digest("hex");
+  let legacyWrites=0;
+  const gateway=createForgeMcpGateway({...env,
+    FORGE_SUPABASE_PUBLISHABLE_KEY:"sb_publishable_test"},{
+    authenticateOwner:(()=>ownerIdentity(FORGE_NATIVE_CLIENT)) as any,
+    register:async()=>{legacyWrites++;return {ok:true,instance_id:INSTANCE};},
+    fetchImpl:(async(_url:any,init:any)=>{
+      assert.equal(init.redirect,"manual");
+      return new Response(null,{status:302,headers:{location:"https://example.invalid/"}});
+    }) as any,
+  });
+  const response=await gateway(request({
+    instance_id:INSTANCE,display_name:"Forge local",app_version:"0.2.0",
+    catalog:CATALOG,catalog_digest:digest,
+  },FORGE_INSTANCE_REGISTER_PATH));
+  assert.equal(response.status,400);
+  assert.deepEqual(await response.json(),{ok:false,error:"forge_supabase_rpc_redirect_forbidden"});
   assert.equal(legacyWrites,0);
 });
 

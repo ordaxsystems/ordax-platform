@@ -66,7 +66,9 @@ async function rpc(
   try{
     response=await fetchImpl(origin+"/rest/v1/rpc/ordax_forge_http_rpc_v1",{
       method:"POST",
-      redirect:"error",
+      // Workers does not implement Fetch redirect="error". Manual mode keeps
+      // the bearer on the original Supabase origin and lets us fail closed on 3xx.
+      redirect:"manual",
       signal:controller.signal,
       headers:{
         accept:"application/json",
@@ -83,6 +85,8 @@ async function rpc(
       :name==="TypeError"?"forge_supabase_rpc_fetch_type_error"
       :"forge_supabase_rpc_fetch_unavailable"};
   }finally{clearTimeout(timeout);}
+  if(response.status>=300&&response.status<400)
+    return {ok:false,error:"forge_supabase_rpc_redirect_forbidden"};
   const declared=Number(response.headers.get("content-length")??0);
   if(declared>MAX_RESPONSE_BYTES)
     return {ok:false,error:"forge_supabase_rpc_response_too_large"};
