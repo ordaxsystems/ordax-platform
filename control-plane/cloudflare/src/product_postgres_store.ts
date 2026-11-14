@@ -238,10 +238,10 @@ const RPC_SPECS = {
     keys: ["p_owner_user_id", "p_challenge_id", "p_repository_id"],
     casts: ["uuid", "uuid", "text"],
   },
-  ordax_apply_github_authority_revocation_v1: {
+  ordax_apply_github_authority_revocation_v2: {
     keys: ["p_delivery_id", "p_event", "p_action", "p_installation_id",
-      "p_repository_ids", "p_payload_sha256"],
-    casts: ["uuid", "text", "text", "bigint", "bigint[]", "text"],
+      "p_github_user_id", "p_repository_ids", "p_payload_sha256"],
+    casts: ["uuid", "text", "text", "bigint", "bigint", "bigint[]", "text"],
   },
   // Staged read-only RPC: remains unavailable until the separately governed
   // PostgreSQL proposal is applied. No new grant authority is created here.
@@ -779,9 +779,10 @@ export async function applyGithubAuthorityRevocation(
   env: ProductPostgresEnv,
   input: {
     deliveryId: string;
-    event: "installation" | "installation_repositories" | "repository";
+    event: "github_app_authorization" | "installation" | "installation_repositories" | "repository";
     action: string;
-    installationId: string;
+    installationId: string | null;
+    githubUserId: string | null;
     repositoryIds: readonly string[];
     payloadSha256: string;
   },
@@ -791,12 +792,13 @@ export async function applyGithubAuthorityRevocation(
     : "{}";
   return callRpc<GithubAuthorityRevocationResult>(
     env,
-    "ordax_apply_github_authority_revocation_v1",
+    "ordax_apply_github_authority_revocation_v2",
     {
       p_delivery_id: input.deliveryId,
       p_event: input.event,
       p_action: input.action,
       p_installation_id: input.installationId,
+      p_github_user_id: input.githubUserId,
       p_repository_ids: repositoryIds,
       p_payload_sha256: input.payloadSha256,
     },
