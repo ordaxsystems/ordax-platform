@@ -1,0 +1,88 @@
+name: OrdaX Owner Project MCP Rollout
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_sha:
+        description: 'Exact reviewed ordax-platform main commit SHA'
+        required: true
+        type: string
+      rollout:
+        description: 'Enable or disable the existing Owner Project MCP flags'
+        required: true
+        type: choice
+        options:
+          - enable
+          - disable
+      confirmation:
+        description: 'Type APPLY_OWNER_PROJECT_MCP_ROLLOUT'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: owner-project-mcp-rollout
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.repository == 'ordaxsystems/ordax-platform'
+      && github.event_name == 'workflow_dispatch'
+      && github.ref == 'refs/heads/main'
+      && inputs.approved_sha == github.sha
+      && inputs.confirmation == 'APPLY_OWNER_PROJECT_MCP_ROLLOUT'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact reviewed Platform source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Reject obsolete or non-main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL="$(git rev-parse HEAD)"
+          CURRENT="$(git ls-remote https://github.com/ordaxsystems/ordax-platform.git refs/heads/main | cut -f1)"
+          test "${GITHUB_REPOSITORY}" = "ordaxsystems/ordax-platform"
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${ACTUAL}" = "${GITHUB_SHA}"
+          test "${CURRENT}" = "${GITHUB_SHA}"
+
+      - name: Require existing Platform Supabase management credential
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${SUPABASE_ACCESS_TOKEN:-}" || {
+            echo '::error::OWNER_PROJECT_MCP_ROLLOUT=BLOCKED (SUPABASE_ACCESS_TOKEN is not configured)'
+            exit 2
+          }
+          echo 'OWNER_PROJECT_MCP_MANAGEMENT_CREDENTIAL_PRESENT=YES'
+          echo 'OWNER_PROJECT_MCP_MANAGEMENT_CREDENTIAL_PRINTED=NO'
+
+      - name: Apply exact existing Owner Project MCP flags
+        shell: bash
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "${{ inputs.rollout }}" in
+            enable) VALUE=1 ;;
+            disable) VALUE=0 ;;
+            *) echo '::error::OWNER_PROJECT_MCP_ROLLOUT=INVALID'; exit 2 ;;
+          esac
+          npx --yes supabase@2.121.0 secrets set \
+            --project-ref jhfphsjptrpmtnzkpwud \
+            "ORDAX_MCP_OWNER_ACCOUNT_ENABLED=${VALUE}" \
+            "ORDAX_MCP_OWNER_PROJECT_ONBOARDING_ENABLED=${VALUE}" \
+            "ORDAX_MCP_OWNER_GITHUB_AUTHORIZATION_ENABLED=${VALUE}" \
+            "ORDAX_MCP_OWNER_PROJECT_DEVICE_BINDING_ENABLED=${VALUE}" \
+            "ORDAX_MCP_OWNER_PROJECT_GRANT_ENABLED=${VALUE}"
+          echo "OWNER_PROJECT_MCP_ROLLOUT=${{ inputs.rollout }}"
+          echo 'OWNER_PROJECT_MCP_SECRET_VALUES_PRINTED=NO'
