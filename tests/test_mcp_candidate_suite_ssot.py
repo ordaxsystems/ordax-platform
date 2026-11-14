@@ -3,8 +3,8 @@
 A candidate gate must not approve a bundle just because a workflow's copied
 test allowlist missed a newly added action/status/wake regression. The
 canonical runner discovers tests at runtime; each workflow watches relevant
-action and PostgreSQL source changes. Deployment policy remains independent
-and manual-production-only.
+action and PostgreSQL source changes. Deployment policy remains independent: first release stays evidence-gated,
+while an already-published canonical Worker may be maintained automatically.
 """
 from pathlib import Path
 import unittest
@@ -84,10 +84,12 @@ class CanonicalMcpCandidateSuiteTests(unittest.TestCase):
                     self.assertIn('"scripts/cloudflare/run_mcp_candidate_tests.sh"', section)
                     self.assertIn('"tests/test_mcp_candidate_suite_ssot.py"', section)
 
-    def test_validation_release_stays_manual_and_fail_closed(self):
+    def test_validation_release_auto_maintains_existing_worker_and_stays_fail_closed(self):
         source = WORKFLOWS[0].read_text("utf-8")
-        self.assertIn("inputs.publish_production == true", source)
+        self.assertNotIn("inputs.publish_production == true", source)
         self.assertIn("needs.validate-candidate.outputs.production_ready == 'true'", source)
+        self.assertIn("needs.validate-candidate.outputs.maintenance_ready == 'true'", source)
+        self.assertIn("--maintenance-upgrade", source)
         self.assertIn("environment: cloudflare-v3", source)
         self.assertIn("deploy --dry-run --config wrangler.mcp.toml", source)
 

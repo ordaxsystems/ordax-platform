@@ -6,6 +6,7 @@ import unittest
 
 from scripts.cloudflare.check_mcp_release import (
     ROOT, FOUNDATION, CONFIG, McpReleaseError, validate, validate_interactive_candidate,
+    validate_maintenance_upgrade,
     REQUIRED_PROOFS, PENDING_PRODUCTION_BLOCKERS, VALIDATION_BASELINE_EVIDENCE,
     TRUSTED_CLIENT_INGRESS,
 )
@@ -156,6 +157,14 @@ class McpReleaseContract(unittest.TestCase):
         evidence=release["oauth_baseline_evidence"]
         self.assertEqual(set(evidence),VALIDATION_BASELINE_EVIDENCE)
         self.assertEqual(evidence["chatgpt_oauth_client_id"],"95d41a8f-0fb8-4c4b-9757-83ba6345062d")
+
+    def test_existing_canonical_worker_can_receive_validated_maintenance_upgrade(self):
+        self.assertFalse(validate(self.foundation,self.config))
+        self.assertTrue(validate_interactive_candidate(self.foundation,self.config))
+        self.assertTrue(validate_maintenance_upgrade(self.foundation,self.config))
+        f=copy.deepcopy(self.foundation)
+        f["mcp_release"]["verified_evidence"]["worker_version_id"]="not-a-version"
+        self.assertFalse(validate_maintenance_upgrade(f,self.config))
 
     def test_interactive_candidate_cannot_disable_remote_actions(self):
         f=copy.deepcopy(self.foundation)
@@ -335,6 +344,16 @@ class McpReleaseContract(unittest.TestCase):
         self.assertIn("snapshot anterior", doc)
         self.assertNotIn("18 para 23 tools", doc)
         self.assertNotIn("reinstalar o servidor para adicionar tools", doc)
+
+    def test_validation_deploy_auto_maintains_existing_canonical_worker_fail_closed(self):
+        source = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("inputs.publish_production == true", source)
+        self.assertIn("maintenance_ready", source)
+        self.assertIn("--maintenance-upgrade", source)
+        self.assertIn("environment: cloudflare-v3", source)
+        self.assertIn("deploy --dry-run --config wrangler.mcp.toml", source)
 
     def test_public_deployment_smoke_requires_actual_hyperdrive_sql_readiness(self):
         source = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text(
