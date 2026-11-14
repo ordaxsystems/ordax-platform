@@ -164,6 +164,44 @@ class HyperdriveEgressRepairTests(TestCase):
         self.assertEqual(count, 0)
         request.assert_not_called()
 
+    def test_large_cloudflare_ban_set_is_deleted_in_bounded_batches(self):
+        targets = tuple(ipaddress.ip_address(f"2606:4700::{index:x}")
+                        for index in range(1, 18))
+        calls = []
+        with mock.patch.object(mod, "network_bans", side_effect=[targets, ()]), \
+             mock.patch.object(mod, "request",
+                               side_effect=lambda method, url, token=None, body=None:
+                               calls.append((method, body)) or {}):
+            count = mod.clear_cloudflare_bans("synthetic-token")
+        self.assertEqual(count, len(targets))
+        self.assertEqual([len(body["ipv4_addresses"]) for _, body in calls], [8, 8, 1])
+        self.assertTrue(all(method == "DELETE" for method, _ in calls))
+
+    def test_delete_batch_bisects_provider_500_without_leaking_targets(self):
+        first = ipaddress.ip_address("2606:4700::1")
+        second = ipaddress.ip_address("2606:4700::2")
+        calls = []
+        def request(method, url, token=None, body=None):
+            calls.append(tuple(body["ipv4_addresses"]))
+            if len(body["ipv4_addresses"]) > 1:
+                raise mod.RepairFailure("provider_http_500")
+            return {}
+        with mock.patch.object(mod, "request", side_effect=request):
+            mod._delete_cloudflare_ban_batch("synthetic-token", (first, second))
+        self.assertEqual([len(call) for call in calls], [2, 1, 1])
+
+    def test_single_provider_500_requires_fresh_absence(self):
+        target = ipaddress.ip_address("2606:4700::1")
+        with mock.patch.object(mod, "request",
+                               side_effect=mod.RepairFailure("provider_http_500")), \
+             mock.patch.object(mod, "network_bans", return_value=()):
+            mod._delete_cloudflare_ban_batch("synthetic-token", (target,))
+        with mock.patch.object(mod, "request",
+                               side_effect=mod.RepairFailure("provider_http_500")), \
+             mock.patch.object(mod, "network_bans", return_value=(target,)):
+            with self.assertRaisesRegex(mod.RepairFailure, "provider_http_500"):
+                mod._delete_cloudflare_ban_batch("synthetic-token", (target,))
+
     def test_already_covered_cloudflare_bans_repair_can_restore_ready(self):
         old = mod.merge(OLD)
         with mock.patch.dict(os.environ, {"SUPABASE_ACCESS_TOKEN": "synthetic"}), \

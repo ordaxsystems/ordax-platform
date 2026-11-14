@@ -218,6 +218,36 @@ def cloudflare_bans(blocked_ips: tuple) -> tuple:
         ip in network for network in (cf_v4 if ip.version == 4 else cf_v6)))
 
 
+def _delete_cloudflare_ban_batch(token: str, targets: tuple) -> None:
+    """Delete only one reviewed provider batch, splitting opaque HTTP 500s.
+
+    Supabase's network-bans endpoint is Beta and may reject a large body with a
+    generic 500. Never print target addresses. A failed batch is recursively
+    bisected; a one-address 500 is accepted only if a fresh read proves that
+    exact address is already absent (for example, an automatic ban expiry).
+    """
+    if not targets:
+        return
+    values = sorted(str(ip) for ip in targets)
+    try:
+        request("DELETE", BANS_API, token, {
+            "ipv4_addresses": values,
+            "requester_ip": False,
+        })
+        return
+    except RepairFailure as error:
+        if str(error) != "provider_http_500":
+            raise
+        if len(targets) == 1:
+            current = network_bans(token)
+            if targets[0] not in current:
+                return
+            raise
+    midpoint = max(1, len(targets) // 2)
+    _delete_cloudflare_ban_batch(token, targets[:midpoint])
+    _delete_cloudflare_ban_batch(token, targets[midpoint:])
+
+
 def clear_cloudflare_bans(token: str) -> int:
     blocked = network_bans(token)
     targets = cloudflare_bans(blocked)
@@ -226,10 +256,12 @@ def clear_cloudflare_bans(token: str) -> int:
         print("ORDAX_NETWORK_BANS_CLOUDFLARE_REPAIR=NOT_NEEDED", flush=True)
         return 0
 
-    request("DELETE", BANS_API, token, {
-        "ipv4_addresses": sorted(str(ip) for ip in targets),
-        "requester_ip": False,
-    })
+    # Keep requests bounded even when a provider has banned a large rotating
+    # egress set. Recursive split below handles an even smaller provider limit.
+    batch_size = 8
+    for start in range(0, len(targets), batch_size):
+        _delete_cloudflare_ban_batch(token, targets[start:start + batch_size])
+
     for attempt in range(12):
         remaining = cloudflare_bans(network_bans(token))
         if not remaining:
