@@ -224,7 +224,7 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
         raise ProbeError("worker_origin_invalid")
     base = (f'name = "{name}"\n'
             'main = "src/hyperdrive_direct_probe.ts"\n'
-            'compatibility_date = "2026-10-17"\n'
+            'compatibility_date = "2026-11-14"\n'
             'compatibility_flags = ["nodejs_compat"]\n'
             'workers_dev = true\npreview_urls = false\n'
             '[vars]\n'
