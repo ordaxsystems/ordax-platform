@@ -388,8 +388,8 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
     if(message.method==="ping")return rpcResult(id,{});
     if(message.method==="initialize"){
       return rpcResult(id,{
-        protocolVersion:"2025-11-25",
-        capabilities:{tools:{listChanged:true}},
+        protocolVersion:"2025-06-18",
+        capabilities:{tools:{listChanged:false}},
         serverInfo:{name:"ordax-forge",title:"OrdaX Forge",version:"1"},
         instructions:"Forge MCP controls the user's connected Forge instance. Platform receipts are authoritative for transport; Forge remains authoritative for project, Task, Run, memory and workspace semantics.",
       });
