@@ -255,6 +255,19 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertEqual(sleep.call_count, 5)
         self.assertNotIn("mock-secret", json.dumps(result))
 
+    def test_curl_worker_accepts_bounded_sqlstate_classification(self):
+        failure = mock.Mock(returncode=0, stdout=(
+            b'{"ok":false,"phase":"connect","classification":"sqlstate_58000"}'
+            + bytes([10]) + b"503"), stderr=b"")
+        with mock.patch.object(probe.shutil, "which", return_value="/usr/bin/curl"), \
+             mock.patch.object(probe.subprocess, "run", return_value=failure) as runner, \
+             mock.patch.object(probe.time, "sleep") as sleep:
+            result = probe.check_worker("ordax-direct-ipv6-diag-39478283587")
+        self.assertEqual(result, {"ok": False, "phase": "connect",
+                                  "classification": "sqlstate_58000"})
+        self.assertEqual(runner.call_count, 6)
+        self.assertEqual(sleep.call_count, 5)
+
     def test_curl_worker_503_can_recover_within_bounded_warmup_window(self):
         failure = mock.Mock(returncode=0, stdout=(
             b'{"ok":false,"phase":"connect","classification":"unclassified"}'

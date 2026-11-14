@@ -67,7 +67,7 @@ def api(method: str, url: str, token: str | None = None, body: dict | None = Non
                 phase = report.get("phase") if isinstance(report, dict) else None
                 label = report.get("classification") if isinstance(report, dict) else None
                 if phase in ("connect", "query") and isinstance(label, str) and re.fullmatch(
-                    r"[a-z_]{1,48}", label
+                    r"[a-z0-9_]{1,48}", label
                 ):
                     return {"ok": False, "phase": phase, "classification": label}
             except (ValueError, OSError):
@@ -266,7 +266,7 @@ def check_worker(name: str) -> dict:
                     phase = value.get("phase")
                     label = value.get("classification")
                     if phase in ("connect", "query") and isinstance(label, str) and re.fullmatch(
-                        r"[a-z_]{1,48}", label
+                        r"[a-z0-9_]{1,48}", label
                     ):
                         last_postgres_failure = {
                             "ok": False, "phase": phase, "classification": label
