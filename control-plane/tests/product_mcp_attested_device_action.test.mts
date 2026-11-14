@@ -657,32 +657,58 @@ test("cross-device request requires target attestation before grant lookup or di
   assert.equal(catalogQueries, 0);
 });
 
-test("attested device retries preserve one PostgreSQL key and replay the original receipt", async () => {
+test("attested device write retries preserve one PostgreSQL key and replay the original receipt", async () => {
   const digest = "a".repeat(64);
+  const keys: string[] = [];
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("full-computer-control", "computer.terminal_exec", "write")),
+    enqueue: async (_env, input) => {
+      keys.push(input.idempotencyKey);
+      return { ok: true, replayed: keys.length > 1,
+        request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => { assert.fail("stable MCP write retry must not generate random UUIDs"); },
+  });
+  const args = { argv: ["cmd.exe", "/c", "echo", "ok"] };
+  const first = await handler(actionRequest("computer.terminal_exec", args), digest);
+  const retried = await handler(actionRequest("computer.terminal_exec", args), digest);
+  assert.equal(first.status, 202);
+  assert.equal(retried.status, 200);
+  assert.equal((await first.json()).request_id, REQUEST);
+  assert.equal((await retried.json()).request_id, REQUEST);
+  assert.deepEqual(keys, [`mcp-write-${digest}`, `mcp-write-${digest}`]);
+  const invalid = await handler(actionRequest("computer.terminal_exec", args), "not-a-hash");
+  assert.equal(invalid.status, 400);
+  assert.equal(keys.length, 2, "invalid correlation never reaches PostgreSQL");
+  const missing = await handler(actionRequest("computer.terminal_exec", args), null);
+  assert.equal(missing.status, 400);
+  assert.equal(keys.length, 2);
+});
+
+test("attested device reads stay fresh even when the retry digest is reused", async () => {
+  const digest = "c".repeat(64);
+  const ids = [
+    "66666666-6666-4666-8666-666666666661",
+    "66666666-6666-4666-8666-666666666662",
+  ];
   const keys: string[] = [];
   const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
     authenticate: identity,
     listTargets: async () => catalog(grantGroup("computer-observe", "computer.screen_info", "read")),
     enqueue: async (_env, input) => {
       keys.push(input.idempotencyKey);
-      return { ok: true, replayed: keys.length > 1,
+      return { ok: true, replayed: false,
         request_id: REQUEST, effect_id: EFFECT, status: "queued" };
     },
-    operationId: () => { assert.fail("stable MCP retry must not generate random UUIDs"); },
+    operationId: () => ids.shift() ?? assert.fail("unexpected third read"),
   });
-  const first = await handler(actionRequest("computer.screen_info"), digest);
-  const retried = await handler(actionRequest("computer.screen_info"), digest);
-  assert.equal(first.status, 202);
-  assert.equal(retried.status, 200);
-  assert.equal((await first.json()).request_id, REQUEST);
-  assert.equal((await retried.json()).request_id, REQUEST);
-  assert.deepEqual(keys, [`mcp-read-${digest}`, `mcp-read-${digest}`]);
-  const invalid = await handler(actionRequest("computer.screen_info"), "not-a-hash");
-  assert.equal(invalid.status, 400);
-  assert.equal(keys.length, 2, "invalid correlation never reaches PostgreSQL");
-  const missing = await handler(actionRequest("computer.screen_info"), null);
-  assert.equal(missing.status, 400);
-  assert.equal(keys.length, 2);
+  assert.equal((await handler(actionRequest("computer.screen_info"), digest)).status, 202);
+  assert.equal((await handler(actionRequest("computer.screen_info"), digest)).status, 202);
+  assert.deepEqual(keys, [
+    "mcp-read-66666666-6666-4666-8666-666666666661",
+    "mcp-read-66666666-6666-4666-8666-666666666662",
+  ]);
 });
 
 test("attested device action forwards only the trusted Worker wake scheduler", async () => {
