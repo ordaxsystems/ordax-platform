@@ -66,7 +66,7 @@ def api(method: str, url: str, token: str | None = None, body: dict | None = Non
                 report = json.loads(exc.read(8192))
                 phase = report.get("phase") if isinstance(report, dict) else None
                 label = report.get("classification") if isinstance(report, dict) else None
-                if phase in ("connect", "query") and isinstance(label, str) and re.fullmatch(
+                if phase in ("tcp", "connect", "query") and isinstance(label, str) and re.fullmatch(
                     r"[a-z0-9_]{1,48}", label
                 ):
                     return {"ok": False, "phase": phase, "classification": label}
@@ -200,24 +200,30 @@ def find_hyperdrive(token: str, name: str) -> str | None:
     return matching[0] if matching else None
 
 
-def worker_config(name: str, hyperdrive_id: str) -> str:
+def worker_config(name: str, hyperdrive_id: str, origin_host: str, origin_port: int) -> str:
     if not re.fullmatch(r"ordax-direct-ipv6-diag-[0-9]{5,16}", name):
         raise ProbeError("worker_name_invalid")
     if not re.fullmatch(r"[a-f0-9]{32}", hyperdrive_id):
         raise ProbeError("hyperdrive_id_invalid")
+    allowed_hosts = {ORIGIN, POOLER_ORIGIN}
+    if origin_host not in allowed_hosts or origin_port not in (5432, 6543):
+        raise ProbeError("worker_origin_invalid")
     return (f'name = "{name}"\n'
             'main = "src/hyperdrive_direct_probe.ts"\n'
             'compatibility_date = "2026-10-17"\n'
             'compatibility_flags = ["nodejs_compat"]\n'
             'workers_dev = true\npreview_urls = false\n'
+            '[vars]\n'
+            f'ORDAX_PROBE_ORIGIN_HOST = "{origin_host}"\n'
+            f'ORDAX_PROBE_ORIGIN_PORT = "{origin_port}"\n'
             '[[hyperdrive]]\nbinding = "POSTGRES"\n'
             f'id = "{hyperdrive_id}"\n')
 
 
-def deploy_worker(name: str, hyperdrive_id: str):
+def deploy_worker(name: str, hyperdrive_id: str, origin_host: str, origin_port: int):
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", prefix="ordax-direct-probe-",
                                      dir=PROBE_DIR, encoding="utf-8", delete=False) as file:
-        file.write(worker_config(name, hyperdrive_id))
+        file.write(worker_config(name, hyperdrive_id, origin_host, origin_port))
         config_path = Path(file.name)
     try:
         # Captured output prevents Wrangler from leaking deployment metadata.
@@ -265,7 +271,7 @@ def check_worker(name: str) -> dict:
                         return {"ok": True, "phase": "complete"}
                     phase = value.get("phase")
                     label = value.get("classification")
-                    if phase in ("connect", "query") and isinstance(label, str) and re.fullmatch(
+                    if phase in ("tcp", "connect", "query") and isinstance(label, str) and re.fullmatch(
                         r"[a-z0-9_]{1,48}", label
                     ):
                         last_postgres_failure = {
@@ -299,7 +305,7 @@ def run():
     name, role = identifiers(run_id)
     mode = os.getenv("ORDAX_HYPERDRIVE_PROBE_MODE", "direct_ipv6")
     # Refuse unreviewed upstreams before even creating an ephemeral SQL role.
-    origin_for_mode(mode, role)
+    origin = origin_for_mode(mode, role)
     if not (PROBE_DIR / "src" / "hyperdrive_direct_probe.ts").is_file():
         raise ProbeError("isolated_source_missing")
     role_ownership = False
@@ -319,7 +325,7 @@ def run():
         print("ORDAX_DIRECT_ORIGIN_MODE=" + mode, flush=True)
         print("ORDAX_DIRECT_HYPERDRIVE=CREATED", flush=True)
         deploy_attempted = True
-        deploy_worker(name, hd_id)
+        deploy_worker(name, hd_id, origin["host"], origin["port"])
         print("ORDAX_DIRECT_WORKER=DEPLOYED", flush=True)
         response = check_worker(name)
         print("ORDAX_DIRECT_PROBE=" + json.dumps(response, sort_keys=True, separators=(",", ":")), flush=True)

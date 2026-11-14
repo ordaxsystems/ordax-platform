@@ -26,13 +26,20 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertEqual(probe.ORIGIN, "db.jhfphsjptrpmtnzkpwud.supabase.co")
 
     def test_config_pinned_to_one_ephemeral_hyperdrive(self):
-        config = probe.worker_config("ordax-direct-ipv6-diag-39478283587", "a" * 32)
+        config = probe.worker_config(
+            "ordax-direct-ipv6-diag-39478283587", "a" * 32, probe.ORIGIN, 5432)
         self.assertIn('binding = "POSTGRES"', config)
         self.assertIn('id = "' + "a" * 32 + '"', config)
         self.assertIn('src/hyperdrive_direct_probe.ts', config)
+        self.assertIn('ORDAX_PROBE_ORIGIN_HOST = "' + probe.ORIGIN + '"', config)
+        self.assertIn('ORDAX_PROBE_ORIGIN_PORT = "5432"', config)
         self.assertNotIn("ordax-control-plane-postgres", config)
         with self.assertRaises(probe.ProbeError):
-            probe.worker_config("ordax-mcp", "a" * 32)
+            probe.worker_config("ordax-mcp", "a" * 32, probe.ORIGIN, 5432)
+        with self.assertRaisesRegex(probe.ProbeError, "worker_origin_invalid"):
+            probe.worker_config(
+                "ordax-direct-ipv6-diag-39478283587", "a" * 32,
+                "attacker.example", 5432)
 
     def test_role_is_login_only_and_ddl_empty_receipts_allowed(self):
         with mock.patch.object(probe, "api", return_value=None) as api:
@@ -187,6 +194,17 @@ class DirectOriginProbeContracts(unittest.TestCase):
                                   "classification": "connection_terminated"})
         self.assertNotIn("mock-secret", json.dumps(status))
 
+    def test_worker_tcp_failure_diagnostic_is_strictly_allowlisted(self):
+        uri = "https://ordax-direct-ipv6-diag-39478283587.ordaxsystems.workers.dev/"
+        error = urllib.error.HTTPError(uri, 503, "private trace", {}, BytesIO(
+            b'{"ok":false,"phase":"tcp","classification":"origin_tcp_unreachable",'
+            b'"secret":"mock-secret"}'))
+        with mock.patch.object(probe.OPENER, "open", side_effect=error):
+            status = probe.api("GET", uri)
+        self.assertEqual(status, {"ok": False, "phase": "tcp",
+                                  "classification": "origin_tcp_unreachable"})
+        self.assertNotIn("mock-secret", json.dumps(status))
+
     def test_successful_probe_always_deletes_every_ephemeral_resource(self):
         calls = []
         fake_env = {"CLOUDFLARE_API_TOKEN": "fake-cf-secret",
@@ -299,6 +317,9 @@ class DirectOriginProbeContracts(unittest.TestCase):
         text = (ROOT / "control-plane/cloudflare/src/hyperdrive_direct_probe.ts").read_text("utf-8")
         self.assertIn("select 1::int as ok", text)
         self.assertIn('openPostgresSession(env.POSTGRES.connectionString)', text)
+        self.assertIn('from "cloudflare:sockets"', text)
+        self.assertIn("socket.opened", text)
+        self.assertIn("origin_tcp_unreachable", text)
         self.assertIn("hyperdrive_internal_error", text)
         self.assertIn("hyperdrive_generic_error", text)
         self.assertIn("hyperdrive_pool_acquire_failed", text)

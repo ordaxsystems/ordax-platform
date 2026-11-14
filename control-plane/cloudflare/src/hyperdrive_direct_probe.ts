@@ -1,9 +1,14 @@
 /** Diagnostic Worker, never a Product MCP authority. No D1/OAuth/owner state.
  * Uses the Hyperdrive binding of ONE ephemeral configuration and SELECT 1.
  */
+import { connect } from "cloudflare:sockets";
 import { openPostgresSession } from "./data_postgres_driver.ts";
 
-type Env = { POSTGRES: { connectionString: string } };
+type Env = {
+  POSTGRES: { connectionString: string };
+  ORDAX_PROBE_ORIGIN_HOST: string;
+  ORDAX_PROBE_ORIGIN_PORT: string;
+};
 
 function safeError(error: unknown): string {
   const code = error && typeof error === "object" && "code" in error
@@ -29,10 +34,39 @@ function safeError(error: unknown): string {
   return "unclassified";
 }
 
+async function probeOriginTcp(env: Env): Promise<boolean> {
+  const port = Number(env.ORDAX_PROBE_ORIGIN_PORT);
+  if (!env.ORDAX_PROBE_ORIGIN_HOST || !Number.isInteger(port)
+      || port < 1 || port > 65535) return false;
+  const socket = connect(
+    { hostname: env.ORDAX_PROBE_ORIGIN_HOST, port },
+    { secureTransport: "off", allowHalfOpen: false },
+  );
+  try {
+    await Promise.race([
+      socket.opened,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("tcp_probe_timeout")), 5000)),
+    ]);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await socket.close().catch(() => {});
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method !== "GET" || new URL(request.url).pathname !== "/") {
       return new Response("Not found", { status: 404 });
+    }
+    const tcpReachable = await probeOriginTcp(env);
+    if (!tcpReachable) {
+      return Response.json(
+        { ok: false, phase: "tcp", classification: "origin_tcp_unreachable" },
+        { status: 503 },
+      );
     }
     const client = openPostgresSession(env.POSTGRES.connectionString);
     let phase = "connect";
