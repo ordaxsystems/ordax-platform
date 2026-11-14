@@ -24,7 +24,7 @@ ORIGIN = f"db.{PROJECT}.supabase.co"
 POOLER_ORIGIN = "aws-1-sa-east-1.pooler.supabase.com"
 # Each mode gets its own short-lived role, config and Worker, never the Product
 # MCP database role or live Hyperdrive. Compare paths before any production cutover.
-ORIGIN_MODES = ("direct_ipv6", "pooler_session", "pooler_transaction")
+ORIGIN_MODES = ("direct_ipv6", "direct_ipv6_default_tls", "pooler_session", "pooler_transaction")
 CF_API = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}"
 DB_API = f"https://api.supabase.com/v1/projects/{PROJECT}/database/query"
 NAME_PREFIX = "ordax-direct-ipv6-diag-"
@@ -131,7 +131,7 @@ def delete_role(token: str, role: str):
 def origin_for_mode(mode: str, role: str) -> dict:
     if mode not in ORIGIN_MODES:
         raise ProbeError("origin_mode_not_allowlisted")
-    if mode == "direct_ipv6":
+    if mode in ("direct_ipv6", "direct_ipv6_default_tls"):
         return {"scheme": "postgres", "database": "postgres",
                 "user": role, "host": ORIGIN, "port": 5432}
     return {"scheme": "postgres", "database": "postgres",
@@ -179,9 +179,13 @@ def create_hyperdrive(token: str, name: str, role: str, credential: str,
     origin["password"] = credential
     body = {"name": name,
             "origin": origin,
-            "mtls": {"sslmode": "require"},
             "caching": {"disabled": True},
             "origin_connection_limit": 5}
+    # Supabase/Hyperdrive documents TLS "require" as the default. This explicit
+    # diagnostic mode omits the optional mTLS/TLS block to prove whether the
+    # API field itself is involved in an internal Hyperdrive failure.
+    if mode != "direct_ipv6_default_tls":
+        body["mtls"] = {"sslmode": "require"}
     result = api("POST", CF_API + "/hyperdrive/configs", token, body)
     hid = result.get("result", {}).get("id") if isinstance(result, dict) else None
     if not result.get("success") or not isinstance(hid, str) or not re.fullmatch(r"[a-f0-9]{32}", hid):

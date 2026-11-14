@@ -9,6 +9,7 @@ on:
         default: pooler_transaction
         options:
           - direct_ipv6
+          - direct_ipv6_default_tls
           - pooler_session
           - pooler_transaction
 

@@ -66,12 +66,26 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertEqual(payload["caching"], {"disabled": True})
         self.assertEqual(payload["mtls"], {"sslmode": "require"})
 
+        with mock.patch.object(probe, "api", return_value={
+            "success": True, "result": {"id": "b" * 32},
+        }) as default_tls:
+            self.assertEqual("b" * 32, probe.create_hyperdrive(
+                "fake-token", "ordax-direct-ipv6-diag-39478283587",
+                "ordax_direct_diag_39478283587", "mock-secret",
+                "direct_ipv6_default_tls"))
+        default_payload = default_tls.call_args.args[3]
+        self.assertNotIn("mtls", default_payload)
+        self.assertEqual(default_payload["origin"]["host"], probe.ORIGIN)
+        self.assertEqual(default_payload["origin"]["port"], 5432)
+
     def test_isolated_pooler_modes_pin_hostname_port_and_tenant_user(self):
         role = "ordax_direct_diag_39478283587"
-        self.assertEqual(probe.ORIGIN_MODES, ("direct_ipv6", "pooler_session", "pooler_transaction"))
-        self.assertEqual(probe.origin_for_mode("direct_ipv6", role), {
-            "scheme": "postgres", "database": "postgres", "user": role,
-            "host": probe.ORIGIN, "port": 5432})
+        self.assertEqual(probe.ORIGIN_MODES, (
+            "direct_ipv6", "direct_ipv6_default_tls", "pooler_session", "pooler_transaction"))
+        for mode in ("direct_ipv6", "direct_ipv6_default_tls"):
+            self.assertEqual(probe.origin_for_mode(mode, role), {
+                "scheme": "postgres", "database": "postgres", "user": role,
+                "host": probe.ORIGIN, "port": 5432})
         for mode, port in (("pooler_session", 5432), ("pooler_transaction", 6543)):
             with self.subTest(mode=mode):
                 origin = probe.origin_for_mode(mode, role)
@@ -168,6 +182,7 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertIn("origin_mode:", workflow)
         self.assertIn("pooler_transaction", workflow)
         self.assertIn("pooler_session", workflow)
+        self.assertIn("direct_ipv6_default_tls", workflow)
         self.assertIn("ORDAX_HYPERDRIVE_PROBE_MODE: ${{ inputs.origin_mode }}", workflow)
         self.assertIn("github.ref == 'refs/heads/main'", workflow)
         self.assertIn("environment: cloudflare-v3", workflow)
