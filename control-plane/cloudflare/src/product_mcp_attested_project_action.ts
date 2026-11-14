@@ -304,8 +304,12 @@ export function createAttestedProjectActionHandler(
         return grantRequired(body.action);
       }
 
-      const opId = retryDigest ?? operationId().toLowerCase();
-      if (retryDigest === undefined && !isCanonicalUuid(opId))
+      // Project reads are observational and must remain fresh even if the
+      // MCP client reuses a JSON-RPC id. Writes keep exact-invocation retry
+      // correlation to preserve at-most-once effect semantics.
+      const stableRetry = accessMode === "write" ? retryDigest : undefined;
+      const opId = stableRetry ?? operationId().toLowerCase();
+      if (stableRetry === undefined && !isCanonicalUuid(opId))
         return json({ ok: false, error: "product_action_unavailable" }, 503);
       const payload: Json = {
         ...body.arguments,
