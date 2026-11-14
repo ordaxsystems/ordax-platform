@@ -137,12 +137,20 @@ class DirectOriginProbeContracts(unittest.TestCase):
             seen["env"] = kwargs["env"]
             return deploy_ok
 
-        with mock.patch.object(probe.subprocess, "run", side_effect=run) as runner:
+        subdomain_receipt = {
+            "success": True,
+            "result": {"enabled": True, "previews_enabled": False},
+        }
+        with mock.patch.object(probe.subprocess, "run", side_effect=run) as runner, \
+             mock.patch.object(probe, "api", return_value=subdomain_receipt) as api:
             probe.deploy_worker(
-                name, None, probe.POOLER_ORIGIN, 5432,
+                name, None, probe.POOLER_ORIGIN, 5432, "fake-cf",
                 direct_postgres_password="synthetic-private-password",
                 db_user=user)
         self.assertEqual(runner.call_count, 1)
+        api.assert_called_once_with(
+            "POST", probe.CF_API + "/workers/scripts/" + name + "/subdomain",
+            "fake-cf", {"enabled": True, "previews_enabled": False})
         self.assertEqual(seen["payload"], {
             "ORDAX_PROBE_DB_PASSWORD": "synthetic-private-password"
         })
