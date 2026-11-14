@@ -10,6 +10,7 @@ on:
         options:
           - direct_ipv6
           - direct_ipv6_default_tls
+          - direct_ipv6_custom_ca
           - pooler_session
           - pooler_transaction
           - worker_direct_pooler
