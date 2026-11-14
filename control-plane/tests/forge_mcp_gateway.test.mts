@@ -3,7 +3,7 @@ import test from "node:test";
 import {createHash} from "node:crypto";
 import {
   createForgeMcpGateway,FORGE_MCP_HOSTNAME,FORGE_INSTANCE_REGISTER_PATH,
-  validForgeCatalog,
+  FORGE_INSTANCE_REPORT_PATH,validForgeCatalog,
 } from "../cloudflare/src/forge_mcp_gateway.ts";
 
 const OWNER="11111111-1111-4111-8111-111111111111";
@@ -129,6 +129,25 @@ test("Forge native registration accepts only a catalog whose digest matches exac
   assert.equal(response.status,200);
   assert.equal(registered.ownerUserId,OWNER);
   assert.equal(registered.catalogDigest,digest);
+});
+
+test("Forge native report rejects oversized UTF-8 results before writing a receipt",async()=>{
+  let reports=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateOwner:(()=>ownerIdentity(FORGE_NATIVE_CLIENT)) as any,
+    report:async()=>{reports++;return {ok:true};},
+  });
+  const response=await gateway(request({
+    instance_id:INSTANCE,request_id:REQUEST,
+    attempt_id:"77777777-7777-4777-8777-777777777777",
+    lease_id:"88888888-8888-4888-8888-888888888888",
+    agent_instance_id:"99999999-9999-4999-8999-999999999999",
+    boot_id:"forge-test",succeeded:true,
+    result:{content:[{type:"text",text:"é".repeat(200_000)}]},error_code:null,
+  },FORGE_INSTANCE_REPORT_PATH));
+  assert.equal(response.status,413);
+  assert.deepEqual(await response.json(),{ok:false,error:"forge_action_result_too_large"});
+  assert.equal(reports,0);
 });
 
 test("Forge native routes require OAuth before any store write",async()=>{
