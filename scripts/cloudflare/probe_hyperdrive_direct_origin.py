@@ -318,12 +318,15 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
 
 
 def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
-                  origin_port: int, direct_postgres_password: str | None = None,
+                  origin_port: int, cf_token: str,
+                  direct_postgres_password: str | None = None,
                   db_user: str | None = None, tls_ca: bool = False,
                   allow_direct_ipv6_literal: bool = False,
                   direct_driver: str = "node_postgres",
                   compatibility_flag: str = "nodejs_compat"):
     direct_postgres = direct_postgres_password is not None
+    if not isinstance(cf_token, str) or not cf_token:
+        raise ProbeError("cloudflare_token_missing")
     if direct_postgres and not direct_postgres_password:
         raise ProbeError("direct_worker_secret_missing")
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", prefix="ordax-direct-probe-",
@@ -360,6 +363,17 @@ def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
             check=False, timeout=120, env=wrangler_env)
         if process.returncode:
             raise ProbeError("isolated_worker_deploy_failed")
+        # Wrangler uploads the script, but workers.dev availability is a separate
+        # per-script setting in the Cloudflare API. Enable it explicitly so the
+        # diagnostic never mistakes an unrouted Worker for a database failure.
+        subdomain = api(
+            "POST", CF_API + "/workers/scripts/" + name + "/subdomain", cf_token,
+            {"enabled": True, "previews_enabled": False},
+        )
+        state = subdomain.get("result") if isinstance(subdomain, dict) else None
+        if (not isinstance(state, dict) or state.get("enabled") is not True
+                or state.get("previews_enabled") is not False):
+            raise ProbeError("isolated_worker_subdomain_enable_failed")
     except (OSError, subprocess.TimeoutExpired):
         raise ProbeError("isolated_worker_deploy_unavailable") from None
     finally:
@@ -467,7 +481,7 @@ def run():
         deploy_attempted = True
         if direct_worker:
             deploy_worker(
-                name, None, origin["host"], origin["port"],
+                name, None, origin["host"], origin["port"], cf,
                 direct_postgres_password=credential, db_user=origin["user"],
                 tls_ca=mode == "worker_direct_ipv6_custom_ca",
                 direct_driver=(
@@ -491,7 +505,7 @@ def run():
             )
             print("ORDAX_DIRECT_HYPERDRIVE=CREATED", flush=True)
             deploy_worker(
-                name, hd_id, origin["host"], origin["port"],
+                name, hd_id, origin["host"], origin["port"], cf,
                 allow_direct_ipv6_literal=mode == "direct_ip_custom_ca_verify_ca",
             )
         print("ORDAX_DIRECT_WORKER=DEPLOYED", flush=True)
