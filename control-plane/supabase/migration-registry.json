@@ -1221,6 +1221,18 @@
         "blob_sha": "d49aa65753cf0a5ea49a535e197b1700cede0b1e"
       },
       "ledger_name": "github_authority_revocation_webhook_v1"
+    },
+    {
+      "name": "20261114004000_github_user_authorization_revocation_v1",
+      "applied_version": "20261114013517",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261114004000_github_user_authorization_revocation_v1.sql",
+        "blob_sha": "c17d6c8da89eed0fac89c16835c340f5a4e54939"
+      },
+      "ledger_name": "github_user_authorization_revocation_v1"
     }
   ]
 }
