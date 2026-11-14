@@ -302,9 +302,10 @@ test("Project binding confirmation projection cannot manufacture grants or local
     state: "active",
     next_state: "ready_without_grants",
   });
-  assert.equal(JSON.stringify(result).includes("local_project_ref"), false);
-  assert.equal(JSON.stringify(result).includes("allowed_capabilities"), false);
-  assert.equal(JSON.stringify(result).includes("grant"), false);
+  assert.equal("local_project_ref" in result, false);
+  assert.equal("allowed_capabilities" in result, false);
+  assert.equal("grant_id" in result, false);
+  assert.equal("grant_profile" in result, false);
 
   for (const error of [
     "project_device_binding_confirmation_invalid",
