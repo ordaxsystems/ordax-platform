@@ -166,11 +166,12 @@ def validate(foundation:dict,config:dict)->bool:
     # This is a public OAuth client identifier, never a credential or grant.
     # Source of truth for the published MCP Worker is wrangler.mcp.toml.
     owner_client=vars.get("PRODUCT_OWNER_OAUTH_CLIENT_ID")
-    if (not isinstance(owner_client,str)
-        or not re.fullmatch(
-            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
-            owner_client)):
+    forge_native_client=vars.get("FORGE_NATIVE_OAUTH_CLIENT_ID")
+    oauth_client_re=r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+    if not isinstance(owner_client,str) or not re.fullmatch(oauth_client_re,owner_client):
         raise McpReleaseError("mcp_owner_oauth_client_not_canonical")
+    if not isinstance(forge_native_client,str) or not re.fullmatch(oauth_client_re,forge_native_client):
+        raise McpReleaseError("forge_native_oauth_client_not_canonical")
     # This is one tightly scoped, authenticated Owner rollout. No model-supplied
     # target is ever accepted, and Owner choice is NOT Device attestation.
     if vars.get("CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED") != "enabled" \
@@ -183,6 +184,7 @@ def validate(foundation:dict,config:dict)->bool:
         "PRODUCT_AUTH_AUDIENCE":"authenticated",
         "PRODUCT_AUTH_JWKS_URL":issuer+"/.well-known/jwks.json",
         "PRODUCT_OWNER_OAUTH_CLIENT_ID":owner_client,
+        "FORGE_NATIVE_OAUTH_CLIENT_ID":forge_native_client,
         "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED":"enabled",
         "CENTRAL_OWNER_SELECTION_ENABLED":"enabled",
         "PRODUCT_DEVICE_WAKE_ENABLED":"enabled",

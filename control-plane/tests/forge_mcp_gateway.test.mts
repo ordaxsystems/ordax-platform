@@ -18,10 +18,12 @@ const CATALOG=[{
   annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
 }];
 
+const FORGE_NATIVE_CLIENT="6a94ae80-a59c-4f48-a32c-2e15da34374f";
 const env:any={
   PRODUCT_AUTH_ISSUER:"https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1",
   PRODUCT_AUTH_AUDIENCE:"authenticated",
   PRODUCT_AUTH_JWKS_URL:"https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1/.well-known/jwks.json",
+  FORGE_NATIVE_OAUTH_CLIENT_ID:FORGE_NATIVE_CLIENT,
 };
 
 function request(body:unknown,path="/mcp"){
@@ -34,10 +36,10 @@ function mcpIdentity(){
   return Promise.resolve({ok:true as const,ownerUserId:OWNER,clientKind:"product-mcp" as const,
     clientId:CLIENT,expiresAt:4102444800});
 }
-function ownerIdentity(){
+function ownerIdentity(clientId:string|null=null){
   return Promise.resolve({ok:true as const,subjectId:OWNER,
     issuer:env.PRODUCT_AUTH_ISSUER,audience:"authenticated",expiresAt:4102444800,
-    clientId:null,role:"authenticated"});
+    clientId,role:"authenticated"});
 }
 function resolution(){
   return {ok:true,instance_id:INSTANCE,display_name:"Forge local",app_version:"0.2.0",
@@ -106,7 +108,7 @@ test("Forge native registration accepts only a catalog whose digest matches exac
   const digest=createHash("sha256").update(JSON.stringify(canonical(CATALOG))).digest("hex");
   let registered:any=null;
   const gateway=createForgeMcpGateway(env,{
-    authenticateOwner:ownerIdentity as any,
+    authenticateOwner:(()=>ownerIdentity(FORGE_NATIVE_CLIENT)) as any,
     register:async(_env,input:any)=>{registered=input;return {ok:true,instance_id:INSTANCE};},
   });
   const response=await gateway(request({
@@ -116,6 +118,39 @@ test("Forge native registration accepts only a catalog whose digest matches exac
   assert.equal(response.status,200);
   assert.equal(registered.ownerUserId,OWNER);
   assert.equal(registered.catalogDigest,digest);
+});
+
+test("Forge native OAuth scope rejects another signed OAuth client without widening Owner authority",async()=>{
+  const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):
+    value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])):value;
+  const digest=createHash("sha256").update(JSON.stringify(canonical(CATALOG))).digest("hex");
+  let writes=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateOwner:(()=>ownerIdentity(CLIENT)) as any,
+    register:async()=>{writes++;return {ok:true,instance_id:INSTANCE};},
+  });
+  const response=await gateway(request({
+    instance_id:INSTANCE,display_name:"Forge local",app_version:"0.2.0",
+    catalog:CATALOG,catalog_digest:digest,
+  },FORGE_INSTANCE_REGISTER_PATH));
+  assert.equal(response.status,403);
+  assert.deepEqual(await response.json(),{ok:false,error:"forge_native_oauth_client_required"});
+  assert.equal(writes,0);
+});
+
+test("Forge native cutover keeps a normal account session compatible",async()=>{
+  const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):
+    value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])):value;
+  const digest=createHash("sha256").update(JSON.stringify(canonical(CATALOG))).digest("hex");
+  const gateway=createForgeMcpGateway(env,{
+    authenticateOwner:(()=>ownerIdentity()) as any,
+    register:async()=>({ok:true,instance_id:INSTANCE}),
+  });
+  const response=await gateway(request({
+    instance_id:INSTANCE,display_name:"Forge local",app_version:"0.2.0",
+    catalog:CATALOG,catalog_digest:digest,
+  },FORGE_INSTANCE_REGISTER_PATH));
+  assert.equal(response.status,200);
 });
 
 test("Forge MCP unauthenticated requests advertise the shared Supabase OAuth resource",async()=>{

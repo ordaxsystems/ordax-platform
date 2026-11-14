@@ -1,7 +1,7 @@
 import {readBoundedJsonObject} from "./request_json.ts";
 import {isCanonicalUuid} from "./product_remote_grant_contract.ts";
 import {
-  authenticateProductMcpClientRequest,authenticateProductRequest,authorizeProductOwnerIdentity,
+  authenticateProductMcpClientRequest,authenticateProductRequest,
   productAuthConfigured,type ProductAuthEnv,type VerifiedProductMcpClient,
 } from "./product_auth.ts";
 import {verifiedMcpRetryDigest} from "./mcp_http.ts";
@@ -12,7 +12,10 @@ import {
   reportForgeAction,getForgeAction,type ForgeInstanceResolution,type ForgeActionReceipt,
 } from "./forge_mcp_store.ts";
 
-type Env=ProductAuthEnv&ProductPostgresEnv;
+type Env=ProductAuthEnv&ProductPostgresEnv&Readonly<{
+  /** Public OAuth client for the native Forge app only; never an Owner-wide grant. */
+  FORGE_NATIVE_OAUTH_CLIENT_ID?:string;
+}>;
 type Json=Record<string,unknown>;
 type ForgeTool=Readonly<{
   name:string;description:string;inputSchema:Json;
@@ -127,9 +130,21 @@ function metadata(origin:string,issuer:string):Json{
 function authChallenge():string{
   return `Bearer resource_metadata="https://${FORGE_MCP_HOSTNAME}${FORGE_RESOURCE_METADATA_PATH}"`;
 }
-function nativeOwner(identity:Awaited<ReturnType<typeof authenticateProductRequest>>,env:ProductAuthEnv):
+function nativeOwner(identity:Awaited<ReturnType<typeof authenticateProductRequest>>,env:Env):
   {ok:true;ownerUserId:string}|{ok:false;error:string;status:number}{
-  return authorizeProductOwnerIdentity(identity,env);
+  if(!identity.ok)return identity;
+  if(identity.role!=="authenticated"||!isCanonicalUuid(identity.subjectId))
+    return {ok:false,error:"forge_native_identity_invalid",status:403};
+  // Legacy normal account sessions stay valid during the cutover. OAuth sessions
+  // are accepted only when signed for the one public Forge desktop client. This
+  // never widens authorizeProductOwnerIdentity or any /v3/owner/* endpoint.
+  if(identity.clientId!==null){
+    const pinned=(env.FORGE_NATIVE_OAUTH_CLIENT_ID??"").trim().toLowerCase();
+    if(!isCanonicalUuid(pinned)||!isCanonicalUuid(identity.clientId)
+      ||identity.clientId.toLowerCase()!==pinned)
+      return {ok:false,error:"forge_native_oauth_client_required",status:403};
+  }
+  return {ok:true,ownerUserId:identity.subjectId};
 }
 function toolFromCatalog(resolution:ForgeInstanceResolution,name:string):ForgeTool|null{
   if(!resolution.ok||!validForgeCatalog(resolution.catalog))return null;

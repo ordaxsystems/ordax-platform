@@ -38,7 +38,10 @@ class McpReleaseContract(unittest.TestCase):
     def test_mcp_owner_oauth_pin_is_bounded_and_cannot_enable_other_vars(self):
         import re
         value=self.config["vars"]["PRODUCT_OWNER_OAUTH_CLIENT_ID"]
+        forge_value=self.config["vars"]["FORGE_NATIVE_OAUTH_CLIENT_ID"]
         self.assertRegex(value,r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
+        self.assertEqual(forge_value,"6a94ae80-a59c-4f48-a32c-2e15da34374f")
+        self.assertRegex(forge_value,r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
         self.assertFalse(validate(self.foundation,self.config))
         for bad in (None, "", "not-a-uuid", "a"*512):
             c=copy.deepcopy(self.config)
@@ -48,6 +51,15 @@ class McpReleaseContract(unittest.TestCase):
                 c["vars"]["PRODUCT_OWNER_OAUTH_CLIENT_ID"]=bad
             with self.subTest(pin=bad):
                 with self.assertRaisesRegex(McpReleaseError,"owner_oauth_client_not_canonical"):
+                    validate(self.foundation,c)
+        for bad in (None, "", "not-a-uuid", "a"*512):
+            c=copy.deepcopy(self.config)
+            if bad is None:
+                c["vars"].pop("FORGE_NATIVE_OAUTH_CLIENT_ID")
+            else:
+                c["vars"]["FORGE_NATIVE_OAUTH_CLIENT_ID"]=bad
+            with self.subTest(forge_pin=bad):
+                with self.assertRaisesRegex(McpReleaseError,"forge_native_oauth_client_not_canonical"):
                     validate(self.foundation,c)
         for gate in ("CENTRAL_OWNER_SELECTION_ENABLED",
                      "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED"):
