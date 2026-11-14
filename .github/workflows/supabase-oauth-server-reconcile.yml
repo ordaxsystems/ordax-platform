@@ -1,0 +1,58 @@
+name: OrdaX Supabase OAuth Server Reconcile
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_sha:
+        description: 'Exact reviewed ordax-platform main commit SHA'
+        required: true
+        type: string
+      confirmation:
+        description: 'Type APPLY_ORDAX_OAUTH_CONFIG'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ordax-supabase-oauth-server-reconcile
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.repository == 'ordaxsystems/ordax-platform'
+      && github.event_name == 'workflow_dispatch'
+      && github.ref == 'refs/heads/main'
+      && inputs.approved_sha == github.sha
+      && inputs.confirmation == 'APPLY_ORDAX_OAUTH_CONFIG'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: cloudflare-v3
+    steps:
+      - name: Checkout exact reviewed Platform source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Reject obsolete or non-main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL="$(git rev-parse HEAD)"
+          CURRENT="$(git ls-remote https://github.com/ordaxsystems/ordax-platform.git refs/heads/main | cut -f1)"
+          test "${GITHUB_REPOSITORY}" = "ordaxsystems/ordax-platform"
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${ACTUAL}" = "${GITHUB_SHA}"
+          test "${CURRENT}" = "${GITHUB_SHA}"
+
+      - name: Reconcile canonical OrdaX OAuth Server config
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: python scripts/supabase/reconcile_oauth_server_config.py --apply
+
+      - name: Verify exact canonical config after write
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: python scripts/supabase/reconcile_oauth_server_config.py
