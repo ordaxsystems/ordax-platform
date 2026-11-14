@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "forge": {
+      "type": "streamable-http",
+      "url": "https://forge-mcp.ordax.com.br/mcp"
+    }
+  }
+}
