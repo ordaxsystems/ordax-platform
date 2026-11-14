@@ -1233,6 +1233,18 @@
         "blob_sha": "c17d6c8da89eed0fac89c16835c340f5a4e54939"
       },
       "ledger_name": "github_user_authorization_revocation_v1"
+    },
+    {
+      "name": "20261114061000_forge_mcp_instance_gateway_v1",
+      "applied_version": "20261114062958",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261114061000_forge_mcp_instance_gateway_v1.sql",
+        "blob_sha": "63eacb8271813523e64e560e72ad597ddf42c9ca"
+      },
+      "ledger_name": "forge_mcp_instance_gateway_v1"
     }
   ]
 }
