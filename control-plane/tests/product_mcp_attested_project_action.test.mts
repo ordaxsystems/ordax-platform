@@ -221,7 +221,7 @@ test("project-scoped reads stay fresh when a retry digest is reused", async () =
     },
     operationId: () => ids.shift() ?? assert.fail("unexpected third project read"),
   });
-  const args = { process_id: "process_123" };
+  const args = { process_id: "99999999-9999-4999-8999-999999999999" };
   assert.equal((await handler(actionRequest("process.status", args), digest)).status, 202);
   assert.equal((await handler(actionRequest("process.status", args), digest)).status, 202);
   assert.deepEqual(keys, [
