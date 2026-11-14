@@ -243,6 +243,7 @@ def check_worker(name: str) -> dict:
     if shutil.which("curl") is None:
         raise ProbeError("curl_missing")
     status = "unknown"
+    last_postgres_failure: dict | None = None
     for attempt in range(6):
         try:
             result = subprocess.run(
@@ -267,12 +268,25 @@ def check_worker(name: str) -> dict:
                     if phase in ("connect", "query") and isinstance(label, str) and re.fullmatch(
                         r"[a-z_]{1,48}", label
                     ):
-                        return {"ok": False, "phase": phase, "classification": label}
+                        last_postgres_failure = {
+                            "ok": False, "phase": phase, "classification": label
+                        }
+                        # A newly-created Hyperdrive/Workers binding can return
+                        # a bounded connect 503 while its origin pool is warming.
+                        # Keep the ephemeral credential and origin alive during
+                        # the same propagation window used for HTTP readiness.
+                        # Persistent 503 remains a hard failure after all tries.
+                        if attempt < 5:
+                            time.sleep(5)
+                            continue
+                        return last_postgres_failure
                     raise ProbeError("probe_invalid_response")
         except (OSError, subprocess.TimeoutExpired, ValueError, UnicodeDecodeError):
             status = "transport"
         if attempt < 5:
             time.sleep(5)
+    if last_postgres_failure is not None:
+        return last_postgres_failure
     raise ProbeError("probe_http_" + (status if status.isdigit() else "unavailable"))
 
 

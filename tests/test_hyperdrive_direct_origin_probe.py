@@ -241,16 +241,34 @@ class DirectOriginProbeContracts(unittest.TestCase):
         self.assertEqual(runner.call_args.args[0][0], "curl")
         self.assertNotIn("--location", runner.call_args.args[0])
 
-    def test_curl_worker_503_returns_only_safe_postgres_phase(self):
+    def test_curl_worker_503_retries_bounded_then_returns_only_safe_postgres_phase(self):
         failure = mock.Mock(returncode=0, stdout=(
             b'{"ok":false,"phase":"connect","classification":"connection_terminated",'
             b'"secret":"mock-secret"}' + bytes([10]) + b"503"), stderr=b"")
         with mock.patch.object(probe.shutil, "which", return_value="/usr/bin/curl"), \
-             mock.patch.object(probe.subprocess, "run", return_value=failure):
+             mock.patch.object(probe.subprocess, "run", return_value=failure) as runner, \
+             mock.patch.object(probe.time, "sleep") as sleep:
             result = probe.check_worker("ordax-direct-ipv6-diag-39478283587")
         self.assertEqual(result, {"ok": False, "phase": "connect",
                                   "classification": "connection_terminated"})
+        self.assertEqual(runner.call_count, 6)
+        self.assertEqual(sleep.call_count, 5)
         self.assertNotIn("mock-secret", json.dumps(result))
+
+    def test_curl_worker_503_can_recover_within_bounded_warmup_window(self):
+        failure = mock.Mock(returncode=0, stdout=(
+            b'{"ok":false,"phase":"connect","classification":"unclassified"}'
+            + bytes([10]) + b"503"), stderr=b"")
+        good = mock.Mock(returncode=0, stdout=(
+            b'{"ok":true,"phase":"complete"}' + bytes([10]) + b"200"), stderr=b"")
+        with mock.patch.object(probe.shutil, "which", return_value="/usr/bin/curl"), \
+             mock.patch.object(probe.subprocess, "run",
+                               side_effect=[failure, failure, good]) as runner, \
+             mock.patch.object(probe.time, "sleep") as sleep:
+            result = probe.check_worker("ordax-direct-ipv6-diag-39478283587")
+        self.assertEqual(result, {"ok": True, "phase": "complete"})
+        self.assertEqual(runner.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
 
     def test_worker_http_403_is_bounded_no_secrets(self):
         denied = mock.Mock(returncode=0, stdout=b"private content" + bytes([10]) + b"403",
