@@ -423,12 +423,14 @@ const SELECTION_ERRORS = new Set([
   "github_authorization_challenge_invalid",
   "project_github_connection_exists",
   "github_repository_not_verified",
+  "github_repository_authority_revoked",
 ]);
 
 function statusForError(error: unknown): number {
   if (error === "project_not_found_or_inactive") return 404;
   if (error === "space_admin_required" || error === "product_owner_auth_ineligible") return 403;
-  if (error === "project_github_connection_exists") return 409;
+  if (error === "project_github_connection_exists"
+      || error === "github_repository_authority_revoked") return 409;
   if (error === "github_authorization_challenge_conflict") return 409;
   if (error === "github_authorization_challenge_invalid"
       || error === "github_repository_candidates_unavailable") return 409;
