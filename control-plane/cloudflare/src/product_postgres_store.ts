@@ -238,6 +238,11 @@ const RPC_SPECS = {
     keys: ["p_owner_user_id", "p_challenge_id", "p_repository_id"],
     casts: ["uuid", "uuid", "text"],
   },
+  ordax_apply_github_authority_revocation_v1: {
+    keys: ["p_delivery_id", "p_event", "p_action", "p_installation_id",
+      "p_repository_ids", "p_payload_sha256"],
+    casts: ["uuid", "text", "text", "bigint", "bigint[]", "text"],
+  },
   // Staged read-only RPC: remains unavailable until the separately governed
   // PostgreSQL proposal is applied. No new grant authority is created here.
   ordax_approve_project_workspace_resource_v1: {
@@ -756,6 +761,46 @@ export async function selectOwnerGithubRepository(
     p_challenge_id: input.challengeId,
     p_repository_id: input.repositoryId,
   });
+}
+
+export type GithubAuthorityRevocationResult = Readonly<{
+  ok: boolean;
+  replayed?: boolean;
+  delivery_id?: string;
+  connection_count?: number;
+  binding_count?: number;
+  grant_count?: number;
+  action_count?: number;
+  intent_count?: number;
+  error?: string;
+}>;
+
+export async function applyGithubAuthorityRevocation(
+  env: ProductPostgresEnv,
+  input: {
+    deliveryId: string;
+    event: "installation" | "installation_repositories" | "repository";
+    action: string;
+    installationId: string;
+    repositoryIds: readonly string[];
+    payloadSha256: string;
+  },
+): Promise<GithubAuthorityRevocationResult> {
+  const repositoryIds = input.repositoryIds.length
+    ? `{${input.repositoryIds.join(",")}}`
+    : "{}";
+  return callRpc<GithubAuthorityRevocationResult>(
+    env,
+    "ordax_apply_github_authority_revocation_v1",
+    {
+      p_delivery_id: input.deliveryId,
+      p_event: input.event,
+      p_action: input.action,
+      p_installation_id: input.installationId,
+      p_repository_ids: repositoryIds,
+      p_payload_sha256: input.payloadSha256,
+    },
+  );
 }
 
 export async function enqueueProductAction(
