@@ -12,6 +12,7 @@ on:
           - direct_ipv6_default_tls
           - direct_ipv6_custom_ca
           - direct_ipv6_custom_ca_verify_ca
+          - direct_ip_custom_ca_verify_ca
           - pooler_session
           - pooler_transaction
           - worker_direct_pooler

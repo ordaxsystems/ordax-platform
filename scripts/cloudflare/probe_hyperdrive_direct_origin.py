@@ -6,6 +6,7 @@ database role has LOGIN only, with no table, function or schema grants.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -25,9 +26,9 @@ POOLER_ORIGIN = "aws-1-sa-east-1.pooler.supabase.com"
 # Each mode gets its own short-lived role, config and Worker, never the Product
 # MCP database role or live Hyperdrive. Compare paths before any production cutover.
 ORIGIN_MODES = ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
-                "direct_ipv6_custom_ca_verify_ca", "pooler_session", "pooler_transaction",
-                "worker_direct_pooler", "worker_direct_ipv6",
-                "worker_direct_ipv6_custom_ca")
+                "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
+                "pooler_session", "pooler_transaction", "worker_direct_pooler",
+                "worker_direct_ipv6", "worker_direct_ipv6_custom_ca")
 CF_API = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}"
 DB_API = f"https://api.supabase.com/v1/projects/{PROJECT}/database/query"
 NAME_PREFIX = "ordax-direct-ipv6-diag-"
@@ -110,6 +111,20 @@ def literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def current_direct_ipv6(token: str) -> str:
+    rows = sql(token, "select host(inet_server_addr()) as address")
+    if len(rows) != 1 or not isinstance(rows[0].get("address"), str):
+        raise ProbeError("direct_origin_ip_unavailable")
+    address = rows[0]["address"].strip()
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        raise ProbeError("direct_origin_ip_invalid") from None
+    if parsed.version != 6 or parsed.is_unspecified or parsed.is_loopback:
+        raise ProbeError("direct_origin_ip_invalid")
+    return parsed.compressed
+
+
 def identifiers(run_id: str) -> tuple[str, str]:
     if not re.fullmatch(r"[1-9][0-9]{4,15}", run_id):
         raise ProbeError("invalid_run_identity")
@@ -135,8 +150,8 @@ def origin_for_mode(mode: str, role: str) -> dict:
     if mode not in ORIGIN_MODES:
         raise ProbeError("origin_mode_not_allowlisted")
     if mode in ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
-                "direct_ipv6_custom_ca_verify_ca", "worker_direct_ipv6",
-                "worker_direct_ipv6_custom_ca"):
+                "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
+                "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
         return {"scheme": "postgres", "database": "postgres",
                 "user": role, "host": ORIGIN, "port": 5432}
     return {"scheme": "postgres", "database": "postgres",
@@ -179,11 +194,22 @@ def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
 
 
 def create_hyperdrive(token: str, name: str, role: str, credential: str,
-                      mode: str = "direct_ipv6") -> str:
+                      mode: str = "direct_ipv6",
+                      origin_host_override: str | None = None) -> str:
     if mode in ("worker_direct_pooler", "worker_direct_ipv6",
                 "worker_direct_ipv6_custom_ca"):
         raise ProbeError("hyperdrive_for_direct_worker_forbidden")
     origin = origin_for_mode(mode, role)
+    if origin_host_override is not None:
+        if mode != "direct_ip_custom_ca_verify_ca":
+            raise ProbeError("origin_override_forbidden")
+        try:
+            parsed = ipaddress.ip_address(origin_host_override)
+        except ValueError:
+            raise ProbeError("origin_override_invalid") from None
+        if parsed.version != 6 or parsed.is_unspecified or parsed.is_loopback:
+            raise ProbeError("origin_override_invalid")
+        origin["host"] = parsed.compressed
     origin["password"] = credential
     body = {"name": name,
             "origin": origin,
@@ -192,11 +218,13 @@ def create_hyperdrive(token: str, name: str, role: str, credential: str,
     # Supabase/Hyperdrive documents TLS "require" as the default. This explicit
     # diagnostic mode omits the optional mTLS/TLS block to prove whether the
     # API field itself is involved in an internal Hyperdrive failure.
-    if mode in ("direct_ipv6_custom_ca", "direct_ipv6_custom_ca_verify_ca"):
+    if mode in ("direct_ipv6_custom_ca", "direct_ipv6_custom_ca_verify_ca",
+                "direct_ip_custom_ca_verify_ca"):
         body["mtls"] = {
             "sslmode": (
-                "verify-ca" if mode == "direct_ipv6_custom_ca_verify_ca"
-                else "verify-full"
+                "verify-ca" if mode in (
+                    "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca"
+                ) else "verify-full"
             ),
             "ca_certificate_id": "00ed2880-f686-4831-ba18-b8981d6ed48a",
         }
@@ -362,6 +390,8 @@ def run():
     mode = os.getenv("ORDAX_HYPERDRIVE_PROBE_MODE", "direct_ipv6")
     # Refuse unreviewed upstreams before even creating an ephemeral SQL role.
     origin = origin_for_mode(mode, role)
+    if mode == "direct_ip_custom_ca_verify_ca":
+        origin = {**origin, "host": current_direct_ipv6(db)}
     if not (PROBE_DIR / "src" / "hyperdrive_direct_probe.ts").is_file():
         raise ProbeError("isolated_source_missing")
     role_ownership = False
@@ -390,7 +420,12 @@ def run():
             )
             print("ORDAX_DIRECT_HYPERDRIVE=NOT_USED", flush=True)
         else:
-            hd_id = create_hyperdrive(cf, name, role, credential, mode)
+            hd_id = create_hyperdrive(
+                cf, name, role, credential, mode,
+                origin_host_override=(
+                    origin["host"] if mode == "direct_ip_custom_ca_verify_ca" else None
+                ),
+            )
             print("ORDAX_DIRECT_HYPERDRIVE=CREATED", flush=True)
             deploy_worker(name, hd_id, origin["host"], origin["port"])
         print("ORDAX_DIRECT_WORKER=DEPLOYED", flush=True)

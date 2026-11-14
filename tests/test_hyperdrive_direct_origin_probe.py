@@ -284,16 +284,62 @@ class DirectOriginProbeContracts(unittest.TestCase):
             "ca_certificate_id": "00ed2880-f686-4831-ba18-b8981d6ed48a",
         })
 
+        with mock.patch.object(probe, "api", return_value={
+            "success": True, "result": {"id": "e" * 32},
+        }) as direct_ip:
+            self.assertEqual("e" * 32, probe.create_hyperdrive(
+                "fake-token", "ordax-direct-ipv6-diag-39478283587",
+                "ordax_direct_diag_39478283587", "mock-secret",
+                "direct_ip_custom_ca_verify_ca",
+                origin_host_override="2001:db8::5"))
+        direct_ip_payload = direct_ip.call_args.args[3]
+        self.assertEqual(direct_ip_payload["origin"]["host"], "2001:db8::5")
+        self.assertEqual(direct_ip_payload["mtls"], {
+            "sslmode": "verify-ca",
+            "ca_certificate_id": "00ed2880-f686-4831-ba18-b8981d6ed48a",
+        })
+        with self.assertRaisesRegex(probe.ProbeError, "origin_override_forbidden"):
+            probe.create_hyperdrive(
+                "fake-token", "ordax-direct-ipv6-diag-39478283587",
+                "ordax_direct_diag_39478283587", "mock-secret",
+                "direct_ipv6", origin_host_override="2001:db8::5")
+        for invalid in ("127.0.0.1", "::", "::1", "not-an-ip"):
+            with self.subTest(invalid=invalid), self.assertRaises(probe.ProbeError):
+                probe.create_hyperdrive(
+                    "fake-token", "ordax-direct-ipv6-diag-39478283587",
+                    "ordax_direct_diag_39478283587", "mock-secret",
+                    "direct_ip_custom_ca_verify_ca",
+                    origin_host_override=invalid)
+
+    def test_current_direct_ipv6_is_read_only_and_ipv6_only(self):
+        with mock.patch.object(probe, "sql",
+                               return_value=[{"address": "2600:1f18:abcd::1234"}]) as query:
+            self.assertEqual(probe.current_direct_ipv6("fake-db-token"),
+                             "2600:1f18:abcd::1234")
+        query.assert_called_once_with(
+            "fake-db-token", "select host(inet_server_addr()) as address")
+        for rows in (
+            [],
+            [{"address": "127.0.0.1"}],
+            [{"address": "::1"}],
+            [{"address": "not-an-ip"}],
+            [{"wrong": "2600:1f18::1"}],
+        ):
+            with self.subTest(rows=rows), \
+                 mock.patch.object(probe, "sql", return_value=rows), \
+                 self.assertRaises(probe.ProbeError):
+                probe.current_direct_ipv6("fake-db-token")
+
     def test_isolated_pooler_modes_pin_hostname_port_and_tenant_user(self):
         role = "ordax_direct_diag_39478283587"
         self.assertEqual(probe.ORIGIN_MODES, (
             "direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
-            "direct_ipv6_custom_ca_verify_ca", "pooler_session", "pooler_transaction",
-            "worker_direct_pooler", "worker_direct_ipv6",
-            "worker_direct_ipv6_custom_ca"))
+            "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
+            "pooler_session", "pooler_transaction", "worker_direct_pooler",
+            "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"))
         for mode in ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
-                     "direct_ipv6_custom_ca_verify_ca", "worker_direct_ipv6",
-                     "worker_direct_ipv6_custom_ca"):
+                     "direct_ipv6_custom_ca_verify_ca", "direct_ip_custom_ca_verify_ca",
+                     "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
             self.assertEqual(probe.origin_for_mode(mode, role), {
                 "scheme": "postgres", "database": "postgres", "user": role,
                 "host": probe.ORIGIN, "port": 5432})
