@@ -7,9 +7,10 @@ import {
 
 type Json = Record<string, unknown>;
 type Revocation = Readonly<{
-  event: "installation" | "installation_repositories" | "repository";
+  event: "github_app_authorization" | "installation" | "installation_repositories" | "repository";
   action: string;
-  installationId: string;
+  installationId: string | null;
+  githubUserId: string | null;
   repositoryIds: readonly string[];
 }>;
 
@@ -79,16 +80,29 @@ export function githubAuthorityRevocation(
   const action = body.action;
   const installation = installationId(body);
 
+  if (event === "github_app_authorization") {
+    const sender = record(body.sender);
+    const userId = sender ? providerId(sender.id) : null;
+    if (action !== "revoked" || !userId) return null;
+    return {
+      event,
+      action,
+      installationId: null,
+      githubUserId: userId,
+      repositoryIds: [],
+    };
+  }
+
   if (event === "installation") {
     if (!installation || !["deleted", "suspend"].includes(action)) return null;
-    return { event, action, installationId: installation, repositoryIds: [] };
+    return { event, action, installationId: installation, githubUserId: null, repositoryIds: [] };
   }
 
   if (event === "installation_repositories") {
     if (!installation || !["added", "removed"].includes(action)) return null;
     const removed = repositoryIds(body.repositories_removed);
     if (!removed || removed.length === 0) return null;
-    return { event, action, installationId: installation, repositoryIds: removed };
+    return { event, action, installationId: installation, githubUserId: null, repositoryIds: removed };
   }
 
   if (event === "repository") {
@@ -96,7 +110,7 @@ export function githubAuthorityRevocation(
     const repository = record(body.repository);
     const id = repository ? providerId(repository.id) : null;
     if (!id) return null;
-    return { event, action, installationId: installation, repositoryIds: [id] };
+    return { event, action, installationId: installation, githubUserId: null, repositoryIds: [id] };
   }
 
   return null;
@@ -210,13 +224,6 @@ export function createProductGithubWebhookHandler(
 
     if (event === "ping") return json({ ok: true, accepted: true });
 
-    // User access tokens are deliberately never persisted. This event therefore
-    // has no credential to revoke locally. Installation/repository authority is
-    // revoked by the provider-scope events below.
-    if (event === "github_app_authorization") {
-      return json({ ok: true, accepted: true, ignored: true }, 202);
-    }
-
     const revocation = githubAuthorityRevocation(event, payload);
     if (!revocation) {
       return json({ ok: true, accepted: true, ignored: true }, 202);
@@ -228,6 +235,7 @@ export function createProductGithubWebhookHandler(
         event: revocation.event,
         action: revocation.action,
         installationId: revocation.installationId,
+        githubUserId: revocation.githubUserId,
         repositoryIds: revocation.repositoryIds,
         payloadSha256: await sha256(rawBody),
       });
