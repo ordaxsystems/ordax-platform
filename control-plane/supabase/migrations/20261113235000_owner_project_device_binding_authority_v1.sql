@@ -224,7 +224,7 @@ begin
     );
   end if;
 
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object(
         'intent_id', i.intent_id,
