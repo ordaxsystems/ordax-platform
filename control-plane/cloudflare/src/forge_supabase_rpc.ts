@@ -61,11 +61,13 @@ async function rpc(
   try{auth=bearer(authorization);}
   catch{return {ok:false,error:"forge_supabase_rpc_auth_required"};}
   let response:Response;
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),12_000);
   try{
     response=await fetchImpl(origin+"/rest/v1/rpc/ordax_forge_http_rpc_v1",{
       method:"POST",
       redirect:"error",
-      signal:AbortSignal.timeout(12_000),
+      signal:controller.signal,
       headers:{
         accept:"application/json",
         "content-type":"application/json",
@@ -74,9 +76,13 @@ async function rpc(
       },
       body:JSON.stringify({p_operation:operation,p_payload:payload}),
     });
-  }catch{
-    return {ok:false,error:"forge_supabase_rpc_fetch_unavailable"};
-  }
+  }catch(error){
+    const name=error instanceof Error?error.name:"";
+    return {ok:false,error:name==="AbortError"||name==="TimeoutError"
+      ?"forge_supabase_rpc_fetch_timeout"
+      :name==="TypeError"?"forge_supabase_rpc_fetch_type_error"
+      :"forge_supabase_rpc_fetch_unavailable"};
+  }finally{clearTimeout(timeout);}
   const declared=Number(response.headers.get("content-length")??0);
   if(declared>MAX_RESPONSE_BYTES)
     return {ok:false,error:"forge_supabase_rpc_response_too_large"};
