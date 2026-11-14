@@ -24,8 +24,22 @@ export interface DatabaseSession {
   end(): Promise<void>;
 }
 
-export function openPostgresSession(connectionString: string): DatabaseSession {
+export type DatabaseTlsTrust = Readonly<{
+  ca: string;
+  rejectUnauthorized: true;
+  servername?: string;
+}>;
+
+export function openPostgresSession(
+  connectionString: string,
+  tlsTrust?: DatabaseTlsTrust,
+): DatabaseSession {
   // Connection lifecycle is owned by the caller; no global singleton,
   // implicit fallback, direct SQL in routes or driver-specific return type.
-  return new Client({ connectionString }) as DatabaseSession;
+  // Optional explicit trust is used only by callers that own a verified CA;
+  // the canonical Hyperdrive path remains connection-string-only.
+  return new Client({
+    connectionString,
+    ...(tlsTrust ? { ssl: tlsTrust } : {}),
+  }) as DatabaseSession;
 }

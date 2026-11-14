@@ -26,7 +26,7 @@ POOLER_ORIGIN = "aws-1-sa-east-1.pooler.supabase.com"
 # MCP database role or live Hyperdrive. Compare paths before any production cutover.
 ORIGIN_MODES = ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
                 "pooler_session", "pooler_transaction", "worker_direct_pooler",
-                "worker_direct_ipv6")
+                "worker_direct_ipv6", "worker_direct_ipv6_custom_ca")
 CF_API = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}"
 DB_API = f"https://api.supabase.com/v1/projects/{PROJECT}/database/query"
 NAME_PREFIX = "ordax-direct-ipv6-diag-"
@@ -134,7 +134,7 @@ def origin_for_mode(mode: str, role: str) -> dict:
     if mode not in ORIGIN_MODES:
         raise ProbeError("origin_mode_not_allowlisted")
     if mode in ("direct_ipv6", "direct_ipv6_default_tls", "direct_ipv6_custom_ca",
-                "worker_direct_ipv6"):
+                "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"):
         return {"scheme": "postgres", "database": "postgres",
                 "user": role, "host": ORIGIN, "port": 5432}
     return {"scheme": "postgres", "database": "postgres",
@@ -178,7 +178,8 @@ def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
 
 def create_hyperdrive(token: str, name: str, role: str, credential: str,
                       mode: str = "direct_ipv6") -> str:
-    if mode in ("worker_direct_pooler", "worker_direct_ipv6"):
+    if mode in ("worker_direct_pooler", "worker_direct_ipv6",
+                "worker_direct_ipv6_custom_ca"):
         raise ProbeError("hyperdrive_for_direct_worker_forbidden")
     origin = origin_for_mode(mode, role)
     origin["password"] = credential
@@ -216,7 +217,7 @@ def find_hyperdrive(token: str, name: str) -> str | None:
 
 def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
                   origin_port: int, direct_postgres: bool = False,
-                  db_user: str | None = None) -> str:
+                  db_user: str | None = None, tls_ca: bool = False) -> str:
     if not re.fullmatch(r"ordax-direct-ipv6-diag-[0-9]{5,16}", name):
         raise ProbeError("worker_name_invalid")
     allowed_hosts = {ORIGIN, POOLER_ORIGIN}
@@ -238,7 +239,8 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
             raise ProbeError("direct_worker_config_invalid")
         return (base
                 + 'ORDAX_PROBE_DIRECT_POSTGRES = "1"\n'
-                + f'ORDAX_PROBE_DB_USER = "{db_user}"\n')
+                + f'ORDAX_PROBE_DB_USER = "{db_user}"\n'
+                + ('ORDAX_PROBE_TLS_CA = "1"\n' if tls_ca else ''))
     if not isinstance(hyperdrive_id, str) or not re.fullmatch(r"[a-f0-9]{32}", hyperdrive_id):
         raise ProbeError("hyperdrive_id_invalid")
     return (base
@@ -248,12 +250,14 @@ def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
 
 def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
                   origin_port: int, direct_postgres_password: str | None = None,
-                  db_user: str | None = None):
+                  db_user: str | None = None, tls_ca: bool = False):
     direct_postgres = direct_postgres_password is not None
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", prefix="ordax-direct-probe-",
                                      dir=PROBE_DIR, encoding="utf-8", delete=False) as file:
-        file.write(worker_config(name, hyperdrive_id, origin_host, origin_port,
-                                 direct_postgres=direct_postgres, db_user=db_user))
+        file.write(worker_config(
+            name, hyperdrive_id, origin_host, origin_port,
+            direct_postgres=direct_postgres, db_user=db_user, tls_ca=tls_ca,
+        ))
         config_path = Path(file.name)
     try:
         # Captured output prevents Wrangler from leaking deployment metadata.
@@ -358,7 +362,9 @@ def run():
     role_ownership = False
     deploy_attempted = False
     hd_id: str | None = None
-    direct_worker = mode in ("worker_direct_pooler", "worker_direct_ipv6")
+    direct_worker = mode in (
+        "worker_direct_pooler", "worker_direct_ipv6", "worker_direct_ipv6_custom_ca"
+    )
     failures = []
     try:
         require_unique_role(db, role)
@@ -375,6 +381,7 @@ def run():
             deploy_worker(
                 name, None, origin["host"], origin["port"],
                 direct_postgres_password=credential, db_user=origin["user"],
+                tls_ca=mode == "worker_direct_ipv6_custom_ca",
             )
             print("ORDAX_DIRECT_HYPERDRIVE=NOT_USED", flush=True)
         else:
