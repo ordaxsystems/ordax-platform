@@ -24,7 +24,8 @@ ORIGIN = f"db.{PROJECT}.supabase.co"
 POOLER_ORIGIN = "aws-1-sa-east-1.pooler.supabase.com"
 # Each mode gets its own short-lived role, config and Worker, never the Product
 # MCP database role or live Hyperdrive. Compare paths before any production cutover.
-ORIGIN_MODES = ("direct_ipv6", "direct_ipv6_default_tls", "pooler_session", "pooler_transaction")
+ORIGIN_MODES = ("direct_ipv6", "direct_ipv6_default_tls", "pooler_session",
+                "pooler_transaction", "worker_direct_pooler")
 CF_API = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT}"
 DB_API = f"https://api.supabase.com/v1/projects/{PROJECT}/database/query"
 NAME_PREFIX = "ordax-direct-ipv6-diag-"
@@ -136,7 +137,7 @@ def origin_for_mode(mode: str, role: str) -> dict:
                 "user": role, "host": ORIGIN, "port": 5432}
     return {"scheme": "postgres", "database": "postgres",
             "user": role + "." + PROJECT, "host": POOLER_ORIGIN,
-            "port": 5432 if mode == "pooler_session" else 6543}
+            "port": 6543 if mode == "pooler_transaction" else 5432}
 
 
 def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
@@ -146,7 +147,7 @@ def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
     ROLE or ALTER ROLE. A direct psql SELECT 1 rules out that misleading
     precondition; it never performs SQL writes or exposes the password.
     """
-    if mode not in ("pooler_session", "pooler_transaction"):
+    if mode not in ("pooler_session", "pooler_transaction", "worker_direct_pooler"):
         raise ProbeError("pooler_preflight_mode_invalid")
     if shutil.which("psql") is None:
         raise ProbeError("pooler_probe_cli_missing")
@@ -175,6 +176,8 @@ def verify_pooler_credential(mode: str, role: str, credential: str) -> None:
 
 def create_hyperdrive(token: str, name: str, role: str, credential: str,
                       mode: str = "direct_ipv6") -> str:
+    if mode == "worker_direct_pooler":
+        raise ProbeError("hyperdrive_for_direct_worker_forbidden")
     origin = origin_for_mode(mode, role)
     origin["password"] = credential
     body = {"name": name,
@@ -204,39 +207,71 @@ def find_hyperdrive(token: str, name: str) -> str | None:
     return matching[0] if matching else None
 
 
-def worker_config(name: str, hyperdrive_id: str, origin_host: str, origin_port: int) -> str:
+def worker_config(name: str, hyperdrive_id: str | None, origin_host: str,
+                  origin_port: int, direct_postgres: bool = False,
+                  db_user: str | None = None) -> str:
     if not re.fullmatch(r"ordax-direct-ipv6-diag-[0-9]{5,16}", name):
         raise ProbeError("worker_name_invalid")
-    if not re.fullmatch(r"[a-f0-9]{32}", hyperdrive_id):
-        raise ProbeError("hyperdrive_id_invalid")
     allowed_hosts = {ORIGIN, POOLER_ORIGIN}
     if origin_host not in allowed_hosts or origin_port not in (5432, 6543):
         raise ProbeError("worker_origin_invalid")
-    return (f'name = "{name}"\n'
+    base = (f'name = "{name}"\n'
             'main = "src/hyperdrive_direct_probe.ts"\n'
             'compatibility_date = "2026-10-17"\n'
             'compatibility_flags = ["nodejs_compat"]\n'
             'workers_dev = true\npreview_urls = false\n'
             '[vars]\n'
             f'ORDAX_PROBE_ORIGIN_HOST = "{origin_host}"\n'
-            f'ORDAX_PROBE_ORIGIN_PORT = "{origin_port}"\n'
-            '[[hyperdrive]]\nbinding = "POSTGRES"\n'
-            f'id = "{hyperdrive_id}"\n')
+            f'ORDAX_PROBE_ORIGIN_PORT = "{origin_port}"\n')
+    if direct_postgres:
+        expected_user = r"ordax_direct_diag_[0-9]{5,16}[.]" + re.escape(PROJECT)
+        if hyperdrive_id is not None or not isinstance(db_user, str) or not re.fullmatch(
+                expected_user, db_user):
+            raise ProbeError("direct_worker_config_invalid")
+        return (base
+                + 'ORDAX_PROBE_DIRECT_POSTGRES = "1"\n'
+                + f'ORDAX_PROBE_DB_USER = "{db_user}"\n')
+    if not isinstance(hyperdrive_id, str) or not re.fullmatch(r"[a-f0-9]{32}", hyperdrive_id):
+        raise ProbeError("hyperdrive_id_invalid")
+    return (base
+            + '[[hyperdrive]]\nbinding = "POSTGRES"\n'
+            + f'id = "{hyperdrive_id}"\n')
 
 
-def deploy_worker(name: str, hyperdrive_id: str, origin_host: str, origin_port: int):
+def deploy_worker(name: str, hyperdrive_id: str | None, origin_host: str,
+                  origin_port: int, direct_postgres_password: str | None = None,
+                  db_user: str | None = None):
+    direct_postgres = direct_postgres_password is not None
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", prefix="ordax-direct-probe-",
                                      dir=PROBE_DIR, encoding="utf-8", delete=False) as file:
-        file.write(worker_config(name, hyperdrive_id, origin_host, origin_port))
+        file.write(worker_config(name, hyperdrive_id, origin_host, origin_port,
+                                 direct_postgres=direct_postgres, db_user=db_user))
         config_path = Path(file.name)
     try:
         # Captured output prevents Wrangler from leaking deployment metadata.
+        wrangler_env = {key: value for key, value in os.environ.items()
+                        if key in {"PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT",
+                                   "CLOUDFLARE_API_TOKEN"}}
         process = subprocess.run(
             ["npx", "--yes", "wrangler@4.141.0", "deploy", "--config", str(config_path)],
             cwd=PROBE_DIR, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            check=False, timeout=120, env=os.environ.copy())
+            check=False, timeout=120, env=wrangler_env)
         if process.returncode:
             raise ProbeError("isolated_worker_deploy_failed")
+        if direct_postgres:
+            if not direct_postgres_password:
+                raise ProbeError("direct_worker_secret_missing")
+            secret_env = {key: value for key, value in os.environ.items()
+                          if key in {"PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT",
+                                     "CLOUDFLARE_API_TOKEN"}}
+            secret = subprocess.run(
+                ["npx", "--yes", "wrangler@4.141.0", "secret", "put",
+                 "ORDAX_PROBE_DB_PASSWORD", "--config", str(config_path)],
+                cwd=PROBE_DIR, input=direct_postgres_password.encode("utf-8"),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+                timeout=90, env=secret_env)
+            if secret.returncode:
+                raise ProbeError("direct_worker_secret_put_failed")
     except (OSError, subprocess.TimeoutExpired):
         raise ProbeError("isolated_worker_deploy_unavailable") from None
     finally:
@@ -315,6 +350,7 @@ def run():
     role_ownership = False
     deploy_attempted = False
     hd_id: str | None = None
+    direct_worker = mode == "worker_direct_pooler"
     failures = []
     try:
         require_unique_role(db, role)
@@ -322,14 +358,21 @@ def run():
         role_ownership = True  # Even an ambiguous CREATE needs safe cleanup.
         create_role(db, role, credential)
         print("ORDAX_DIRECT_ROLE=CREATED_LOGIN_ONLY", flush=True)
-        if mode in ("pooler_session", "pooler_transaction"):
+        if mode in ("pooler_session", "pooler_transaction", "worker_direct_pooler"):
             verify_pooler_credential(mode, role, credential)
             print("ORDAX_DIRECT_POOLER_CREDENTIAL=VERIFIED", flush=True)
-        hd_id = create_hyperdrive(cf, name, role, credential, mode)
         print("ORDAX_DIRECT_ORIGIN_MODE=" + mode, flush=True)
-        print("ORDAX_DIRECT_HYPERDRIVE=CREATED", flush=True)
         deploy_attempted = True
-        deploy_worker(name, hd_id, origin["host"], origin["port"])
+        if direct_worker:
+            deploy_worker(
+                name, None, origin["host"], origin["port"],
+                direct_postgres_password=credential, db_user=origin["user"],
+            )
+            print("ORDAX_DIRECT_HYPERDRIVE=NOT_USED", flush=True)
+        else:
+            hd_id = create_hyperdrive(cf, name, role, credential, mode)
+            print("ORDAX_DIRECT_HYPERDRIVE=CREATED", flush=True)
+            deploy_worker(name, hd_id, origin["host"], origin["port"])
         print("ORDAX_DIRECT_WORKER=DEPLOYED", flush=True)
         response = check_worker(name)
         print("ORDAX_DIRECT_PROBE=" + json.dumps(response, sort_keys=True, separators=(",", ":")), flush=True)
@@ -355,14 +398,17 @@ def run():
                 else:
                     failures.append("worker_cleanup")
                     print("ORDAX_DIRECT_WORKER_CLEANUP=FAILED", flush=True)
-        try:
-            config_id = hd_id or find_hyperdrive(cf, name)
-            if config_id:
-                api("DELETE", CF_API + "/hyperdrive/configs/" + config_id, cf)
-            print("ORDAX_DIRECT_HYPERDRIVE_CLEANUP=PASS", flush=True)
-        except ProbeError:
-            failures.append("hyperdrive_cleanup")
-            print("ORDAX_DIRECT_HYPERDRIVE_CLEANUP=FAILED_NAME_" + name, flush=True)
+        if direct_worker:
+            print("ORDAX_DIRECT_HYPERDRIVE_CLEANUP=NOT_CREATED", flush=True)
+        else:
+            try:
+                config_id = hd_id or find_hyperdrive(cf, name)
+                if config_id:
+                    api("DELETE", CF_API + "/hyperdrive/configs/" + config_id, cf)
+                print("ORDAX_DIRECT_HYPERDRIVE_CLEANUP=PASS", flush=True)
+            except ProbeError:
+                failures.append("hyperdrive_cleanup")
+                print("ORDAX_DIRECT_HYPERDRIVE_CLEANUP=FAILED_NAME_" + name, flush=True)
         if role_ownership:
             try:
                 delete_role(db, role)

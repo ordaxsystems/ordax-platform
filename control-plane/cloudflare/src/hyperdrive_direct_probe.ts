@@ -5,9 +5,12 @@ import { connect } from "cloudflare:sockets";
 import { openPostgresSession } from "./data_postgres_driver.ts";
 
 type Env = {
-  POSTGRES: { connectionString: string };
+  POSTGRES?: { connectionString: string };
   ORDAX_PROBE_ORIGIN_HOST: string;
   ORDAX_PROBE_ORIGIN_PORT: string;
+  ORDAX_PROBE_DIRECT_POSTGRES?: string;
+  ORDAX_PROBE_DB_USER?: string;
+  ORDAX_PROBE_DB_PASSWORD?: string;
 };
 
 function safeError(error: unknown): string {
@@ -57,6 +60,21 @@ function safeError(error: unknown): string {
   return "unclassified";
 }
 
+function probeConnectionString(env: Env): string | null {
+  if (env.ORDAX_PROBE_DIRECT_POSTGRES === "1") {
+    const user = (env.ORDAX_PROBE_DB_USER ?? "").trim();
+    const password = env.ORDAX_PROBE_DB_PASSWORD ?? "";
+    const host = (env.ORDAX_PROBE_ORIGIN_HOST ?? "").trim();
+    const port = Number(env.ORDAX_PROBE_ORIGIN_PORT);
+    if (!user || !password || !host || !Number.isInteger(port)
+        || port < 1 || port > 65535) return null;
+    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}`
+      + `@${host}:${port}/postgres?sslmode=require`;
+  }
+  const connectionString = (env.POSTGRES?.connectionString ?? "").trim();
+  return connectionString || null;
+}
+
 async function probeOriginTcp(env: Env): Promise<boolean> {
   const port = Number(env.ORDAX_PROBE_ORIGIN_PORT);
   if (!env.ORDAX_PROBE_ORIGIN_HOST || !Number.isInteger(port)
@@ -91,7 +109,14 @@ export default {
         { status: 503 },
       );
     }
-    const client = openPostgresSession(env.POSTGRES.connectionString);
+    const connectionString = probeConnectionString(env);
+    if (!connectionString) {
+      return Response.json(
+        { ok: false, phase: "connect", classification: "probe_connection_unconfigured" },
+        { status: 503 },
+      );
+    }
+    const client = openPostgresSession(connectionString);
     let phase = "connect";
     try {
       await client.connect();

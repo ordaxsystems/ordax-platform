@@ -12,6 +12,7 @@ on:
           - direct_ipv6_default_tls
           - pooler_session
           - pooler_transaction
+          - worker_direct_pooler
 
 permissions:
   contents: read
