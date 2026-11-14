@@ -22,6 +22,7 @@ import urllib.request
 
 PROJECT = "jhfphsjptrpmtnzkpwud"
 API = f"https://api.supabase.com/v1/projects/{PROJECT}/network-restrictions"
+BANS_API = f"https://api.supabase.com/v1/projects/{PROJECT}/network-bans"
 READY = "https://ordax-mcp.ordaxsystems.workers.dev/ready"
 CF_V4 = frozenset("""
 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22
@@ -160,6 +161,94 @@ def ready() -> bool:
     ))
 
 
+def _blocked_ips_from_response(bans: dict) -> tuple:
+    blocked = bans.get("banned_ipv4_addresses")
+    if not isinstance(blocked, list):
+        for wrapper in ("result", "data"):
+            obj = bans.get(wrapper)
+            if isinstance(obj, dict) and isinstance(obj.get("banned_ipv4_addresses"), list):
+                blocked = obj["banned_ipv4_addresses"]
+                break
+    if not isinstance(blocked, list):
+        safe_keys = sorted(key for key in bans if
+                           isinstance(key, str) and 1 <= len(key) <= 48 and
+                           key.replace("_", "").isalnum())
+        print("ORDAX_NETWORK_BANS_RESPONSE_KEYS=" + json.dumps(safe_keys), flush=True)
+        print("ORDAX_NETWORK_BANS_IPV4_TYPE=" + type(blocked).__name__, flush=True)
+        raise RepairFailure("network_bans_response_invalid")
+
+    blocked_ips = []
+    for raw in blocked:
+        candidate = raw.get("banned_address") if isinstance(raw, dict) else raw
+        try:
+            if not isinstance(candidate, str):
+                raise ValueError("invalid_ban_record")
+            if "/" in candidate:
+                network = ipaddress.ip_network(candidate, strict=True)
+                if network.prefixlen != network.max_prefixlen:
+                    raise ValueError("ban_must_be_single_host")
+                item = network.network_address
+            else:
+                item = ipaddress.ip_address(candidate)
+            blocked_ips.append(item)
+        except ValueError:
+            print("ORDAX_NETWORK_BANS_ITEM_TYPE=" + type(raw).__name__, flush=True)
+            if isinstance(candidate, str):
+                mask = "".join("9" if c.isdecimal() else "a" if c.isalpha()
+                               else c if c in "./:_-[]()" else "?"
+                               for c in candidate[:80])
+                print("ORDAX_NETWORK_BANS_ITEM_PATTERN=" + mask, flush=True)
+                print("ORDAX_NETWORK_BANS_ITEM_LENGTH=" + str(len(candidate)), flush=True)
+            if isinstance(raw, dict):
+                keys = sorted(k for k in raw if isinstance(k, str) and
+                              1 <= len(k) <= 48 and k.replace("_", "").isalnum())
+                print("ORDAX_NETWORK_BANS_ITEM_KEYS=" + json.dumps(keys), flush=True)
+            raise RepairFailure("network_bans_response_invalid") from None
+    return tuple(blocked_ips)
+
+
+def network_bans(token: str) -> tuple:
+    return _blocked_ips_from_response(request("POST", BANS_API + "/retrieve", token, {}))
+
+
+def cloudflare_bans(blocked_ips: tuple) -> tuple:
+    cf_v4 = tuple(ipaddress.ip_network(c) for c in CF_V4)
+    cf_v6 = tuple(ipaddress.ip_network(c) for c in CF_V6)
+    return tuple(ip for ip in blocked_ips if any(
+        ip in network for network in (cf_v4 if ip.version == 4 else cf_v6)))
+
+
+def clear_cloudflare_bans(token: str) -> int:
+    blocked = network_bans(token)
+    targets = cloudflare_bans(blocked)
+    print("ORDAX_NETWORK_BANS_CLOUDFLARE_REPAIR_COUNT=" + str(len(targets)), flush=True)
+    if not targets:
+        print("ORDAX_NETWORK_BANS_CLOUDFLARE_REPAIR=NOT_NEEDED", flush=True)
+        return 0
+
+    request("DELETE", BANS_API, token, {
+        "ipv4_addresses": sorted(str(ip) for ip in targets),
+        "requester_ip": False,
+    })
+    for attempt in range(12):
+        remaining = cloudflare_bans(network_bans(token))
+        if not remaining:
+            print("ORDAX_NETWORK_BANS_CLOUDFLARE_REPAIR=CONFIRMED", flush=True)
+            return len(targets)
+        if attempt < 11:
+            time.sleep(2)
+    raise RepairFailure("cloudflare_network_bans_not_cleared")
+
+
+def wait_ready(retries: int = 18, delay: int = 10) -> bool:
+    for attempt in range(retries):
+        if ready():
+            return True
+        if attempt + 1 < retries:
+            time.sleep(delay)
+    return False
+
+
 def rollback_if_ours(token: str, previous: dict, expected: dict) -> None:
     current, _ = policy(token)
     if equal_acl(current, previous):
@@ -195,63 +284,11 @@ def inspect_only(token: str) -> None:
         all(covered(x, allowed_v4) for x in CF_V4)).lower(), flush=True)
     print("ORDAX_NETWORK_CLOUDFLARE_IPV6_COVERED=" + str(
         all(covered(x, allowed_v6) for x in CF_V6)).lower(), flush=True)
-    bans = request("POST", API.replace("/network-restrictions", "/network-bans/retrieve"),
-                   token, {})
-    blocked = bans.get("banned_ipv4_addresses")
-    if not isinstance(blocked, list):
-        # Provider implementations may wrap the API response; accept the
-        # documented field under one known envelope, but never guess an empty
-        # list or print values when the shape is unexpected.
-        for wrapper in ("result", "data"):
-            obj = bans.get(wrapper)
-            if isinstance(obj, dict) and isinstance(obj.get("banned_ipv4_addresses"), list):
-                blocked = obj["banned_ipv4_addresses"]
-                break
-    if not isinstance(blocked, list):
-        safe_keys = sorted(key for key in bans if
-                           isinstance(key, str) and 1 <= len(key) <= 48 and
-                           key.replace("_", "").isalnum())
-        print("ORDAX_NETWORK_BANS_RESPONSE_KEYS=" + json.dumps(safe_keys), flush=True)
-        print("ORDAX_NETWORK_BANS_IPV4_TYPE=" + type(blocked).__name__, flush=True)
-        raise RepairFailure("network_bans_response_invalid")
-    blocked_ips = []
-    for raw in blocked:
-        candidate = raw.get("banned_address") if isinstance(raw, dict) else raw
-        try:
-            if not isinstance(candidate, str):
-                raise ValueError("invalid_ban_record")
-            # Supabase can return IPv6 ban entries even under the legacy
-            # 'banned_ipv4_addresses' name. Accept exact host addresses only.
-            if "/" in candidate:
-                network = ipaddress.ip_network(candidate, strict=True)
-                if network.prefixlen != network.max_prefixlen:
-                    raise ValueError("ban_must_be_single_host")
-                item = network.network_address
-            else:
-                item = ipaddress.ip_address(candidate)
-            blocked_ips.append(item)
-        except ValueError:
-            # Only bounded data types and key names are observable; addresses
-            # and provider return values remain secret to the runner.
-            print("ORDAX_NETWORK_BANS_ITEM_TYPE=" + type(raw).__name__, flush=True)
-            if isinstance(candidate, str):
-                mask = "".join("9" if c.isdecimal() else "a" if c.isalpha()
-                               else c if c in "./:_-[]()" else "?"
-                               for c in candidate[:80])
-                print("ORDAX_NETWORK_BANS_ITEM_PATTERN=" + mask, flush=True)
-                print("ORDAX_NETWORK_BANS_ITEM_LENGTH=" + str(len(candidate)), flush=True)
-            if isinstance(raw, dict):
-                keys = sorted(k for k in raw if isinstance(k, str) and
-                              1 <= len(k) <= 48 and k.replace("_", "").isalnum())
-                print("ORDAX_NETWORK_BANS_ITEM_KEYS=" + json.dumps(keys), flush=True)
-            raise RepairFailure("network_bans_response_invalid") from None
-    cf_v4 = tuple(ipaddress.ip_network(c) for c in CF_V4)
-    cf_v6 = tuple(ipaddress.ip_network(c) for c in CF_V6)
-    cloudflare_bans = sum(any(ip in net for net in (
-        cf_v4 if ip.version == 4 else cf_v6)) for ip in blocked_ips)
+    blocked_ips = network_bans(token)
+    overlap = cloudflare_bans(blocked_ips)
     print("ORDAX_NETWORK_BANS_IPV4_COUNT=" + str(sum(ip.version == 4 for ip in blocked_ips)), flush=True)
     print("ORDAX_NETWORK_BANS_IPV6_COUNT=" + str(sum(ip.version == 6 for ip in blocked_ips)), flush=True)
-    print("ORDAX_NETWORK_BANS_CLOUDFLARE_OVERLAP=" + str(cloudflare_bans), flush=True)
+    print("ORDAX_NETWORK_BANS_CLOUDFLARE_OVERLAP=" + str(len(overlap)), flush=True)
     print("ORDAX_NETWORK_INSPECTION=COMPLETE_NO_CHANGES", flush=True)
 
 
@@ -269,33 +306,34 @@ def run() -> None:
         "ipv6": len(set(expected["dbAllowedCidrsV6"]) - set(previous["dbAllowedCidrsV6"])),
     }
     print("ORDAX_EGRESS_ADD_COUNTS=" + json.dumps(additions, sort_keys=True), flush=True)
-    if additions["ipv4"] + additions["ipv6"] == 0:
+    acl_changed = additions["ipv4"] + additions["ipv6"] > 0
+    if not acl_changed:
         print("ORDAX_EGRESS_POLICY=ALREADY_COVERED", flush=True)
-        if not ready():
-            raise RepairFailure("covered_network_but_postgres_unavailable")
-        print("ORDAX_EGRESS_READY=PASS", flush=True)
-        return
 
-    # The user has requested the root fix; apply exactly the reviewed Cloudflare
-    # network list, keep the original rules and explicitly rollback if the MCP
-    # does not recover after the ACL propagation window.
+    # Repair only the two provider-controlled network layers:
+    # 1) preserve existing allowlist entries and add missing Cloudflare ranges;
+    # 2) remove only exact host bans that belong to those verified ranges.
+    # Never clear unrelated bans or broaden database roles/permissions.
     try:
-        update_policy(token, expected)
-        print("ORDAX_EGRESS_ACL=APPLIED_REQUEST", flush=True)
-        if not wait_for_applied(token, expected):
-            raise RepairFailure("policy_application_not_confirmed")
-        for attempt in range(18):
-            if ready():
-                print("ORDAX_EGRESS_READY=PASS", flush=True)
-                return
-            if attempt < 17:
-                time.sleep(10)
-        raise RepairFailure("mcp_remains_unavailable_after_network_repair")
+        if acl_changed:
+            update_policy(token, expected)
+            print("ORDAX_EGRESS_ACL=APPLIED_REQUEST", flush=True)
+            if not wait_for_applied(token, expected):
+                raise RepairFailure("policy_application_not_confirmed")
+
+        clear_cloudflare_bans(token)
+        if wait_ready():
+            print("ORDAX_EGRESS_READY=PASS", flush=True)
+            return
+        if acl_changed:
+            raise RepairFailure("mcp_remains_unavailable_after_network_repair")
+        raise RepairFailure("covered_network_and_bans_repaired_but_postgres_unavailable")
     except RepairFailure:
-        try:
-            rollback_if_ours(token, previous, expected)
-        except RepairFailure as failure:
-            print("ORDAX_EGRESS_ROLLBACK=FAILED_" + str(failure), flush=True)
+        if acl_changed:
+            try:
+                rollback_if_ours(token, previous, expected)
+            except RepairFailure as failure:
+                print("ORDAX_EGRESS_ROLLBACK=FAILED_" + str(failure), flush=True)
         raise
 
 

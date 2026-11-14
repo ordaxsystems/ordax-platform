@@ -86,9 +86,12 @@ class HyperdriveEgressRepairTests(TestCase):
         with mock.patch.dict(os.environ, {"SUPABASE_ACCESS_TOKEN": "synthetic"}), \
              mock.patch.object(mod, "policy", return_value=(old, "applied")), \
              mock.patch.object(mod, "official_cloudflare_networks"), \
-             mock.patch.object(mod, "ready", return_value=False), \
+             mock.patch.object(mod, "clear_cloudflare_bans", return_value=0), \
+             mock.patch.object(mod, "wait_ready", return_value=False), \
              mock.patch.object(mod, "update_policy") as update:
-            with self.assertRaisesRegex(mod.RepairFailure, "covered_network_but_postgres_unavailable"):
+            with self.assertRaisesRegex(
+                    mod.RepairFailure,
+                    "covered_network_and_bans_repaired_but_postgres_unavailable"):
                 mod.run()
             update.assert_not_called()
 
@@ -98,9 +101,9 @@ class HyperdriveEgressRepairTests(TestCase):
         with mock.patch.dict(os.environ, {"SUPABASE_ACCESS_TOKEN": "synthetic"}), \
              mock.patch.object(mod, "policy", side_effect=[(OLD, "applied"), (expected, "applied")]), \
              mock.patch.object(mod, "official_cloudflare_networks"), \
-             mock.patch.object(mod, "ready", return_value=False), \
+             mock.patch.object(mod, "clear_cloudflare_bans", return_value=0), \
+             mock.patch.object(mod, "wait_ready", return_value=False), \
              mock.patch.object(mod, "wait_for_applied", return_value=True), \
-             mock.patch.object(mod.time, "sleep"), \
              mock.patch.object(mod, "update_policy", side_effect=lambda _, acl: calls.append(acl)):
             with self.assertRaisesRegex(mod.RepairFailure, "mcp_remains_unavailable_after_network_repair"):
                 mod.run()
@@ -114,7 +117,8 @@ class HyperdriveEgressRepairTests(TestCase):
         with mock.patch.dict(os.environ, {"SUPABASE_ACCESS_TOKEN": "synthetic"}), \
              mock.patch.object(mod, "policy", return_value=(OLD, "applied")), \
              mock.patch.object(mod, "official_cloudflare_networks"), \
-             mock.patch.object(mod, "ready", return_value=True), \
+             mock.patch.object(mod, "clear_cloudflare_bans", return_value=0), \
+             mock.patch.object(mod, "wait_ready", return_value=True), \
              mock.patch.object(mod, "wait_for_applied", return_value=True), \
              mock.patch.object(mod, "update_policy", side_effect=lambda _, acl: calls.append(acl)):
             mod.run()
@@ -130,6 +134,47 @@ class HyperdriveEgressRepairTests(TestCase):
             with self.assertRaisesRegex(mod.RepairFailure, "rollback_blocked_concurrent_change"):
                 mod.rollback_if_ours("synthetic", OLD, updated)
             update.assert_not_called()
+
+    def test_clear_cloudflare_bans_removes_only_provider_hosts(self):
+        cf4 = ipaddress.ip_address("173.245.48.3")
+        cf6 = ipaddress.ip_address("2606:4700::abcd")
+        other = ipaddress.ip_address("2001:db8::1234")
+        calls = []
+        with mock.patch.object(mod, "network_bans",
+                               side_effect=[(cf4, cf6, other), (other,)]), \
+             mock.patch.object(mod, "request",
+                               side_effect=lambda method, url, token=None, body=None:
+                               calls.append((method, url, token, body)) or {}), \
+             mock.patch.object(mod.time, "sleep"):
+            count = mod.clear_cloudflare_bans("synthetic-token")
+        self.assertEqual(count, 2)
+        self.assertEqual(len(calls), 1)
+        method, url, token, body = calls[0]
+        self.assertEqual((method, url, token),
+                         ("DELETE", mod.BANS_API, "synthetic-token"))
+        self.assertEqual(body["requester_ip"], False)
+        self.assertEqual(set(body["ipv4_addresses"]), {str(cf4), str(cf6)})
+        self.assertNotIn(str(other), body["ipv4_addresses"])
+
+    def test_clear_cloudflare_bans_preserves_unrelated_bans_without_delete(self):
+        other = ipaddress.ip_address("2001:db8::1234")
+        with mock.patch.object(mod, "network_bans", return_value=(other,)), \
+             mock.patch.object(mod, "request") as request:
+            count = mod.clear_cloudflare_bans("synthetic-token")
+        self.assertEqual(count, 0)
+        request.assert_not_called()
+
+    def test_already_covered_cloudflare_bans_repair_can_restore_ready(self):
+        old = mod.merge(OLD)
+        with mock.patch.dict(os.environ, {"SUPABASE_ACCESS_TOKEN": "synthetic"}), \
+             mock.patch.object(mod, "policy", return_value=(old, "applied")), \
+             mock.patch.object(mod, "official_cloudflare_networks"), \
+             mock.patch.object(mod, "clear_cloudflare_bans", return_value=68) as clear, \
+             mock.patch.object(mod, "wait_ready", return_value=True), \
+             mock.patch.object(mod, "update_policy") as update:
+            mod.run()
+        clear.assert_called_once_with("synthetic")
+        update.assert_not_called()
 
     def test_inspection_reports_bans_without_leaking_addresses_or_mutation(self):
         acl = mod.merge(OLD)
