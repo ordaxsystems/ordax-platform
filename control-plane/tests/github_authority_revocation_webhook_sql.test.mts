@@ -6,22 +6,30 @@ import { createRequire } from "node:module";
 
 const require=createRequire(new URL("../cloudflare/package.json",import.meta.url));
 const {PGlite}=require("@electric-sql/pglite");
-const migration=fs.readFileSync(
+const providerMigration=fs.readFileSync(
   new URL("../supabase/migrations/20261114002500_github_authority_revocation_webhook_v1.sql",import.meta.url),
+  "utf8",
+);
+const userMigration=fs.readFileSync(
+  new URL("../supabase/migrations/20261114004000_github_user_authorization_revocation_v1.sql",import.meta.url),
   "utf8",
 );
 
 test("GitHub webhook migration is fail-closed and never touches Space/device execute authority",()=>{
-  assert.match(migration,/ordax_github_webhook_executor/);
-  assert.match(migration,/ordax_github_authority_revocations/);
-  assert.match(migration,/ordax_github_webhook_deliveries/);
-  assert.match(migration,/github_repository_authority_revoked/);
-  assert.match(migration,/pg_advisory_xact_lock/);
-  assert.match(migration,/status = 'cancelled'/);
-  assert.match(migration,/error_code = 'github_authority_revoked'/);
-  assert.doesNotMatch(migration,/update\s+public\.ordax_space_devices/i,
-    "repository revocation must not remove a Space/device relation shared by other Projects");
-  assert.doesNotMatch(migration,/delete\s+from\s+public\.ordax_project_connections/i,
+  const combined=providerMigration+"\n"+userMigration;
+  assert.match(combined,/ordax_github_webhook_executor/);
+  assert.match(combined,/ordax_github_authority_revocations/);
+  assert.match(combined,/ordax_github_webhook_deliveries/);
+  assert.match(combined,/github_repository_authority_revoked/);
+  assert.match(combined,/verified_github_user_id/);
+  assert.match(combined,/github_app_authorization/);
+  assert.match(combined,/pg_advisory_xact_lock/);
+  assert.match(combined,/status = 'cancelled'/);
+  assert.match(combined,/error_code = 'github_authority_revoked'/);
+  assert.match(userMigration,/drop function public\.ordax_apply_github_authority_revocation_v1/);
+  assert.doesNotMatch(combined,/update\s+public\.ordax_space_devices/i,
+    "provider revocation must not remove a Space/device relation shared by other Projects");
+  assert.doesNotMatch(combined,/delete\s+from\s+public\.ordax_project_connections/i,
     "provider history remains auditable; authority changes state instead of deleting identity");
 });
 
@@ -30,7 +38,8 @@ test("signed provider revocation cascades through connection, binding, grants, i
   const owner=randomUUID(),space=randomUUID(),project=randomUUID(),device=randomUUID();
   const connection=randomUUID(),binding=randomUUID(),grant=randomUUID(),intent=randomUUID();
   const delivery=randomUUID(),staleChallenge=randomUUID(),freshChallenge=randomUUID();
-  const installation="123456789", repository="987654321";
+  const userDelivery=randomUUID(),staleUserChallenge=randomUUID(),freshUserChallenge=randomUUID();
+  const installation="123456789", repository="987654321", githubUser="555";
   try{
     await db.exec(`
       create schema private;
@@ -105,6 +114,8 @@ test("signed provider revocation cascades through connection, binding, grants, i
         project_id uuid not null,
         space_id uuid not null,
         status text not null,
+        github_user_id bigint,
+        github_user_login text,
         expires_at timestamptz not null,
         verified_at timestamptz,
         consumed_at timestamptz,
@@ -142,8 +153,13 @@ test("signed provider revocation cascades through connection, binding, grants, i
         installation_id,repository_id,repository_full_name,default_branch,
         access_mode,state,metadata,project_id
       ) values($1,$2,$3,'github','444',$4::bigint,$5::bigint,
-        'ordaxsystems/ordax-platform','main','read','active','{}'::jsonb,$6)`,
-      [connection,space,owner,installation,repository,project],
+        'ordaxsystems/ordax-platform','main','read','active',
+        jsonb_build_object(
+          'authority','github_app_user_authorization_v1',
+          'verified_at',(clock_timestamp()-interval '1 minute'),
+          'verified_github_user_id',$7::text
+        ),$6)`,
+      [connection,space,owner,installation,repository,project,githubUser],
     );
     await db.query(
       `insert into public.ordax_device_project_bindings(
@@ -166,12 +182,21 @@ test("signed provider revocation cascades through connection, binding, grants, i
       );
     }
 
-    await db.exec(migration);
+    await db.exec(providerMigration);
+    await db.exec(userMigration);
 
-    const apply=async(deliveryId:string,payloadHash="a".repeat(64),event="repository",action="renamed")=>
+    const apply=async(
+      deliveryId:string,
+      payloadHash="a".repeat(64),
+      event="repository",
+      action="renamed",
+      installationId:string|null=installation,
+      githubUserId:string|null=null,
+      repositoryIds=`{${repository}}`,
+    )=>
       (await db.query(
-        "select public.ordax_apply_github_authority_revocation_v1($1::uuid,$2::text,$3::text,$4::bigint,$5::bigint[],$6::text) as result",
-        [deliveryId,event,action,installation,`{${repository}}`,payloadHash],
+        "select public.ordax_apply_github_authority_revocation_v2($1::uuid,$2::text,$3::text,$4::bigint,$5::bigint,$6::bigint[],$7::text) as result",
+        [deliveryId,event,action,installationId,githubUserId,repositoryIds,payloadHash],
       )).rows[0].result as any;
 
     const revoked=await apply(delivery);
@@ -206,10 +231,11 @@ test("signed provider revocation cascades through connection, binding, grants, i
     assert.equal((await apply(delivery,"b".repeat(64))).error,"github_webhook_delivery_conflict");
 
     const marker=(await db.query(
-      "select scope_kind,installation_id,repository_id from private.ordax_github_authority_revocations",
+      "select scope_kind,installation_id,repository_id,github_user_id from private.ordax_github_authority_revocations where scope_kind='repository'",
     )).rows[0] as any;
     assert.deepEqual(marker,{
-      scope_kind:"repository",installation_id:Number(installation),repository_id:Number(repository),
+      scope_kind:"repository",installation_id:Number(installation),
+      repository_id:Number(repository),github_user_id:null,
     });
 
     await assert.rejects(()=>db.query(
@@ -231,9 +257,10 @@ test("signed provider revocation cascades through connection, binding, grants, i
     const addCandidate=async(challengeId:string,verifiedAt:string)=>{
       await db.query(
         `insert into private.ordax_owner_github_authorization_challenges(
-          challenge_id,owner_user_id,project_id,space_id,status,expires_at,verified_at
-        ) values($1,$2,$3,$4,'verified',$5,$6)`,
-        [challengeId,owner,project,space,expires,verifiedAt],
+          challenge_id,owner_user_id,project_id,space_id,status,github_user_id,
+          github_user_login,expires_at,verified_at
+        ) values($1,$2,$3,$4,'verified',$5::bigint,'owner-login',$6,$7)`,
+        [challengeId,owner,project,space,githubUser,expires,verifiedAt],
       );
       await db.query(
         `insert into private.ordax_owner_github_repository_candidates(
@@ -258,12 +285,72 @@ test("signed provider revocation cascades through connection, binding, grants, i
     )).rows[0].result as any;
     assert.equal(fresh.ok,true);
     assert.equal(fresh.state,"active");
-    assert.equal((await db.query(
-      "select state,metadata->>'verified_at' as verified_at from public.ordax_project_connections where connection_id=$1",
+    const freshConnection=(await db.query(
+      "select state,metadata->>'verified_at' as verified_at,metadata->>'verified_github_user_id' as github_user_id from public.ordax_project_connections where connection_id=$1",
       [connection],
-    )).rows[0].state,"active");
+    )).rows[0] as any;
+    assert.equal(freshConnection.state,"active");
+    assert.equal(freshConnection.github_user_id,githubUser);
 
-    const signature="public.ordax_apply_github_authority_revocation_v1(uuid,text,text,bigint,bigint[],text)";
+    const binding2=randomUUID(),grant2=randomUUID(),intent2=randomUUID();
+    await db.query(
+      `insert into public.ordax_device_project_bindings(
+        binding_id,project_id,device_id,local_project_ref,state,allowed_capabilities
+      ) values($1,$2,$3,'project-2','active',array['terminal.exec'])`,
+      [binding2,project,device],
+    );
+    await db.query(
+      "insert into public.ordax_remote_capability_grants(grant_id,project_id,state) values($1,$2,'active')",
+      [grant2,project],
+    );
+    await db.query(
+      "insert into private.ordax_owner_project_device_binding_intents(intent_id,project_id) values($1,$2)",
+      [intent2,project],
+    );
+    await db.query(
+      "insert into private.ordax_product_action_requests(project_id,status,lease_expires_at) values($1,'queued',clock_timestamp()+interval '5 minutes')",
+      [project],
+    );
+
+    const userRevoked=await apply(
+      userDelivery,"c".repeat(64),"github_app_authorization","revoked",null,githubUser,"{}",
+    );
+    assert.deepEqual(userRevoked,{
+      ok:true,replayed:false,delivery_id:userDelivery,
+      connection_count:1,binding_count:1,grant_count:1,action_count:1,intent_count:1,
+    });
+    const userMarker=(await db.query(
+      "select scope_kind,installation_id,repository_id,github_user_id,revoked_at from private.ordax_github_authority_revocations where scope_kind='user'",
+    )).rows[0] as any;
+    assert.equal(userMarker.scope_kind,"user");
+    assert.equal(userMarker.installation_id,null);
+    assert.equal(userMarker.repository_id,null);
+    assert.equal(userMarker.github_user_id,Number(githubUser));
+
+    const userRevokedAt=userMarker.revoked_at as Date;
+    await addCandidate(
+      staleUserChallenge,new Date(userRevokedAt.getTime()-1000).toISOString(),
+    );
+    const staleUser=(await db.query(
+      "select public.ordax_owner_select_github_repository_v1($1::uuid,$2::uuid,$3::text) as result",
+      [owner,staleUserChallenge,repository],
+    )).rows[0].result as any;
+    assert.deepEqual(staleUser,{ok:false,error:"github_repository_authority_revoked"});
+
+    await addCandidate(
+      freshUserChallenge,new Date(userRevokedAt.getTime()+1000).toISOString(),
+    );
+    const freshUser=(await db.query(
+      "select public.ordax_owner_select_github_repository_v1($1::uuid,$2::uuid,$3::text) as result",
+      [owner,freshUserChallenge,repository],
+    )).rows[0].result as any;
+    assert.equal(freshUser.ok,true);
+    assert.equal(freshUser.state,"active");
+
+    const signature="public.ordax_apply_github_authority_revocation_v2(uuid,text,text,bigint,bigint,bigint[],text)";
+    assert.equal((await db.query(
+      "select to_regprocedure('public.ordax_apply_github_authority_revocation_v1(uuid,text,text,bigint,bigint[],text)') is null as gone",
+    )).rows[0].gone,true);
     for(const role of ["anon","authenticated","service_role","ordax_edge_executor"]){
       assert.equal((await db.query(
         "select has_function_privilege($1,$2,'EXECUTE') as allowed",[role,signature],
