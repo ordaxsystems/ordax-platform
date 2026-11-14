@@ -11,11 +11,11 @@ import {
   enqueueForgeAction,claimForgeAction,startForgeAction,renewForgeAction,
   reportForgeAction,getForgeAction,type ForgeInstanceResolution,type ForgeActionReceipt,
 } from "./forge_mcp_store.ts";
+import {
+  createForgeSupabaseRpcClient,forgeSupabaseRpcConfigured,type ForgeSupabaseRpcEnv,
+} from "./forge_supabase_rpc.ts";
 
-type Env=ProductAuthEnv&ProductPostgresEnv&Readonly<{
-  /** Public OAuth client for the native Forge app only; never an Owner-wide grant. */
-  FORGE_NATIVE_OAUTH_CLIENT_ID?:string;
-}>;
+type Env=ProductAuthEnv&ProductPostgresEnv&ForgeSupabaseRpcEnv;
 type Json=Record<string,unknown>;
 type ForgeTool=Readonly<{
   name:string;description:string;inputSchema:Json;
@@ -130,20 +130,15 @@ function metadata(origin:string,issuer:string):Json{
 function authChallenge():string{
   return `Bearer resource_metadata="https://${FORGE_MCP_HOSTNAME}${FORGE_RESOURCE_METADATA_PATH}"`;
 }
-function nativeOwner(identity:Awaited<ReturnType<typeof authenticateProductRequest>>,env:Env):
+function nativeOwner(identity:Awaited<ReturnType<typeof authenticateProductRequest>>):
   {ok:true;ownerUserId:string}|{ok:false;error:string;status:number}{
   if(!identity.ok)return identity;
   if(identity.role!=="authenticated"||!isCanonicalUuid(identity.subjectId))
     return {ok:false,error:"forge_native_identity_invalid",status:403};
-  // Legacy normal account sessions stay valid during the cutover. OAuth sessions
-  // are accepted only when signed for the one public Forge desktop client. This
-  // never widens authorizeProductOwnerIdentity or any /v3/owner/* endpoint.
-  if(identity.clientId!==null){
-    const pinned=(env.FORGE_NATIVE_OAUTH_CLIENT_ID??"").trim().toLowerCase();
-    if(!isCanonicalUuid(pinned)||!isCanonicalUuid(identity.clientId)
-      ||identity.clientId.toLowerCase()!==pinned)
-      return {ok:false,error:"forge_native_oauth_client_required",status:403};
-  }
+  // Native routes require an OAuth session. The exact Forge desktop client is
+  // authorized by PostgreSQL, which is the single SSOT for this boundary.
+  if(identity.clientId===null||!isCanonicalUuid(identity.clientId))
+    return {ok:false,error:"forge_native_oauth_client_required",status:403};
   return {ok:true,ownerUserId:identity.subjectId};
 }
 function toolFromCatalog(resolution:ForgeInstanceResolution,name:string):ForgeTool|null{
@@ -212,6 +207,7 @@ type Dependencies=Readonly<{
   renew?:typeof renewForgeAction;
   report?:typeof reportForgeAction;
   getAction?:typeof getForgeAction;
+  fetchImpl?:typeof fetch;
   now?:()=>number;
   randomUUID?:()=>string;
   sleep?:(ms:number)=>Promise<void>;
@@ -229,23 +225,44 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
   const renew=deps.renew??renewForgeAction;
   const report=deps.report??reportForgeAction;
   const getAction=deps.getAction??getForgeAction;
+  const fetchImpl=deps.fetchImpl??fetch;
   const now=deps.now??Date.now;
   const randomUUID=deps.randomUUID??(()=>crypto.randomUUID());
   const sleep=deps.sleep??(ms=>new Promise(r=>setTimeout(r,ms)));
 
   async function owner(request:Request){
-    return nativeOwner(await authenticateOwner(request,env),env);
+    return nativeOwner(await authenticateOwner(request,env));
   }
-  async function resolveFor(identity:VerifiedProductMcpClient){
-    return resolve(env,{ownerUserId:identity.ownerUserId,clientId:identity.clientId});
+  function storeFor(request:Request){
+    if(forgeSupabaseRpcConfigured(env))
+      return createForgeSupabaseRpcClient(
+        env,request.headers.get("authorization")??"",fetchImpl,
+      );
+    return {
+      register:(input:Parameters<typeof register>[1])=>register(env,input),
+      presence:(input:Parameters<typeof presence>[1])=>presence(env,input),
+      resolve:(input:Parameters<typeof resolve>[1])=>resolve(env,input),
+      enqueue:(input:Parameters<typeof enqueue>[1])=>enqueue(env,input),
+      claim:(input:Parameters<typeof claim>[1])=>claim(env,input),
+      start:(input:Parameters<typeof start>[1])=>start(env,input),
+      renew:(input:Parameters<typeof renew>[1])=>renew(env,input),
+      report:(input:Parameters<typeof report>[1])=>report(env,input),
+      getAction:(input:Parameters<typeof getAction>[1])=>getAction(env,input),
+    };
   }
-  async function waitFor(identity:VerifiedProductMcpClient,requestId:string,waitMs=DEFAULT_WAIT_MS){
-    let receipt=await getAction(env,{ownerUserId:identity.ownerUserId,
+  async function resolveFor(identity:VerifiedProductMcpClient,store:ReturnType<typeof storeFor>){
+    return store.resolve({ownerUserId:identity.ownerUserId,clientId:identity.clientId});
+  }
+  async function waitFor(
+    identity:VerifiedProductMcpClient,requestId:string,store:ReturnType<typeof storeFor>,
+    waitMs=DEFAULT_WAIT_MS,
+  ){
+    let receipt=await store.getAction({ownerUserId:identity.ownerUserId,
       clientId:identity.clientId,requestId});
     const deadline=now()+waitMs;
     while(receipt.ok&&!terminalStatus(receipt)&&now()<deadline){
       await sleep(Math.min(250,Math.max(1,deadline-now())));
-      receipt=await getAction(env,{ownerUserId:identity.ownerUserId,
+      receipt=await store.getAction({ownerUserId:identity.ownerUserId,
         clientId:identity.clientId,requestId});
     }
     return receipt;
@@ -262,13 +279,18 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
     }
     if(request.method==="GET"&&url.pathname==="/health"){
       return json({ok:true,service:"ordax-forge-mcp",gateway:"ordax-platform",
-        auth_configured:productAuthConfigured(env),postgres_configured:productPostgresConfigured(env),
+        auth_configured:productAuthConfigured(env),
+        forge_rpc_transport:"supabase_https",
+        forge_rpc_configured:forgeSupabaseRpcConfigured(env),
+        legacy_hyperdrive_configured:productPostgresConfigured(env),
         local_tunnel_required:false,model_relay:false});
     }
     if(request.method==="GET"&&url.pathname==="/ready"){
-      const ready=productAuthConfigured(env)&&productPostgresConfigured(env);
+      const ready=productAuthConfigured(env)&&forgeSupabaseRpcConfigured(env);
       return json({ok:ready,service:"ordax-forge-mcp",
-        auth_configured:productAuthConfigured(env),postgres_configured:productPostgresConfigured(env),
+        auth_configured:productAuthConfigured(env),
+        forge_rpc_transport:"supabase_https",
+        forge_rpc_configured:forgeSupabaseRpcConfigured(env),
         local_tunnel_required:false},ready?200:503);
     }
 
@@ -280,6 +302,7 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
       if(request.method!=="POST")return json({ok:false,error:"method_not_allowed"},405,{allow:"POST"});
       const identity=await owner(request.clone());
       if(!identity.ok)return json({ok:false,error:identity.error},identity.status);
+      const store=storeFor(request);
       const body=await readBoundedJsonObject(request,MAX_BODY);
       if(!body)return json({ok:false,error:"forge_instance_request_invalid"},400);
 
@@ -291,7 +314,7 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
         }
         const catalog=await validatedCatalog(body.catalog,body.catalog_digest);
         if(!catalog)return json({ok:false,error:"forge_catalog_invalid"},400);
-        const result=await register(env,{ownerUserId:identity.ownerUserId,
+        const result=await store.register({ownerUserId:identity.ownerUserId,
           instanceId:String(body.instance_id).toLowerCase(),displayName:body.display_name,
           appVersion:body.app_version,catalog,catalogDigest:String(body.catalog_digest)});
         return json(result,result.ok===true?200:400);
@@ -305,7 +328,7 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
         }
         const catalog=await validatedCatalog(body.catalog,body.catalog_digest);
         if(!catalog)return json({ok:false,error:"forge_catalog_invalid"},400);
-        const result=await presence(env,{ownerUserId:identity.ownerUserId,
+        const result=await store.presence({ownerUserId:identity.ownerUserId,
           instanceId:String(body.instance_id).toLowerCase(),online:body.online,
           appVersion:body.app_version,catalog,catalogDigest:String(body.catalog_digest)});
         return json(result,result.ok===true?200:404);
@@ -319,12 +342,12 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
           return json({ok:false,error:"forge_claim_invalid"},400);
         }
         const deadline=now()+Number(body.wait_ms);
-        let result=await claim(env,{ownerUserId:identity.ownerUserId,
+        let result=await store.claim({ownerUserId:identity.ownerUserId,
           instanceId:String(body.instance_id).toLowerCase(),
           agentInstanceId:String(body.agent_instance_id).toLowerCase(),bootId:body.boot_id});
         while(result.ok===true&&result.job===null&&now()<deadline){
           await sleep(Math.min(500,Math.max(1,deadline-now())));
-          result=await claim(env,{ownerUserId:identity.ownerUserId,
+          result=await store.claim({ownerUserId:identity.ownerUserId,
             instanceId:String(body.instance_id).toLowerCase(),
             agentInstanceId:String(body.agent_instance_id).toLowerCase(),bootId:body.boot_id});
         }
@@ -343,10 +366,10 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
           attemptId:String(body.attempt_id).toLowerCase(),leaseId:String(body.lease_id).toLowerCase(),
           agentInstanceId:String(body.agent_instance_id).toLowerCase(),bootId:body.boot_id};
         if(url.pathname===FORGE_INSTANCE_START_PATH){
-          const started=await start(env,input);
+          const started=await store.start(input);
           return json({ok:started},started?200:409);
         }
-        const leaseExpiresAt=await renew(env,input);
+        const leaseExpiresAt=await store.renew(input);
         return json({ok:leaseExpiresAt!==null,lease_expires_at:leaseExpiresAt},leaseExpiresAt?200:409);
       }
 
@@ -359,7 +382,7 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
         }
         if(Buffer.byteLength(JSON.stringify(body.result??null))>MAX_RESULT)
           return json({ok:false,error:"forge_action_result_too_large"},413);
-        const result=await report(env,{ownerUserId:identity.ownerUserId,
+        const result=await store.report({ownerUserId:identity.ownerUserId,
           instanceId:String(body.instance_id).toLowerCase(),requestId:String(body.request_id).toLowerCase(),
           attemptId:String(body.attempt_id).toLowerCase(),leaseId:String(body.lease_id).toLowerCase(),
           agentInstanceId:String(body.agent_instance_id).toLowerCase(),bootId:body.boot_id,
@@ -376,6 +399,7 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
         "WWW-Authenticate":authChallenge(),
       });
     }
+    const store=storeFor(request);
     if(request.method==="GET")return json({ok:false,error:"method_not_allowed"},405,{allow:"POST"});
     if(request.method!=="POST")return json({ok:false,error:"method_not_allowed"},405,{allow:"POST"});
 
@@ -395,7 +419,7 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
       });
     }
 
-    const resolution=await resolveFor(identity);
+    const resolution=await resolveFor(identity,store);
     if(message.method==="tools/list"){
       const tools=[CONNECTION_TOOL,ACTION_STATUS_TOOL,
         ...(resolution.ok&&validForgeCatalog(resolution.catalog)?resolution.catalog:[])];
@@ -421,7 +445,7 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
     if(name===ACTION_STATUS_TOOL.name){
       if(Object.keys(args).length!==1||!isCanonicalUuid(args.request_id))
         return rpcError(id,-32602,"Invalid request_id");
-      const receipt=await getAction(env,{ownerUserId:identity.ownerUserId,
+      const receipt=await store.getAction({ownerUserId:identity.ownerUserId,
         clientId:identity.clientId,requestId:String(args.request_id).toLowerCase()});
       return rpcResult(id,toolResult(receipt,receipt.ok!==true));
     }
@@ -444,7 +468,7 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
     if(mode==="read"&&!isCanonicalUuid(opId))
       return rpcResult(id,toolResult({ok:false,error:"forge_gateway_unavailable"},true));
 
-    const queued=await enqueue(env,{
+    const queued=await store.enqueue({
       ownerUserId:identity.ownerUserId,clientId:identity.clientId,
       instanceId:resolution.instance_id.toLowerCase(),toolName:name,accessMode:mode,
       arguments:args,idempotencyKey:`forge:${mode}:${opId}`,
@@ -453,7 +477,7 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
     if(!queued.ok||!isCanonicalUuid(queued.request_id))
       return rpcResult(id,toolResult({ok:false,error:queued.error??"forge_action_unavailable"},true));
 
-    const receipt=await waitFor(identity,queued.request_id,DEFAULT_WAIT_MS);
+    const receipt=await waitFor(identity,queued.request_id,store,DEFAULT_WAIT_MS);
     if(terminalStatus(receipt))return rpcResult(id,completedToolResult(receipt));
     return rpcResult(id,toolResult({
       ok:true,pending:true,request_id:queued.request_id,effect_id:queued.effect_id,

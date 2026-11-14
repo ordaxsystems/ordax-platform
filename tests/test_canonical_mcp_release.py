@@ -35,13 +35,13 @@ class McpReleaseContract(unittest.TestCase):
         self.assertNotIn("r2_buckets",c)
         self.assertEqual(c["hyperdrive"][0]["binding"],"POSTGRES")
 
-    def test_mcp_owner_oauth_pin_is_bounded_and_cannot_enable_other_vars(self):
+    def test_mcp_oauth_and_forge_https_transport_are_bounded(self):
         import re
         value=self.config["vars"]["PRODUCT_OWNER_OAUTH_CLIENT_ID"]
-        forge_value=self.config["vars"]["FORGE_NATIVE_OAUTH_CLIENT_ID"]
+        forge_key=self.config["vars"]["FORGE_SUPABASE_PUBLISHABLE_KEY"]
         self.assertRegex(value,r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
-        self.assertEqual(forge_value,"6a94ae80-a59c-4f48-a32c-2e15da34374f")
-        self.assertRegex(forge_value,r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
+        self.assertRegex(forge_key,r"^sb_publishable_[A-Za-z0-9_-]{20,}$")
+        self.assertNotIn("FORGE_NATIVE_OAUTH_CLIENT_ID",self.config["vars"])
         self.assertFalse(validate(self.foundation,self.config))
         for bad in (None, "", "not-a-uuid", "a"*512):
             c=copy.deepcopy(self.config)
@@ -52,15 +52,19 @@ class McpReleaseContract(unittest.TestCase):
             with self.subTest(pin=bad):
                 with self.assertRaisesRegex(McpReleaseError,"owner_oauth_client_not_canonical"):
                     validate(self.foundation,c)
-        for bad in (None, "", "not-a-uuid", "a"*512):
+        for bad in (None, "", "not-a-publishable-key", "sb_publishable_x"):
             c=copy.deepcopy(self.config)
             if bad is None:
-                c["vars"].pop("FORGE_NATIVE_OAUTH_CLIENT_ID")
+                c["vars"].pop("FORGE_SUPABASE_PUBLISHABLE_KEY")
             else:
-                c["vars"]["FORGE_NATIVE_OAUTH_CLIENT_ID"]=bad
-            with self.subTest(forge_pin=bad):
-                with self.assertRaisesRegex(McpReleaseError,"forge_native_oauth_client_not_canonical"):
+                c["vars"]["FORGE_SUPABASE_PUBLISHABLE_KEY"]=bad
+            with self.subTest(forge_key=bad):
+                with self.assertRaisesRegex(McpReleaseError,"forge_supabase_publishable_key_not_canonical"):
                     validate(self.foundation,c)
+        c=copy.deepcopy(self.config)
+        c["vars"]["FORGE_NATIVE_OAUTH_CLIENT_ID"]="6a94ae80-a59c-4f48-a32c-2e15da34374f"
+        with self.assertRaisesRegex(McpReleaseError,"forge_native_oauth_client_must_be_postgres_ssot"):
+            validate(self.foundation,c)
         for gate in ("CENTRAL_OWNER_SELECTION_ENABLED",
                      "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED"):
             self.assertEqual(self.config["vars"][gate],"enabled")

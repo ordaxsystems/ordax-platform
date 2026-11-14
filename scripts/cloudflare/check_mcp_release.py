@@ -163,15 +163,20 @@ def validate(foundation:dict,config:dict)->bool:
     if issuer!="https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1" or release.get("oauth_issuer")!=issuer:
         raise McpReleaseError("mcp_wrong_oauth_issuer")
     vars=config.get("vars") or {}
-    # This is a public OAuth client identifier, never a credential or grant.
-    # Source of truth for the published MCP Worker is wrangler.mcp.toml.
+    # Public identifiers only. Owner OAuth remains pinned in Worker config.
+    # Forge native OAuth is intentionally NOT duplicated here: PostgreSQL is
+    # the SSOT and the HTTPS RPC derives sub/client_id from the caller JWT.
     owner_client=vars.get("PRODUCT_OWNER_OAUTH_CLIENT_ID")
-    forge_native_client=vars.get("FORGE_NATIVE_OAUTH_CLIENT_ID")
+    forge_publishable_key=vars.get("FORGE_SUPABASE_PUBLISHABLE_KEY")
     oauth_client_re=r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
     if not isinstance(owner_client,str) or not re.fullmatch(oauth_client_re,owner_client):
         raise McpReleaseError("mcp_owner_oauth_client_not_canonical")
-    if not isinstance(forge_native_client,str) or not re.fullmatch(oauth_client_re,forge_native_client):
-        raise McpReleaseError("forge_native_oauth_client_not_canonical")
+    if "FORGE_NATIVE_OAUTH_CLIENT_ID" in vars:
+        raise McpReleaseError("forge_native_oauth_client_must_be_postgres_ssot")
+    if not isinstance(forge_publishable_key,str) or not re.fullmatch(
+        r"sb_publishable_[A-Za-z0-9_-]{20,}",forge_publishable_key
+    ):
+        raise McpReleaseError("forge_supabase_publishable_key_not_canonical")
     # This is one tightly scoped, authenticated Owner rollout. No model-supplied
     # target is ever accepted, and Owner choice is NOT Device attestation.
     if vars.get("CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED") != "enabled" \
@@ -184,7 +189,7 @@ def validate(foundation:dict,config:dict)->bool:
         "PRODUCT_AUTH_AUDIENCE":"authenticated",
         "PRODUCT_AUTH_JWKS_URL":issuer+"/.well-known/jwks.json",
         "PRODUCT_OWNER_OAUTH_CLIENT_ID":owner_client,
-        "FORGE_NATIVE_OAUTH_CLIENT_ID":forge_native_client,
+        "FORGE_SUPABASE_PUBLISHABLE_KEY":forge_publishable_key,
         "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED":"enabled",
         "CENTRAL_OWNER_SELECTION_ENABLED":"enabled",
         "PRODUCT_DEVICE_WAKE_ENABLED":"enabled",

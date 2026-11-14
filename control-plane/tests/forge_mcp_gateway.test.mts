@@ -131,13 +131,13 @@ test("Forge native registration accepts only a catalog whose digest matches exac
   assert.equal(registered.catalogDigest,digest);
 });
 
-test("Forge native OAuth scope rejects another signed OAuth client without widening Owner authority",async()=>{
+test("Forge native routes require OAuth before any store write",async()=>{
   const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):
     value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])):value;
   const digest=createHash("sha256").update(JSON.stringify(canonical(CATALOG))).digest("hex");
   let writes=0;
   const gateway=createForgeMcpGateway(env,{
-    authenticateOwner:(()=>ownerIdentity(CLIENT)) as any,
+    authenticateOwner:(()=>ownerIdentity()) as any,
     register:async()=>{writes++;return {ok:true,instance_id:INSTANCE};},
   });
   const response=await gateway(request({
@@ -149,19 +149,56 @@ test("Forge native OAuth scope rejects another signed OAuth client without widen
   assert.equal(writes,0);
 });
 
-test("Forge native cutover keeps a normal account session compatible",async()=>{
+test("Forge native client SSOT is enforced by the authenticated PostgreSQL RPC",async()=>{
   const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):
     value&&typeof value==="object"?Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])):value;
   const digest=createHash("sha256").update(JSON.stringify(canonical(CATALOG))).digest("hex");
-  const gateway=createForgeMcpGateway(env,{
-    authenticateOwner:(()=>ownerIdentity()) as any,
-    register:async()=>({ok:true,instance_id:INSTANCE}),
+  let legacyWrites=0,remoteCalls=0;
+  const gateway=createForgeMcpGateway({...env,
+    FORGE_SUPABASE_PUBLISHABLE_KEY:"sb_publishable_test"},{
+    authenticateOwner:(()=>ownerIdentity(CLIENT)) as any,
+    register:async()=>{legacyWrites++;return {ok:true,instance_id:INSTANCE};},
+    fetchImpl:(async(_url:any,init:any)=>{
+      remoteCalls++;
+      const sent=JSON.parse(String(init.body));
+      assert.equal(sent.p_operation,"native_register");
+      assert.equal(init.headers.authorization,"Bearer test");
+      return Response.json({ok:false,error:"forge_native_oauth_client_required"});
+    }) as any,
   });
   const response=await gateway(request({
     instance_id:INSTANCE,display_name:"Forge local",app_version:"0.2.0",
     catalog:CATALOG,catalog_digest:digest,
   },FORGE_INSTANCE_REGISTER_PATH));
+  assert.equal(response.status,400);
+  assert.deepEqual(await response.json(),{ok:false,error:"forge_native_oauth_client_required"});
+  assert.equal(remoteCalls,1);
+  assert.equal(legacyWrites,0);
+});
+
+test("Forge MCP tools/list uses Supabase HTTPS RPC instead of Hyperdrive when configured",async()=>{
+  let legacyResolves=0,remoteCalls=0;
+  const gateway=createForgeMcpGateway({...env,
+    FORGE_SUPABASE_PUBLISHABLE_KEY:"sb_publishable_test"},{
+    authenticateMcp:mcpIdentity as any,
+    resolve:async()=>{legacyResolves++;return resolution();},
+    fetchImpl:(async(_url:any,init:any)=>{
+      remoteCalls++;
+      const sent=JSON.parse(String(init.body));
+      assert.equal(sent.p_operation,"mcp_resolve");
+      assert.deepEqual(sent.p_payload,{});
+      assert.equal(init.headers.authorization,"Bearer test");
+      assert.equal(init.headers.apikey,"sb_publishable_test");
+      return Response.json(resolution());
+    }) as any,
+  });
+  const response=await gateway(request({jsonrpc:"2.0",id:1,method:"tools/list",params:{}}));
   assert.equal(response.status,200);
+  const body:any=await response.json();
+  assert.deepEqual(body.result.tools.map((x:any)=>x.name),
+    ["forge_connection_status","forge_action_status","forge_projects_list"]);
+  assert.equal(remoteCalls,1);
+  assert.equal(legacyResolves,0);
 });
 
 test("Forge MCP unauthenticated requests advertise the shared Supabase OAuth resource",async()=>{

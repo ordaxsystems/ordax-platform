@@ -1245,6 +1245,18 @@
         "blob_sha": "63eacb8271813523e64e560e72ad597ddf42c9ca"
       },
       "ledger_name": "forge_mcp_instance_gateway_v1"
+    },
+    {
+      "name": "20261114210500_forge_https_rpc_transport_v1",
+      "applied_version": "20261114210745",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261114210500_forge_https_rpc_transport_v1.sql",
+        "blob_sha": "368654747c2e44365b6cbf12b1a1828ac37ff3c3"
+      },
+      "ledger_name": "forge_https_rpc_transport_v1"
     }
   ]
 }
