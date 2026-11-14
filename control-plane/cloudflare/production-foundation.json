@@ -1,5 +1,5 @@
 {
-  "version": 30,
+  "version": 31,
   "account_id": "42586bf13b61436219d21def299833e4",
   "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
@@ -271,6 +271,50 @@
         "status": "verified",
         "run_url": "https://github.com/ordaxsystems/ordax-platform/actions/runs/43457462005"
       }
+    }
+  },
+  "forge_mcp_gateway": {
+    "worker_name": "ordax-mcp",
+    "hostname": "forge-mcp.ordax.com.br",
+    "path": "/mcp",
+    "transport": "streamable-http",
+    "authority": "postgresql",
+    "oauth_issuer": "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1",
+    "oauth_audience": "authenticated",
+    "custom_domain_required": true,
+    "worker_domain_id": "a9ee8929a5d6575c48113e902d5f667fe85dad74",
+    "local_tunnel_required": false,
+    "cloudflare_access_required": false,
+    "model_relay": false,
+    "instance_connection": "outbound_https_long_poll",
+    "binding_authority": "owner_user_plus_oauth_client_to_forge_instance",
+    "catalog_authority": "forge_instance_published_catalog_sha256",
+    "meta_tools": [
+      "forge_connection_status",
+      "forge_action_status"
+    ],
+    "migration": {
+      "source": "control-plane/supabase/migrations/20261114061000_forge_mcp_instance_gateway_v1.sql",
+      "applied_version": "20261114062958",
+      "ledger_name": "forge_mcp_instance_gateway_v1"
+    },
+    "live_evidence": {
+      "platform_source_commit": "f2391a56c016b47f7b8d25041f923d352e7ee9e3",
+      "worker_deployment_id": "5c846fc9-3147-4204-bdb3-4a06498321ea",
+      "worker_version_id": "8a5cb3c9-4aa1-4561-b04c-a73a92d0354f",
+      "health_verified_at": "2026-11-14T06:35:28Z",
+      "health_status": 200,
+      "oauth_metadata_status": 200,
+      "unauthenticated_mcp_status": 401
+    },
+    "legacy": {
+      "allow_per_machine_cloudflare_tunnel": false,
+      "allow_cloudflare_access_login": false,
+      "allow_cfargotunnel_cname": false,
+      "allow_second_worker": false,
+      "retired_tunnel_id": "f785d1da-cca0-4f39-abd8-b51458c1ea62",
+      "retired_access_app_id": "0e56773b-e7cc-41ed-b08f-ad230fc74e2e",
+      "retired_at": "2026-11-14T06:34:57Z"
     }
   }
 }
