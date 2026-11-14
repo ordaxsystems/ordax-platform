@@ -37,7 +37,7 @@ jobs:
           name = "ordax-hyperdrive-ab-dry-run"
           main = "labs/hyperdrive_driver_ab.ts"
           compatibility_date = "2026-10-20"
-          compatibility_flags = ["nodejs_compat"]
+          compatibility_flags = ["nodejs_compat_v2"]
           workers_dev = true
           preview_urls = false
           [[hyperdrive]]

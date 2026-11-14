@@ -18,6 +18,8 @@ class HyperdriveDriverAbTest(TestCase):
         conf = ab.config("ordax-hyperdrive-ab-39494974328")
         self.assertIn('id = "4b601ec5815f43259bd8040053825d2a"', conf)
         self.assertIn('main = "labs/hyperdrive_driver_ab.ts"', conf)
+        self.assertIn('compatibility_flags = ["nodejs_compat_v2"]', conf)
+        self.assertNotIn('compatibility_flags = ["nodejs_compat"]', conf)
         self.assertNotIn("db.jhfphsjptrpmtnzkpwud", conf)
         self.assertNotIn("secret", conf.lower())
         for value in ("ordax-mcp", "test-run", "ordax-hyperdrive-ab-1"):
@@ -131,6 +133,8 @@ class HyperdriveDriverAbTest(TestCase):
         self.assertIn("github.ref == 'refs/heads/main'", workflow)
         self.assertNotIn("schedule:", workflow)
         self.assertIn("postgres@3.4.5", workflow)
+        self.assertIn('compatibility_flags = ["nodejs_compat_v2"]', workflow)
+        self.assertNotIn('compatibility_flags = ["nodejs_compat"]', workflow)
         self.assertIn('- name: "Dry-run only: no deployed Worker"', workflow)
         self.assertNotIn("SUPABASE_ACCESS_TOKEN", workflow)
 

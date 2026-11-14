@@ -38,7 +38,7 @@ def config(worker: str) -> str:
     return (f'name = "{worker}"\n'
             'main = "labs/hyperdrive_driver_ab.ts"\n'
             'compatibility_date = "2026-10-20"\n'
-            'compatibility_flags = ["nodejs_compat"]\n'
+            'compatibility_flags = ["nodejs_compat_v2"]\n'
             'workers_dev = true\npreview_urls = false\n'
             '[observability]\nenabled = true\nredact_query_string = true\n'
             '[[hyperdrive]]\nbinding = "POSTGRES"\n'
