@@ -621,6 +621,8 @@ test("MCP projects cross-device attestation errors without leaking the bound dev
       ok: false,
       error: "product_attested_device_mismatch",
       internal_device_id: "private-device",
+      attested_device_id: "66666666-6666-4666-8666-666666666666",
+      requested_device_id: "22222222-2222-4222-8222-222222222222",
     }, { status: 403 }),
     getAction: async () => { assert.fail("no action status after attestation denial"); },
   }, { device_id: "22222222-2222-4222-8222-222222222222", argv: ["id"] });
@@ -629,6 +631,11 @@ test("MCP projects cross-device attestation errors without leaking the bound dev
     ok: false,
     error: "product_attested_device_mismatch",
     required_action: "establish_attested_session_for_requested_device",
+    owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
+    selection_location: "ordax_owner",
+    selection_scope: "new_unbound_session_only",
+    owner_confirmation_required: true,
+    action_dispatched: false,
     grant_evaluated: false,
   });
   assert.equal(JSON.stringify(body).includes("private-device"), false);
