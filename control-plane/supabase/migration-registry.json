@@ -1293,6 +1293,18 @@
         "blob_sha": "dc22cd980a04c050b94010dea69ba947821e809f"
       },
       "ledger_name": "product_action_grant_revalidation_v1"
+    },
+    {
+      "name": "20261117164000_product_queued_revocation_terminal_v1",
+      "applied_version": "20261117140216",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261117164000_product_queued_revocation_terminal_v1.sql",
+        "blob_sha": "4e4ea16b8d220109c44c9ea28e9a7af1cfb43006"
+      },
+      "ledger_name": "product_queued_revocation_terminal_v1"
     }
   ]
 }
