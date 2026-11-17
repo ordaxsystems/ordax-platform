@@ -116,6 +116,33 @@ export function githubAuthorityRevocation(
   return null;
 }
 
+/** Distinguish a non-destructive GitHub notification from a destructive
+ * notification whose signed payload cannot identify the authority to revoke.
+ * Unknown event/action kinds remain advisory and are intentionally ignored.
+ */
+export function requiresGithubAuthorityRevocation(event: string, payload: unknown): boolean {
+  const body = record(payload);
+  if (!body || typeof body.action !== "string") {
+    return event === "github_app_authorization"
+      || event === "installation"
+      || event === "installation_repositories"
+      || event === "repository";
+  }
+  if (event === "github_app_authorization") return body.action === "revoked";
+  if (event === "installation") return body.action === "deleted" || body.action === "suspend";
+  if (event === "repository") return DESTRUCTIVE_REPOSITORY_ACTIONS.has(body.action);
+  if (event === "installation_repositories") {
+    if (body.action === "removed") return true;
+    // GitHub can report additions and removals in a single delivery. A
+    // malformed/nonempty removal list must never be silently acknowledged.
+    if (body.action === "added" && Object.hasOwn(body, "repositories_removed")) {
+      return !Array.isArray(body.repositories_removed)
+        || body.repositories_removed.length > 0;
+    }
+  }
+  return false;
+}
+
 function bytesFromHex(value: string): Uint8Array | null {
   if (value.length % 2 !== 0) return null;
   const out = new Uint8Array(value.length / 2);
@@ -226,6 +253,14 @@ export function createProductGithubWebhookHandler(
 
     const revocation = githubAuthorityRevocation(event, payload);
     if (!revocation) {
+      // A signed deletion/removal is NOT a harmless unknown event. Reject an
+      // incomplete provider identity instead of acknowledging a revocation
+      // that never reached PostgreSQL. GitHub delivery failures remain
+      // observable/re-deliverable by the owner, while valid non-destructive
+      // events continue to be acknowledged without changing authority.
+      if (requiresGithubAuthorityRevocation(event, payload)) {
+        return json({ ok: false, error: "github_webhook_revocation_invalid" }, 422);
+      }
       return json({ ok: true, accepted: true, ignored: true }, 202);
     }
 
