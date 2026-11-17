@@ -521,6 +521,16 @@ export function createAttestedDeviceActionHandler(
         ok: false,
         error: "product_attested_device_mismatch",
         required_action: "establish_attested_session_for_requested_device",
+        // A bound conversation never changes its trusted device from a
+        // model-supplied ID. Give the Owner the exact next authorized step,
+        // including the identity that actually holds this session.
+        owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
+        selection_location: "ordax_owner",
+        selection_scope: "new_unbound_session_only",
+        owner_confirmation_required: true,
+        action_dispatched: false,
+        attested_device_id: trusted.deviceId,
+        requested_device_id: body.device_id,
       }, 403);
     }
     if (!body || !validCreateBody(body, trusted)) {
