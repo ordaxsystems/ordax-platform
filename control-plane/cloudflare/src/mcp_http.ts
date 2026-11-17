@@ -1208,7 +1208,12 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
         selection_scope: "this_conversation_only",
         choices_are_authority: false,
         action_dispatched: false, attested: false,
-      }, true);
+      }, false);
+      // Awaiting consent is a fulfilled *tool interaction*, NOT a failed
+      // device action. Keep ok:false/action_dispatched:false and never enqueue
+      // or attest on the caller's behalf; the Owner must match the challenge
+      // in the first-party account. Avoid MCP isError because hosts surface
+      // it as a generic INVALID_ARGUMENT rather than a user-choice prompt.
     }
     if (spec.projectRequired && createdPayload.error === "product_project_scope_not_found") {
       // A missing Owner-managed Space/project/repository/device association
@@ -1387,10 +1392,10 @@ export async function handleOrdaxMcp(
     try {
       const retryDigest = await verifiedMcpRetryDigest(sessionPayload, id, params);
       const result = await callTool(request, name, args, handlers, allowedTools, retryDigest);
-      if (result.isError !== true && handlers.recordUsage) {
-        // Shadow-only accounting is not an execution dependency. A slow usage
-        // write must not delay a successful MCP answer or cause a duplicate
-        // user retry after the canonical action receipt was committed.
+      if (result.isError !== true && result.structuredContent?.ok !== false && handlers.recordUsage) {
+        // Shadow-only accounting records actual successful tools, never an
+        // Owner-selection prompt (ok:false with isError:false). A slow write
+        // must not delay a successful MCP answer or duplicate an action retry.
         const usage = recordSuccessfulToolCall(handlers, sessionPayload, id, name, args, retryDigest);
         if (context) {
           try {
