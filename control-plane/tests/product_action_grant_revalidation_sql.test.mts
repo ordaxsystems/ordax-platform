@@ -100,9 +100,9 @@ test("Product claim/start/renew recheck original grant, OAuth and owner; termina
         returns boolean language sql as $$ select false $$;
       create function public.ordax_renew_product_action_lease_v1(
         uuid,uuid,uuid,uuid,uuid,bigint,uuid,text,integer)
-        returns timestamptz language sql as $ select null::timestamptz $;
+        returns timestamptz language sql as 'select null::timestamptz';
       create function public.ordax_get_product_action_v1(uuid,text,text,uuid)
-        returns jsonb language sql as $ select null::jsonb $;
+        returns jsonb language sql as 'select null::jsonb';
     `);
     await db.exec(migration);
     await db.exec(queuedRevocation);
