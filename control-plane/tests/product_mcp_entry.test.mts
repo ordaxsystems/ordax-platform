@@ -716,6 +716,7 @@ test("Owner selection tells chat which endpoints exist but never binds or dispat
       },
     }); },
     getAction: async () => { actions++; return Response.json({ok:false}, {status:404}); },
+    recordUsage: async () => { assert.fail("pending Owner confirmation is not a successful billable tool"); },
   };
   const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
     new Set(["computer_access_status","ordax_targets"]), {
@@ -727,7 +728,8 @@ test("Owner selection tells chat which endpoints exist but never binds or dispat
     });
   const body = await (await gateway(request("computer_access_status",
     {device_id:desktop}))).json() as any;
-  assert.equal(body.result.isError,true);
+  assert.equal(body.result.isError,false,
+    "expected Owner confirmation must be a structured result, not a client tool error");
   assert.deepEqual(body.result.structuredContent,{
     ok:false,error:"central_session_owner_selection_required",
     challenge_id:challenge,
@@ -773,7 +775,10 @@ test("device choice hints do not leak through restricted or malformed target cat
       });
     const payload=await(await gateway(request("computer_access_status",
       {device_id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd"}))).json() as any;
+    assert.equal(payload.result.isError,false);
+    assert.equal(payload.result.structuredContent.ok,false);
     assert.equal(payload.result.structuredContent.action_dispatched,false);
+    assert.equal(payload.result.structuredContent.owner_confirmation_required,true);
     assert.equal("device_options" in payload.result.structuredContent,false);
     assert.equal(queried,item.targetAllowed?1:0);
     assert.equal(JSON.stringify(payload).includes("forged secret"),false);
