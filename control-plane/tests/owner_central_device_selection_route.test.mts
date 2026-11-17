@@ -97,6 +97,40 @@ test("Owner route only permits exact IDs and one explicit selected challenge",as
   });
 });
 
+test("Owner selection reports missing/stale/ambiguous challenge separately from auth denial",async()=>{
+  await withIssuer(async()=>{
+    const jwt=await token({client_id:null});
+    const enabled={...env,CENTRAL_OWNER_SELECTION_ENABLED:"enabled"};
+    const selection={
+      client_id:client,challenge_id:challenge,device_id:device,
+    };
+    const cases=[
+      ["owner_central_selection_invalid",400],
+      ["owner_central_selection_not_found",404],
+      ["owner_central_selection_not_pending",409],
+      ["owner_central_selection_ambiguous",409],
+      ["central_session_target_mismatch",409],
+      ["central_device_runtime_not_ready",409],
+      ["owner_central_client_not_consented",403],
+      ["central_device_grant_revoked",403],
+      ["owner_auth_ineligible",403],
+      ["unknown_error",403],
+    ] as const;
+    let calls=0;
+    for(const [error,expectedStatus] of cases){
+      const response=await handleProductOwnerGrantAdmin(req(base,jwt,"POST",selection),enabled,{
+        selectDevice:async()=>{
+          calls++;
+          return {ok:false,error};
+        },
+      });
+      assert.equal(response.status,expectedStatus,error);
+      assert.deepEqual(await response.json(),{ok:false,error},error);
+    }
+    assert.equal(calls,cases.length,"no status handling may retry a failed selection");
+  });
+});
+
 test("MCP opening a waiting challenge cannot acquire Owner selection by model device argument",async()=>{
   await withIssuer(async()=>{
     const jwt=await token();
