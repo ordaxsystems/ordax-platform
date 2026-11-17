@@ -121,6 +121,47 @@ test("MCP opening a waiting challenge cannot acquire Owner selection by model de
   });
 });
 
+test("a second GPT session sees Owner choice contention without challenge or dispatch",async()=>{
+  await withIssuer(async()=>{
+    const jwt=await token();
+    const request=new Request("https://mcp.ordax.com.br/mcp",{
+      method:"POST",headers:{authorization:"Bearer "+jwt,"content-type":"application/json"},
+      body:JSON.stringify({jsonrpc:"2.0",id:6,method:"tools/call",params:{
+        name:"computer_access_status",arguments:{device_id:device},
+        _meta:{"openai/session":"distinct-provider-conversation-marker"},
+      }}),
+    });
+    let opens=0;
+    const response=await openCentralSessionFromMcp(request,env,{open:async()=>{
+      opens++;
+      return {ok:false,error:"central_owner_selection_in_progress"};
+    }});
+    assert.equal(response.status,409);
+    assert.deepEqual(await response.json(),
+      {ok:false,error:"central_owner_selection_in_progress"});
+    assert.equal(opens,1);
+  });
+  let resolved=0,opened=0,waited=0;
+  const recovery=await resolveOrBootstrapAttestedSession(
+    new Request("https://mcp.ordax.com.br/mcp",{method:"POST"}),env,{
+      resolve:async()=>{
+        resolved++;
+        return {ok:false as const,error:"central_session_unbound"};
+      },
+      open:async()=>{
+        opened++;
+        return Response.json({ok:false,error:"central_owner_selection_in_progress"},
+          {status:409});
+      },
+      wait:async()=>{waited++;throw Error("do not poll a competing Owner challenge");},
+    });
+  assert.deepEqual(recovery,{ok:false,error:"central_owner_selection_in_progress"});
+  assert.equal(resolved,1);
+  assert.equal(opened,1);
+  assert.equal(waited,0);
+  assert.equal("challenge_id" in recovery,false,"another GPT session's Owner ticket stays private");
+});
+
 test("awaiting Owner returns a bounded remediation immediately without polling/retrying",async()=>{
   let opened=0,waited=0,resolved=0;
   const req=new Request("https://mcp.ordax.com.br/mcp",{method:"POST"});
