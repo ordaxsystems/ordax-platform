@@ -1191,7 +1191,6 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
                         || entry.reported_online === null)
                       && entry.target_type === "ordax_runtime_endpoint";
                   })) options = snapshot.options as JsonObject[];
-              }
             }
           }
         } catch { /* Optional UI hint never changes the authorization decision. */ }
