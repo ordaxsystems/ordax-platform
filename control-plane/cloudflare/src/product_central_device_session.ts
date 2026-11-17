@@ -67,7 +67,8 @@ export async function openCentralSessionFromMcp(
     });
     if (result.ok !== true) {
       const code = typeof result.error === "string" ? result.error : "central_session_unavailable";
-      const status = code === "central_device_target_ambiguous" ? 409
+      const status = code === "central_owner_selection_in_progress" ? 409
+        : code === "central_device_target_ambiguous" ? 409
         : code === "central_device_offline" || code === "central_device_runtime_not_ready" ? 409
         : code === "central_device_target_missing" ? 403
         : code === "central_session_revoked" ? 403 : 503;
