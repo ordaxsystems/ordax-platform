@@ -534,6 +534,21 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
       }];
     });
     const name = boundedText(target.device_name) ?? "ORDAX device";
+    const endpointRole = target.endpoint_role === "physical_computer"
+      || target.endpoint_role === "ordax_desktop_installation"
+      || target.endpoint_role === "standalone_runtime_endpoint"
+      ? target.endpoint_role : null;
+    const hostId = isCanonicalUuid(target.physical_host_device_id)
+      ? target.physical_host_device_id.toLowerCase() : null;
+    // Presentation metadata only; a host ID is not a grant or session.
+    // Malformed or contradictory relationships must never be projected.
+    const validHost = endpointRole === "standalone_runtime_endpoint"
+      ? target.physical_host_device_id == null
+      : endpointRole === "physical_computer"
+        ? hostId === target.device_id.toLowerCase()
+        : endpointRole === "ordax_desktop_installation"
+          ? (hostId === null || hostId !== target.device_id.toLowerCase())
+          : false;
     return [{
       device_id: typeof target.device_id === "string" ? target.device_id : "",
       name,
@@ -543,6 +558,8 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
       device_kind: boundedText(target.device_kind),
       channel: boundedText(target.channel),
       link_id: typeof target.link_id === "string" ? target.link_id : null,
+      ...(endpointRole && validHost
+        ? { endpoint_role: endpointRole, physical_host_device_id: hostId } : {}),
       grant_groups: grantGroups,
     }];
   });
@@ -632,6 +649,9 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
             reported_online: target.online,
             device_kind: target.device_kind,
             target_type: "ordax_runtime_endpoint",
+            ...("endpoint_role" in target
+              ? { endpoint_role: target.endpoint_role,
+                  physical_host_device_id: target.physical_host_device_id } : {}),
           })) } : {}),
         };
   return { ok: true, targets: targetsWithDiagnostics, client_device_routing: {
