@@ -214,7 +214,12 @@ function resourceMetadata(origin: string, issuer: string) {
   };
 }
 
-async function mcpToolName(request: Request): Promise<string | null> {
+type McpRoutingHint = Readonly<{
+  toolName: string;
+  explicitNonNullSpace: boolean;
+}>;
+
+async function mcpRoutingHint(request: Request): Promise<McpRoutingHint | null> {
   if (request.method !== "POST") return null;
   // Do not eagerly buffer an unbounded client body just to identify a tool.
   // Reuse the same stream reader and limit as the downstream JSON-RPC parser.
@@ -223,7 +228,17 @@ async function mcpToolName(request: Request): Promise<string | null> {
   // attested-session resolution before the JSON-RPC dispatcher rejects it.
   if (!validMcpToolCallEnvelope(body)) return null;
   const name = body.params.name;
-  return typeof name === "string" ? name : null;
+  if (typeof name !== "string") return null;
+  const args = body.params.arguments;
+  return {
+    toolName: name,
+    // Device-scoped commands never inherit a model-supplied Space. Detect
+    // that denial without creating an Owner challenge for an impossible call.
+    // Project-scoped commands still resolve their Space via the canonical RPC.
+    explicitNonNullSpace: args !== null && typeof args === "object"
+      && !Array.isArray(args) && Object.hasOwn(args, "space_id")
+      && (args as Record<string, unknown>).space_id !== null,
+  };
 }
 
 /** Session recovery is only coordination. A device remains trusted exclusively
@@ -444,7 +459,8 @@ export function createCanonicalProductMcpGateway(
       return handleProductOwnerGrantAdmin(request, env);
     }
     if (url.pathname === "/mcp") {
-      const toolName = await mcpToolName(request);
+      const routingHint = await mcpRoutingHint(request);
+      const toolName = routingHint?.toolName ?? null;
       // This single request-owned scheduler serves SQL-committed action wakes
       // and device-attested session challenges. No second queue or authority.
       const wakeDependencies = context
@@ -484,6 +500,20 @@ export function createCanonicalProductMcpGateway(
         ? { ...deniedHandlers, sessionDeviceBinding }
         : deniedHandlers;
       if (toolName && allowedTools.has(toolName)
+        && ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)
+        && routingHint?.explicitNonNullSpace) {
+        // The canonical device handler accepts space_id=null only. Reject
+        // the explicit foreign/invalid Space at the authenticated JSON-RPC
+        // boundary, before any session bootstrap or Owner selection. This
+        // does not authorize the call or enqueue an action.
+        handlers = {
+          ...reads,
+          createAction: async () => respond({
+            ok: false, error: "product_device_action_invalid",
+            action_dispatched: false,
+          }, 400),
+        };
+      } else if (toolName && allowedTools.has(toolName)
         && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName) || ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
           || ATTESTED_SPECIAL_TOOLS.has(toolName))) {
         let trusted: AttestedMcpDevice | null = null;
