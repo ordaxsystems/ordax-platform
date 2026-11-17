@@ -43,14 +43,20 @@ a função `ordax_owner_select_central_device_v1` trava a mesma linha com
 fresca e digest do Runtime, e torna o ticket `pending` por **2 minutos**.
 Seleções simultâneas não podem sobrescrever o alvo vencedor.
 
-Quando houver **dois ou mais tickets de sessões distintas** aguardando
-escolha para o mesmo Owner+cliente OAuth, o seletor recusa com
-`owner_central_selection_ambiguous`: sem prova visível da conversa,
-escolher só por UUID não pode bindar a sessão errada. A abertura dos desafios
-e a escolha compartilham um lock transacional por Owner+cliente para que duas
-aberturas concorrentes não escapem da checagem. Um ticket expirado não conta
-para essa ambiguidade. Esse bloqueio não substitui uma UI de identificação
-segura da sessão, necessária antes do rollout.
+A seleção Owner continua recusando `owner_central_selection_ambiguous`
+se encontrar mais de um ticket de sessões diferentes aguardando escolha
+(defesa em profundidade). Desde a
+[PR #379](https://github.com/ordaxsystems/ordax-platform/pull/379), a
+mesma autoridade PostgreSQL e seu lock por Owner+cliente **não admitem
+um segundo ticket ativo**: uma nova conversa recebe
+`central_owner_selection_in_progress` enquanto uma escolha
+`awaiting_owner` de outra sessão estiver válida. O MCP propaga esse
+código como conflito HTTP 409, sem divulgar o ID do challenge concorrente
+nem inferir o dispositivo. O primeiro ticket permanece selecionável
+pelo Owner autenticado; desafios vencidos não bloqueiam o próximo.
+A interface de Conta já oferece o controle de vínculo MCP por
+dispositivo e cliente OAuth, mas a atestação do Runtime selecionado
+continua obrigatória antes de qualquer ação.
 
 A seleção **não equivale** a atestação nem despacho. O Runtime mantém a
 rota Device original de polling/confirm e só pode confirmar com credencial do
