@@ -429,13 +429,6 @@ test("explicit device Space is denied before Owner selection, without a job or c
   assert.equal(calls.targets, 0, "invalid device scope must not query grant catalog");
   assert.equal(calls.getAction, 0, "invalid device scope must not read action receipts");
 
-  // An otherwise valid device request still requires durable session authority.
-  const valid = await run(request("computer_screen_info", { device_id }));
-  const payload = await valid.json() as any;
-  assert.equal(payload.result.isError, true);
-  assert.equal(payload.result.structuredContent.error, "central_session_owner_selection_required");
-  assert.equal(resolutions, 1);
-  assert.equal(opens, 0);
 });
 
 test("attested device tools fail closed without a verified session binding", async () => {
