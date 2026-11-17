@@ -218,7 +218,7 @@ test("awaiting Owner returns a bounded remediation immediately without polling/r
 });
 
 
-test("MCP tool denial exposes only its exact Owner challenge reference, never session marker or authority",async()=>{
+test("MCP Owner-choice prompt remains non-dispatched and never leaks session correlation",async()=>{
   let calls=0;
   const gate=(challengeId:unknown)=>handleOrdaxMcp(new Request("https://mcp.ordax.com.br/mcp",{
     method:"POST",headers:{"content-type":"application/json"},
@@ -247,7 +247,8 @@ test("MCP tool denial exposes only its exact Owner challenge reference, never se
     assert.equal(result?.challenge_id,expected ?? undefined);
     assert.equal(JSON.stringify(result).includes("private-provider-correlation"),false);
     assert.equal(JSON.stringify(result).includes("session_sha256"),false);
-    assert.equal(payload.result?.isError,true);
+    assert.equal(payload.result?.isError,false,
+      "the client should render an Owner action-required reply, not an INVALID_ARGUMENT");
   }
   assert.equal(calls,2);
 });
