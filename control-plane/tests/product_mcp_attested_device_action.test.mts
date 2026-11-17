@@ -647,6 +647,13 @@ test("cross-device request requires target attestation before grant lookup or di
     ok: false,
     error: "product_attested_device_mismatch",
     required_action: "establish_attested_session_for_requested_device",
+    owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
+    selection_location: "ordax_owner",
+    selection_scope: "new_unbound_session_only",
+    owner_confirmation_required: true,
+    action_dispatched: false,
+    attested_device_id: DEVICE,
+    requested_device_id: other,
   });
   assert.equal(catalogQueries, 0);
   assert.equal(enqueues, 0);
