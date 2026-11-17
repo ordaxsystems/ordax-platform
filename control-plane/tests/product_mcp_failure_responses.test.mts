@@ -631,6 +631,11 @@ test("MCP projects cross-device attestation errors without leaking the bound dev
     ok: false,
     error: "product_attested_device_mismatch",
     required_action: "establish_attested_session_for_requested_device",
+    owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
+    selection_location: "ordax_owner",
+    selection_scope: "new_unbound_session_only",
+    owner_confirmation_required: true,
+    action_dispatched: false,
     grant_evaluated: false,
   });
   assert.equal(JSON.stringify(body).includes("private-device"), false);
