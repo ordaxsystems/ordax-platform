@@ -1269,6 +1269,18 @@
         "blob_sha": "3b3b32158f2f7a8d83f3fe120c8aaddeaba5830b"
       },
       "ledger_name": "owner_central_selection_single_flight_v1"
+    },
+    {
+      "name": "20261117132500_central_confirm_revocation_revalidation_v1",
+      "applied_version": "20261117132559",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261117132500_central_confirm_revocation_revalidation_v1.sql",
+        "blob_sha": "f96b2a14b2904b5b81380f6834dfdca7ba6b9916"
+      },
+      "ledger_name": "central_confirm_revocation_revalidation_v1"
     }
   ]
 }
