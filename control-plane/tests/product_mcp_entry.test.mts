@@ -400,6 +400,37 @@ test("unrelated browser and project tools remain unpublished", async () => {
   }
 });
 
+test("explicit device Space is denied before Owner selection, without a job or challenge (#118)", async () => {
+  const { handlers, calls } = fakeHandlers();
+  let resolutions = 0;
+  let opens = 0;
+  const run = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+    new Set(["computer_screen_info"]), {
+      resolve: async () => {
+        resolutions++;
+        return { ok: false, error: "central_session_owner_selection_required" };
+      },
+      open: async () => {
+        opens++;
+        throw Error("invalid explicit Space must not open Owner selection");
+      },
+    });
+  const device_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  for (const space_id of ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "invalid-space"]) {
+    const response = await run(request("computer_screen_info", { device_id, space_id }));
+    assert.equal(response.status, 200, "MCP tool failures use JSON-RPC transport 200");
+    const payload = await response.json() as any;
+    assert.equal(payload.result.isError, true);
+    assert.equal(payload.result.structuredContent.error,
+      space_id === "invalid-space" ? "space_id_invalid" : "product_device_action_invalid");
+  }
+  assert.equal(resolutions, 0, "invalid device scope must not resolve a session");
+  assert.equal(opens, 0, "invalid device scope must not create Owner consent challenge");
+  assert.equal(calls.targets, 0, "invalid device scope must not query grant catalog");
+  assert.equal(calls.getAction, 0, "invalid device scope must not read action receipts");
+
+});
+
 test("attested device tools fail closed without a verified session binding", async () => {
   const { handlers } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
