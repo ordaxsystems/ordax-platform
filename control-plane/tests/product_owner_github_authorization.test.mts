@@ -316,6 +316,26 @@ test("Provider catalog rejects spoofed, duplicate or oversized repository author
     ],
   }), /github_repository_catalog_invalid/);
 
+  // An installation is scoped to one GitHub account; an unrelated repository
+  // owner must never be persisted as an authorized Project candidate.
+  await assert.rejects(base({
+    total_count: 1,
+    repositories: [{ id: 4, full_name: "another-org/a", default_branch: "main" }],
+  }), /github_repository_catalog_invalid/);
+
+  // Duplicate installation rows are not independent grants, even when their
+  // repository catalogs are empty and no repository ID collision catches them.
+  await assert.rejects(collectVerifiedGithubRepositories(token, async url => {
+    if (url === "https://api.github.com/user") return jsonResponse({ id: 1, login: "owner" });
+    if (url === "https://api.github.com/user/installations?per_page=100&page=1") {
+      return jsonResponse({ total_count: 2, installations: [
+        { id: 2, account: { id: 3, login: "org" } },
+        { id: 2, account: { id: 3, login: "org" } },
+      ] });
+    }
+    return jsonResponse({ total_count: 0, repositories: [] });
+  }), /github_installation_catalog_invalid/);
+
   // Both counts below previously reached the candidate persistence boundary:
   // unique IDs are insufficient if the provider page contradicts total_count.
   for (const total_count of [0, 1]) {
@@ -382,6 +402,30 @@ test("Candidate read exposes repository choice but never installation identity",
   });
   assert.ok(!JSON.stringify(body).includes("installation_id"));
   assert.ok(!JSON.stringify(body).includes("github_user_id"));
+});
+
+test("Candidate projection refuses repositories outside their verified installation account", async () => {
+  const handler = createOwnerGithubAuthorizationHandler(ENV, {
+    authenticate: authenticated,
+    readCandidates: async () => ({
+      ok: true,
+      challenge_id: CHALLENGE,
+      project_id: PROJECT,
+      repositories: [{
+        repository_id: "10001",
+        repository_full_name: "another-org/ordax-platform",
+        default_branch: "main",
+        installation_account_login: "ordaxsystems",
+      }],
+      expires_at: EXPIRES,
+    }),
+  });
+  const response = await handler(request(
+    "/v3/owner/github/repository-candidates?challenge_id=" + CHALLENGE,
+  ));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(),
+    { ok: false, error: "product_postgres_invalid_response" });
 });
 
 test("Repository selection accepts only a verified repository id and explicit confirmation", async () => {

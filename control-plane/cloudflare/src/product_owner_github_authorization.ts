@@ -188,6 +188,13 @@ function safeRepositoryFullName(value: unknown): string | null {
     ? value : null;
 }
 
+function repositoryBelongsToInstallation(fullName: string, accountLogin: string): boolean {
+  // The installation owns only repositories of its account. Provider pages
+  // and persisted candidates must not cross an installation/account boundary.
+  return fullName.slice(0, fullName.indexOf("/")).toLowerCase()
+    === accountLogin.toLowerCase();
+}
+
 function safeDefaultBranch(value: unknown): string | null | undefined {
   if (value === null) return null;
   if (typeof value !== "string" || value.length < 1 || value.length > 255
@@ -269,6 +276,7 @@ export async function collectVerifiedGithubRepositories(
   }
 
   const candidates: VerifiedGithubRepositoryCandidate[] = [];
+  const installationIds = new Set<string>();
   const repositoryIds = new Set<string>();
   for (const installation of rows) {
     if (!installation || typeof installation !== "object" || Array.isArray(installation)) {
@@ -283,7 +291,10 @@ export async function collectVerifiedGithubRepositories(
     const accountRecord = account as Json;
     const accountId = safeProviderId(accountRecord.id);
     const accountLogin = safeGithubLogin(accountRecord.login);
-    if (!accountId || !accountLogin) throw new Error("github_installation_catalog_invalid");
+    if (!accountId || !accountLogin || installationIds.has(installationId)) {
+      throw new Error("github_installation_catalog_invalid");
+    }
+    installationIds.add(installationId);
 
     let page = 1;
     let expectedTotal: number | null = null;
@@ -314,6 +325,7 @@ export async function collectVerifiedGithubRepositories(
         const fullName = safeRepositoryFullName(row.full_name);
         const defaultBranch = safeDefaultBranch(row.default_branch);
         if (!repositoryId || !fullName || defaultBranch === undefined
+            || !repositoryBelongsToInstallation(fullName, accountLogin)
             || repositoryIds.has(repositoryId)) {
           throw new Error("github_repository_catalog_invalid");
         }
@@ -517,6 +529,7 @@ function candidatesResponse(raw: Json, expectedChallengeId: string): Json {
     const branch = safeDefaultBranch(row.default_branch);
     if (typeof repositoryId !== "string" || !DECIMAL_ID.test(repositoryId)
         || ids.has(repositoryId) || !fullName || !accountLogin
+        || !repositoryBelongsToInstallation(fullName, accountLogin)
         || branch === undefined) {
       throw new Error("product_postgres_invalid_response");
     }
