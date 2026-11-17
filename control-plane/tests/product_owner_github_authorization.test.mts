@@ -312,7 +312,8 @@ test("Provider catalog rejects spoofed, duplicate or oversized repository author
   // Never persist a repository that the canonical Project resolver rejects.
   for (const full_name of [
     "org/<script>", "org/with?query", "org/repo#fragment",
-    "org/" + "r".repeat(101), "o".repeat(40) + "/repo",
+    "org/repo ", " org/repo", "org/" + "r".repeat(101),
+    "o".repeat(40) + "/repo",
   ]) {
     await assert.rejects(base({
       total_count: 1,
@@ -452,7 +453,8 @@ test("Candidate projection refuses repositories outside their verified installat
 });
 
 test("Candidate read refuses names that canonical Project resolution cannot recognize", async () => {
-  for (const invalidName of ["org/<script>", "org/test?bad", "org/" + "x".repeat(101)]) {
+  for (const invalidName of ["org/<script>", "org/test?bad", "org/repo ",
+    "org/" + "x".repeat(101)]) {
     const handler = createOwnerGithubAuthorizationHandler(ENV, {
       authenticate: authenticated,
       readCandidates: async () => ({
