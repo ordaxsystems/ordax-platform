@@ -259,4 +259,9 @@ test("multiple action targets remain ambiguous, never automatically selected",as
   assert.equal(result.client_device_routing.authoritative_for_current_session,false);
   assert.equal(result.client_device_routing.current_session_authority,"ordax_session.device_binding");
   assert.equal("candidate_device_id" in result.client_device_routing,false);
+  assert.deepEqual(result.client_device_routing.options, targets.map(t=>({
+    device_id:t.device_id,display_name:"ORDAX device",reported_online:true,
+    device_kind:null,target_type:"ordax_runtime_endpoint",
+  })));
+  assert.equal(result.client_device_routing.dispatch_authorized,false);
 });

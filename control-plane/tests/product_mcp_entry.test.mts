@@ -697,6 +697,89 @@ test("ambiguous Central device selection yields a safe remediation instead of op
   assert.equal(opens, 1);
 });
 
+test("Owner selection tells chat which endpoints exist but never binds or dispatches on a reply", async () => {
+  const challenge = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const desktop = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const installed = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  let queried = 0, opened = 0, actions = 0, waits = 0;
+  const options = [
+    {device_id:desktop,display_name:"Windows principal",reported_online:true,
+      device_kind:"desktop",target_type:"ordax_runtime_endpoint"},
+    {device_id:installed,display_name:"OrdaX Desktop",reported_online:false,
+      device_kind:"desktop",target_type:"ordax_runtime_endpoint"},
+  ];
+  const handlers = {
+    session: async () => Response.json({ok:true,session:{subject_id:"owner"}}),
+    targets: async () => { queried++; return Response.json({
+      ok:true,targets:[],client_device_routing:{
+        state:"multiple_action_grant_candidates",options,
+      },
+    }); },
+    getAction: async () => { actions++; return Response.json({ok:false}, {status:404}); },
+  };
+  const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+    new Set(["computer_access_status","ordax_targets"]), {
+      resolve: async () => ({ok:false,error:"central_session_unbound"}),
+      open: async () => { opened++; return Response.json({
+        ok:true,status:"awaiting_owner",challenge_id:challenge,
+      }); },
+      wait: async () => { waits++; },
+    });
+  const body = await (await gateway(request("computer_access_status",
+    {device_id:desktop}))).json() as any;
+  assert.equal(body.result.isError,true);
+  assert.deepEqual(body.result.structuredContent,{
+    ok:false,error:"central_session_owner_selection_required",
+    challenge_id:challenge,
+    required_action:"ask_user_to_choose_then_confirm_in_authenticated_ordax_owner",
+    question:"Qual dispositivo ou instalacao OrdaX deseja acessar nesta conversa?",
+    device_options:options,
+    owner_confirmation_required:true,selection_location:"ordax_owner",
+    selection_scope:"this_conversation_only",choices_are_authority:false,
+    action_dispatched:false,attested:false,
+  });
+  assert.equal(opened,1);
+  assert.equal(queried,1);
+  assert.equal(waits,0);
+  assert.equal(actions,0);
+});
+
+test("device choice hints do not leak through restricted or malformed target catalog", async () => {
+  const cases = [
+    {targetAllowed:false,valid:true},
+    {targetAllowed:true,valid:false},
+  ];
+  for (const item of cases) {
+    let queried=0;
+    const handlers={
+      session:async()=>Response.json({ok:true}),
+      targets:async()=>{queried++;return Response.json({
+        ok:true,
+        client_device_routing:{state:"multiple_action_grant_candidates",options:[
+          {device_id:"not-a-uuid",display_name:"forged secret",reported_online:true,
+            target_type:"ordax_runtime_endpoint"},
+          {device_id:"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",display_name:"valid",
+            reported_online:false,target_type:"ordax_runtime_endpoint"},
+        ]},
+      });},
+      getAction:async()=>{assert.fail("no dispatch");return Response.json({});},
+    };
+    const gateway=createCanonicalProductMcpGateway(ENV, handlers, fetch,
+      new Set(item.targetAllowed?["computer_access_status","ordax_targets"]:["computer_access_status"]),{
+        resolve:async()=>({ok:false,error:"central_session_unbound"}),
+        open:async()=>Response.json({ok:true,status:"awaiting_owner",
+          challenge_id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}),
+        wait:async()=>{assert.fail("Owner decision cannot be polled");},
+      });
+    const payload=await(await gateway(request("computer_access_status",
+      {device_id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd"}))).json() as any;
+    assert.equal(payload.result.structuredContent.action_dispatched,false);
+    assert.equal("device_options" in payload.result.structuredContent,false);
+    assert.equal(queried,item.targetAllowed?1:0);
+    assert.equal(JSON.stringify(payload).includes("forged secret"),false);
+  }
+});
+
 test("offline authorized device returns reconnect guidance without waiting or observing actions", async () => {
   const { handlers, calls } = fakeHandlers();
   const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,

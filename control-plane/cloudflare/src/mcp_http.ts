@@ -623,7 +623,17 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
           owner_action: "authorize_in_ordax_owner_permissions" }
       : { state: "multiple_action_grant_candidates",
           owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
-          owner_action_scope: "new_unbound_session_only" };
+          owner_action_scope: "new_unbound_session_only",
+          // This is only a descriptive view of the EXISTING current OAuth
+          // grant candidates, never execution authority. Never truncate choices.
+          ...(candidates.length <= 20 ? { options: candidates.map(target => ({
+            device_id: target.device_id,
+            display_name: target.name,
+            reported_online: target.online,
+            device_kind: target.device_kind,
+            target_type: "ordax_runtime_endpoint",
+          })) } : {}),
+        };
   return { ok: true, targets: targetsWithDiagnostics, client_device_routing: {
     ...routing, basis: "current_oauth_client_target_catalog",
     authoritative_for_current_session: false,
@@ -1154,14 +1164,49 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       }, true);
     }
     if (createdPayload.error === "central_session_owner_selection_required") {
-      // The authenticated conversation gets its *own* opaque challenge UUID.
-      // The Owner CLI must match this exact reference before consent/selection;
-      // neither the model nor this response receives device authority.
+      // The Owner must confirm the exact challenge through a separately
+      // authenticated first-party session. A user reply in the chat is a
+      // preference, not authority to bind, change grants or dispatch actions.
+      // Reuse OAuth-scoped ordax_targets instead of duplicating grant logic.
+      let options: JsonObject[] = [];
+      if (allowedTools.has("ordax_targets")) {
+        try {
+          const listing = await handlers.targets(cloneWithAuth(source,
+            new URL("/v3/product/targets", source.url).toString(), "GET"));
+          if (listing.ok) {
+            const catalog = await bodyJson(listing);
+            const routing = catalog.client_device_routing;
+            if (routing && typeof routing === "object" && !Array.isArray(routing)) {
+              const snapshot = routing as JsonObject;
+              if (snapshot.state === "multiple_action_grant_candidates"
+                  && Array.isArray(snapshot.options)
+                  && snapshot.options.length >= 2 && snapshot.options.length <= 20
+                  && snapshot.options.every((item: unknown) => {
+                    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+                    const entry = item as JsonObject;
+                    return isCanonicalUuid(entry.device_id)
+                      && typeof entry.display_name === "string"
+                      && entry.display_name.length <= 128
+                      && !/[\x00-\x1f]/.test(entry.display_name)
+                      && (entry.reported_online === true || entry.reported_online === false
+                        || entry.reported_online === null)
+                      && entry.target_type === "ordax_runtime_endpoint";
+                  })) options = snapshot.options as JsonObject[];
+            }
+          }
+        } catch { /* Optional UI hint never changes the authorization decision. */ }
+      }
       return textToolResult({
         ok: false, error: "central_session_owner_selection_required",
         ...(isCanonicalUuid(createdPayload.challenge_id)
           ? { challenge_id: createdPayload.challenge_id } : {}),
-        required_action: "match_challenge_in_authenticated_owner_cli",
+        required_action: "ask_user_to_choose_then_confirm_in_authenticated_ordax_owner",
+        question: "Qual dispositivo ou instalacao OrdaX deseja acessar nesta conversa?",
+        ...(options.length ? { device_options: options } : {}),
+        owner_confirmation_required: true,
+        selection_location: "ordax_owner",
+        selection_scope: "this_conversation_only",
+        choices_are_authority: false,
         action_dispatched: false, attested: false,
       }, true);
     }
