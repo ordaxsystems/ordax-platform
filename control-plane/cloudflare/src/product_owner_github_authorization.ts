@@ -186,6 +186,7 @@ function safeRepositoryFullName(value: unknown): string | null {
   // exactly the same repository grammar. Preserve provider casing for the
   // human-facing choice; the resolver canonicalizes it for matching.
   return typeof value === "string"
+    && value === value.trim()
     && canonicalGithubRepositoryFullName(value) !== null
     ? value : null;
 }
