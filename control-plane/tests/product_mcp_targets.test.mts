@@ -265,3 +265,57 @@ test("multiple action targets remain ambiguous, never automatically selected",as
   })));
   assert.equal(result.client_device_routing.dispatch_authorized,false);
 });
+
+
+test("one physical PC and its Desktop installation remain separate action endpoints but share a verified descriptive host",async()=>{
+  const pc="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const desktop="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  const group={
+    profile_key:"computer-observe",space_id:null,project_id:null,valid_until:null,
+    capabilities:[{capability:"computer.windows",access_mode:"read"}],
+  };
+  const {body}=await listTargets([
+    {device_id:pc,device_name:"DESKTOP-X",device_kind:"desktop",online:true,
+      endpoint_role:"physical_computer",physical_host_device_id:pc,grant_groups:[group]},
+    {device_id:desktop,device_name:"OrdaX Desktop",device_kind:"desktop",online:false,
+      endpoint_role:"ordax_desktop_installation",physical_host_device_id:pc,grant_groups:[group]},
+  ]);
+  const payload=body.result.structuredContent;
+  assert.equal(payload.targets.length,2);
+  const physical=payload.targets[0],installed=payload.targets[1];
+  assert.equal(physical.name,"DESKTOP-X");
+  assert.equal(physical.endpoint_role,"physical_computer");
+  assert.equal(physical.physical_host_device_id,pc);
+  assert.equal(installed.name,"OrdaX Desktop");
+  assert.equal(installed.endpoint_role,"ordax_desktop_installation");
+  assert.equal(installed.physical_host_device_id,pc);
+  assert.deepEqual(payload.client_device_routing.options,[
+    {device_id:pc,display_name:"DESKTOP-X",reported_online:true,device_kind:"desktop",
+      target_type:"ordax_runtime_endpoint",endpoint_role:"physical_computer",
+      physical_host_device_id:pc},
+    {device_id:desktop,display_name:"OrdaX Desktop",reported_online:false,device_kind:"desktop",
+      target_type:"ordax_runtime_endpoint",endpoint_role:"ordax_desktop_installation",
+      physical_host_device_id:pc},
+  ]);
+  assert.equal(payload.client_device_routing.state,"multiple_action_grant_candidates",
+    "a shared physical host never makes different Runtime credentials interchangeable");
+  assert.equal(payload.client_device_routing.dispatch_authorized,false);
+});
+
+test("forged or inconsistent physical host metadata is not projected as authority",async()=>{
+  const id="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const group={profile_key:"computer-observe",space_id:null,project_id:null,valid_until:null,
+    capabilities:[{capability:"computer.windows",access_mode:"read"}]};
+  for(const raw of [
+    {endpoint_role:"physical_computer",physical_host_device_id:"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"},
+    {endpoint_role:"ordax_desktop_installation",physical_host_device_id:id},
+    {endpoint_role:"forged_physical_pc",physical_host_device_id:id},
+    {endpoint_role:"standalone_runtime_endpoint",physical_host_device_id:id},
+  ]){
+    const {body}=await listTargets([{device_id:id,device_name:"Endpoint",online:true,
+      grant_groups:[group],...raw}]);
+    const result=body.result.structuredContent.targets[0];
+    assert.equal("endpoint_role" in result,false);
+    assert.equal("physical_host_device_id" in result,false);
+  }
+});
