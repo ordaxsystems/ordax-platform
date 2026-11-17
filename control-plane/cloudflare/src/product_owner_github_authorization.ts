@@ -1,4 +1,5 @@
 import { readBoundedJsonObject } from "./request_json.ts";
+import { canonicalGithubRepositoryFullName } from "./product_owner_project_scope.ts";
 import {
   authenticateProductRequest,
   authorizeProductOwnerIdentity,
@@ -65,7 +66,6 @@ const MAX_REPOSITORIES = 500;
 const MAX_PROVIDER_JSON = 1024 * 1024;
 const DECIMAL_ID = /^[1-9][0-9]{0,18}$/;
 const GITHUB_LOGIN = /^[A-Za-z0-9-]{1,100}$/;
-const REPOSITORY_FULL_NAME = /^[^\s/]+\/[^\s/]+$/;
 const CLIENT_ID = /^[A-Za-z0-9_.-]{8,160}$/;
 const SECRET = /^[^\s\u0000-\u001f\u007f]{20,512}$/;
 const INSTALL_URL = /^https:\/\/github\.com\/apps\/[A-Za-z0-9-]+\/installations\/new$/;
@@ -182,9 +182,12 @@ function safeGithubLogin(value: unknown): string | null {
 }
 
 function safeRepositoryFullName(value: unknown): string | null {
+  // The GitHub App candidate and the eventual Project scope must accept
+  // exactly the same repository grammar. Preserve provider casing for the
+  // human-facing choice; the resolver canonicalizes it for matching.
   return typeof value === "string"
-      && value.length >= 3 && value.length <= 200
-      && REPOSITORY_FULL_NAME.test(value)
+    && value === value.trim()
+    && canonicalGithubRepositoryFullName(value) !== null
     ? value : null;
 }
 
