@@ -68,7 +68,8 @@ test("Product claim/start/renew recheck original grant, OAuth and owner; termina
         created_at timestamptz default now(), attempt_id uuid, lease_id uuid,
         execution_epoch bigint default 0, agent_instance_id uuid, boot_id text,
         lease_expires_at timestamptz, report_id uuid, started_at timestamptz,
-        error_code text, finished_at timestamptz, result jsonb, result_sha256 text);
+        error_code text, finished_at timestamptz, result jsonb, result_sha256 text,
+        execution_runtime_kind text, execution_agent_version text);
       create table private.ordax_product_action_audit(
         request_id uuid,owner_user_id uuid,space_id uuid,project_id uuid,
         device_id uuid,grant_id uuid,client_kind text,client_id text,
