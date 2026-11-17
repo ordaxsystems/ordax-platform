@@ -1171,7 +1171,8 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       let options: JsonObject[] = [];
       if (allowedTools.has("ordax_targets")) {
         try {
-          const listing = await handlers.targets(source.clone());
+          const listing = await handlers.targets(cloneWithAuth(source,
+            new URL("/v3/product/targets", source.url).toString(), "GET"));
           if (listing.ok) {
             const catalog = await bodyJson(listing);
             const routing = catalog.client_device_routing;
