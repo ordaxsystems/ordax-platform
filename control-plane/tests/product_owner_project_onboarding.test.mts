@@ -121,6 +121,36 @@ test("Owner onboarding state derives root setup gates without fabricating GitHub
   });
 });
 
+test("Onboarding rejects orphaned/duplicate authority and inconsistent readiness projection", () => {
+  const space = { space_id: SPACE, name: "Owner", kind: "work", state: "active" };
+  const project = {
+    project_id: PROJECT, space_id: SPACE, name: "OrdaX Platform",
+    kind: "development", state: "active", github_connection_count: 0,
+    repository_full_name: null, space_device_execute: false,
+    project_device_bound: false, next_state: "needs_github_installation",
+  };
+  const state = (spaces: unknown[], projects: unknown[], next_state: unknown = null) =>
+    ({ ok: true, device_id: DEVICE, spaces, projects, next_state });
+  const check = (raw: Record<string, unknown>) => assert.throws(
+    () => onboardingStateResponse(raw, DEVICE), /product_postgres_invalid_response/,
+  );
+  const ready = { ...project, github_connection_count: 1,
+    repository_full_name: "ordaxsystems/ordax-platform", space_device_execute: true,
+    project_device_bound: true, next_state: "ready_without_grants" };
+  assert.equal((onboardingStateResponse(state([space], [ready]), DEVICE).projects as any[])[0].next_state,
+    "ready_without_grants");
+  check(state([], [project], "needs_space"));
+  check(state([space], [{ ...project, space_id: INTENT }]));
+  check(state([space, space], [project]));
+  check(state([space], [project, project]));
+  check(state([space], [{ ...project, next_state: "ready_without_grants" }]));
+  check(state([space], [{ ...ready, project_device_bound: false }]));
+  check(state([space], [{ ...ready, github_connection_count: 0, repository_full_name: null }]));
+  check(state([space], [{ ...ready, github_connection_count: 2,
+    repository_full_name: null, next_state: "ready_without_grants" }]));
+  assert.deepEqual(onboardingStateResponse(state([space], [project]), DEVICE).projects, [project]);
+});
+
 test("Project creation requires an explicit Owner confirmation and reuses canonical project RPC", async () => {
   let observed: unknown = null;
   const handler = createOwnerProjectOnboardingHandler(ENV, {

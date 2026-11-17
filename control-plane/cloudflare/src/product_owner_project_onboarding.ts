@@ -109,6 +109,7 @@ export function onboardingStateResponse(raw: Json, requestedDeviceId: string): J
     throw new Error("product_postgres_invalid_response");
   }
 
+  const spaceIds = new Set<string>();
   const spaces = raw.spaces.map((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error("product_postgres_invalid_response");
@@ -116,12 +117,15 @@ export function onboardingStateResponse(raw: Json, requestedDeviceId: string): J
     const item = entry as Json;
     const name = safeLabel(item.name);
     const kind = safeLabel(item.kind, 80);
-    if (!isCanonicalUuid(item.space_id) || name === null || kind === null || item.state !== "active") {
+    if (!isCanonicalUuid(item.space_id) || spaceIds.has(item.space_id)
+        || name === null || kind === null || item.state !== "active") {
       throw new Error("product_postgres_invalid_response");
     }
+    spaceIds.add(item.space_id);
     return { space_id: item.space_id, name, kind, state: "active" };
   });
 
+  const projectIds = new Set<string>();
   const projects = raw.projects.map((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error("product_postgres_invalid_response");
@@ -132,16 +136,26 @@ export function onboardingStateResponse(raw: Json, requestedDeviceId: string): J
     const nextState = item.next_state;
     const repository = item.repository_full_name === null
       ? null : canonicalGithubRepositoryFullName(item.repository_full_name);
-    if (!isCanonicalUuid(item.project_id) || !isCanonicalUuid(item.space_id)
+    // The SQL authority derives this state from current repository and Device
+    // bindings. Refuse a stale/incoherent projection instead of telling the
+    // Account UI a Project is ready without its prerequisite authorities.
+    const expectedState = count === 0 ? "needs_github_installation"
+      : count > 1 ? "needs_repository_selection"
+      : item.space_device_execute !== true || item.project_device_bound !== true
+        ? "needs_device_binding" : "ready_without_grants";
+    if (!isCanonicalUuid(item.project_id) || projectIds.has(item.project_id)
+        || !isCanonicalUuid(item.space_id) || !spaceIds.has(item.space_id)
         || name === null || typeof item.kind !== "string" || !PROJECT_KINDS.has(item.kind)
         || item.state !== "active" || typeof count !== "number" || !Number.isSafeInteger(count) || count < 0
         || typeof item.space_device_execute !== "boolean"
         || typeof item.project_device_bound !== "boolean"
         || typeof nextState !== "string" || !PROJECT_STATES.has(nextState)
+        || nextState !== expectedState
         || (count === 1 && repository === null)
         || (count !== 1 && item.repository_full_name !== null)) {
       throw new Error("product_postgres_invalid_response");
     }
+    projectIds.add(item.project_id);
     return {
       project_id: item.project_id,
       space_id: item.space_id,
@@ -160,7 +174,7 @@ export function onboardingStateResponse(raw: Json, requestedDeviceId: string): J
   if (rootState !== null && (typeof rootState !== "string" || !ROOT_STATES.has(rootState))) {
     throw new Error("product_postgres_invalid_response");
   }
-  if ((rootState === "needs_space" && spaces.length !== 0)
+  if ((rootState === "needs_space" && (spaces.length !== 0 || projects.length !== 0))
       || (rootState === "needs_project" && (spaces.length === 0 || projects.length !== 0))
       || (rootState === null && (spaces.length === 0 || projects.length === 0))) {
     throw new Error("product_postgres_invalid_response");
