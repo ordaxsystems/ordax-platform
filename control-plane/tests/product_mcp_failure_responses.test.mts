@@ -621,6 +621,8 @@ test("MCP projects cross-device attestation errors without leaking the bound dev
       ok: false,
       error: "product_attested_device_mismatch",
       internal_device_id: "private-device",
+      attested_device_id: "66666666-6666-4666-8666-666666666666",
+      requested_device_id: "22222222-2222-4222-8222-222222222222",
     }, { status: 403 }),
     getAction: async () => { assert.fail("no action status after attestation denial"); },
   }, { device_id: "22222222-2222-4222-8222-222222222222", argv: ["id"] });
