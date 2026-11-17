@@ -4,6 +4,7 @@ import {
   PRODUCT_GITHUB_WEBHOOK_PATH,
   createProductGithubWebhookHandler,
   githubAuthorityRevocation,
+  requiresGithubAuthorityRevocation,
   verifyGithubWebhookSignature,
 } from "../cloudflare/src/product_github_webhook.ts";
 import { isProductTrustedClientPath } from "../cloudflare/src/product_mcp_entry.ts";
@@ -87,6 +88,38 @@ test("destructive GitHub provider events normalize only provider authority ident
   ] as const) {
     assert.equal(githubAuthorityRevocation(value[0],value[1]),null);
   }
+});
+
+test("unparseable signed revocations never receive a false success acknowledgement", async () => {
+  const invalid = [
+    ["installation", { action: "deleted" }],
+    ["installation", { action: "suspend", installation: { id: "not-a-provider-id" } }],
+    ["installation_repositories", { action: "removed", installation: { id: 123 }, repositories_removed: [] }],
+    ["installation_repositories", { action: "removed", installation: { id: 123 },
+      repositories_removed: [{ id: "invalid" }] }],
+    ["installation_repositories", { action: "added", installation: { id: 123 },
+      repositories_added: [{ id: 456 }], repositories_removed: [{ id: "invalid" }] }],
+    ["repository", { action: "renamed", repository: { id: 456 } }],
+    ["repository", { action: "deleted", installation: { id: 123 } }],
+    ["github_app_authorization", { action: "revoked", sender: { id: "invalid" } }],
+    ["installation", { installation: { id: 123 } }],
+  ] as const;
+  let mutations = 0;
+  const handler = createProductGithubWebhookHandler({
+    PRODUCT_GITHUB_APP_WEBHOOK_ENABLED: "enabled",
+    PRODUCT_GITHUB_APP_WEBHOOK_SECRET: SECRET,
+  }, {
+    applyRevocation: async () => { mutations++; throw Error("incomplete event reached database"); },
+  });
+  for (const [event, payload] of invalid) {
+    assert.equal(githubAuthorityRevocation(event, payload), null);
+    assert.equal(requiresGithubAuthorityRevocation(event, payload), true);
+    const response = await handler(await request(event, payload));
+    assert.equal(response.status, 422, event);
+    assert.deepEqual(await response.json(),
+      { ok: false, error: "github_webhook_revocation_invalid" }, event);
+  }
+  assert.equal(mutations, 0);
 });
 
 test("webhook stays invisible while independent release config is absent", async () => {
