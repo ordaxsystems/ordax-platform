@@ -332,7 +332,13 @@ export async function collectVerifiedGithubRepositories(
         }
       }
 
-      if (installationCount >= (expectedTotal ?? 0)) break;
+      // GitHub's total_count is part of the provider authority snapshot.
+      // An overfull page is inconsistent even when each repository ID is
+      // unique; never persist more candidates than the provider reports.
+      if (installationCount > (expectedTotal ?? 0)) {
+        throw new Error("github_repository_catalog_invalid");
+      }
+      if (installationCount === expectedTotal) break;
       if (repositories.length === 0 || page >= 5) {
         throw new Error("github_repository_catalog_incomplete");
       }
