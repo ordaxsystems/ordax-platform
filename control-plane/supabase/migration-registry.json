@@ -1257,6 +1257,18 @@
         "blob_sha": "368654747c2e44365b6cbf12b1a1828ac37ff3c3"
       },
       "ledger_name": "forge_https_rpc_transport_v1"
+    },
+    {
+      "name": "20261117065000_owner_central_selection_single_flight_v1",
+      "applied_version": "20261117061840",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261117065000_owner_central_selection_single_flight_v1.sql",
+        "blob_sha": "3b3b32158f2f7a8d83f3fe120c8aaddeaba5830b"
+      },
+      "ledger_name": "owner_central_selection_single_flight_v1"
     }
   ]
 }
