@@ -1196,6 +1196,9 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
           }
         } catch { /* Optional UI hint never changes the authorization decision. */ }
       }
+      // Awaiting consent is a fulfilled tool interaction, NOT a completed
+      // device action. Do not emit an MCP error that host clients reclassify
+      // as INVALID_ARGUMENT. The response still explicitly denies dispatch.
       return textToolResult({
         ok: false, error: "central_session_owner_selection_required",
         ...(isCanonicalUuid(createdPayload.challenge_id)
@@ -1209,11 +1212,6 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
         choices_are_authority: false,
         action_dispatched: false, attested: false,
       }, false);
-      // Awaiting consent is a fulfilled *tool interaction*, NOT a failed
-      // device action. Keep ok:false/action_dispatched:false and never enqueue
-      // or attest on the caller's behalf; the Owner must match the challenge
-      // in the first-party account. Avoid MCP isError because hosts surface
-      // it as a generic INVALID_ARGUMENT rather than a user-choice prompt.
     }
     if (spec.projectRequired && createdPayload.error === "product_project_scope_not_found") {
       // A missing Owner-managed Space/project/repository/device association
