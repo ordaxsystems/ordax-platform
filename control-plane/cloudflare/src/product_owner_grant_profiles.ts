@@ -73,5 +73,9 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
 });
 
 export function ownerMcpGrantProfile(key: string): OwnerGrantProfile | null {
-  return OWNER_MCP_GRANT_PROFILES[key] ?? null;
+  // Never resolve inherited Object.prototype members (e.g. "constructor")
+  // as grant profiles supplied by an Owner request.
+  return Object.hasOwn(OWNER_MCP_GRANT_PROFILES, key)
+    ? OWNER_MCP_GRANT_PROFILES[key]
+    : null;
 }

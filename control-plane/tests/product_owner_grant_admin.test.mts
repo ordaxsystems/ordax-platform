@@ -8,6 +8,7 @@ import {
 } from "../cloudflare/src/product_owner_grant_admin.ts";
 import {
   OWNER_MCP_GRANT_PROFILES,
+  ownerMcpGrantProfile,
   productCapabilityAccessMode,
 } from "../cloudflare/src/product_owner_grant_profiles.ts";
 import { env, token, withIssuer, client } from "./product_mcp_test_fixtures.mts";
@@ -74,6 +75,39 @@ test("owner grant profiles are explicit and observation remains least privilege"
   assert.equal(productCapabilityAccessMode("workspace.project_snapshot"),"read");
   assert.equal(workspace.capabilities.some(item=>item.accessMode==="write"),false);
   assert.equal(workspace.capabilities.some(item=>item.capability.startsWith("computer.")),false);
+});
+
+test("Owner grant profile keys must be registered own keys, never prototype members", async () => {
+  for (const inherited of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+    assert.equal(ownerMcpGrantProfile(inherited), null, inherited);
+  }
+
+  await withIssuer(async () => {
+    const firstParty = await token({ client_id: null });
+    let grantWrites = 0;
+    const device = "11111111-1111-4111-8111-111111111111";
+    const body = {
+      client_id: client, device_id: device, profile_key: "constructor",
+      space_id: null, project_id: null, valid_until: null,
+    };
+    // "constructor" matches the public profile-key syntax; it previously
+    // resolved to Object.prototype.constructor and reached the grant writer.
+    const response = await handleProductOwnerGrantAdmin(new Request(
+      "https://mcp.ordax.com.br/v3/owner/remote-grant-groups", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer " + firstParty,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    ), env, {
+      replaceGrantGroup: async () => { grantWrites++; return { ok: true }; },
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { ok: false, error: "owner_grant_invalid" });
+    assert.equal(grantWrites, 0, "unknown profile must never reach PostgreSQL");
+  });
 });
 
 test("owner grant admin fails closed before database access without signed owner session", async () => {
