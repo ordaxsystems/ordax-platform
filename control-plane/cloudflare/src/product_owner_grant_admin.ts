@@ -70,6 +70,22 @@ function failure(error: unknown): Response {
   return json({ ok: false, error: "product_postgres_unavailable" }, 503);
 }
 
+// Owner's authenticated selection is distinct from OAuth authorization.
+// A stale/ambiguous ticket is a state conflict, not a permission denial;
+// retain fail-closed 403 for missing consent or revoked grant.
+function ownerCentralSelectionStatus(result: { ok: boolean; error?: string }): number {
+  if (result.ok === true) return 200;
+  switch (result.error) {
+    case "owner_central_selection_invalid": return 400;
+    case "owner_central_selection_not_found": return 404;
+    case "owner_central_selection_not_pending":
+    case "owner_central_selection_ambiguous":
+    case "central_session_target_mismatch":
+    case "central_device_runtime_not_ready": return 409;
+    default: return 403;
+  }
+}
+
 function optionalUuid(value: unknown): string | null | undefined {
   // null is the *explicit* unscoped choice. Empty/omitted form fields are
   // not permission to create a device-wide grant.
@@ -147,7 +163,7 @@ export async function handleProductOwnerGrantAdmin(
       const result = await (deps.selectDevice ?? selectOwnerCentralDevice)(env, {
         ownerUserId: ownerId, clientId, challengeId, deviceId,
       });
-      return json(result, result.ok === true ? 200 : 403);
+      return json(result, ownerCentralSelectionStatus(result));
     }
     if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH) {
       // Advisory-only Owner preflight: not a device selector, grant or dispatch.
