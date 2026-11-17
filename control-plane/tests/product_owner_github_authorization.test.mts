@@ -308,6 +308,29 @@ test("Provider catalog rejects spoofed, duplicate or oversized repository author
     repositories: [{ id: 4, full_name: "not-a-repository", default_branch: "main" }],
   }), /github_repository_catalog_invalid/);
 
+  // Previously valid at GitHub selection but invalid at /v3/owner/project-scope.
+  // Never persist a repository that the canonical Project resolver rejects.
+  for (const full_name of [
+    "org/<script>", "org/with?query", "org/repo#fragment",
+    "org/" + "r".repeat(101), "o".repeat(40) + "/repo",
+  ]) {
+    await assert.rejects(base({
+      total_count: 1,
+      repositories: [{ id: 4, full_name, default_branch: "main" }],
+    }), /github_repository_catalog_invalid/, full_name);
+  }
+  const mixedCase = await collectVerifiedGithubRepositories(token, async url => {
+    if (url === "https://api.github.com/user") return jsonResponse({ id: 1, login: "owner" });
+    if (url === "https://api.github.com/user/installations?per_page=100&page=1") {
+      return jsonResponse({ total_count: 1, installations: [{ id: 2,
+        account: { id: 3, login: "OrG" } }] });
+    }
+    return jsonResponse({ total_count: 1, repositories: [
+      { id: 4, full_name: "Org/Repo.Name_1", default_branch: "main" },
+    ] });
+  });
+  assert.equal(mixedCase.candidates[0].repository_full_name, "Org/Repo.Name_1");
+
   await assert.rejects(base({
     total_count: 2,
     repositories: [
@@ -426,6 +449,32 @@ test("Candidate projection refuses repositories outside their verified installat
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(),
     { ok: false, error: "product_postgres_invalid_response" });
+});
+
+test("Candidate read refuses names that canonical Project resolution cannot recognize", async () => {
+  for (const invalidName of ["org/<script>", "org/test?bad", "org/" + "x".repeat(101)]) {
+    const handler = createOwnerGithubAuthorizationHandler(ENV, {
+      authenticate: authenticated,
+      readCandidates: async () => ({
+        ok: true,
+        challenge_id: CHALLENGE,
+        project_id: PROJECT,
+        repositories: [{
+          repository_id: "10001",
+          repository_full_name: invalidName,
+          default_branch: "main",
+          installation_account_login: "org",
+        }],
+        expires_at: EXPIRES,
+      }),
+    });
+    const response = await handler(request(
+      "/v3/owner/github/repository-candidates?challenge_id=" + CHALLENGE,
+    ));
+    assert.equal(response.status, 503, invalidName);
+    assert.deepEqual(await response.json(),
+      { ok: false, error: "product_postgres_invalid_response" });
+  }
 });
 
 test("Repository selection accepts only a verified repository id and explicit confirmation", async () => {
