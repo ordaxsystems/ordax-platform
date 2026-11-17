@@ -16,8 +16,8 @@ e não devem ser ativados por inferência desse sucesso DEV.
 
 A integração Aura/Fabric com a Store `CURRENT` instalada pertence
 ao OS (fonte/vínculo Native) e ao Runtime (cliente Product), **não**
-ao PostgreSQL/Worker. Handoff vigente:
-[`ordax-os/INTELLIGENCE-HANDOFF.md`](https://github.com/ordaxsystems/ordax-os/blob/main/INTELLIGENCE-HANDOFF.md).
+ao PostgreSQL/Worker. Estado vigente no OS:
+[`docs/CURRENT-STATE.md` do OS](https://github.com/ordaxsystems/ordax-os/blob/main/docs/CURRENT-STATE.md).
 Este repo continua dono somente de OAuth, Device/Owner,
 grants/leases, autorização, dispatch e recibos remotos;
 `ordax-surface` é owner da UI e `ordax-apps` dos providers.
