@@ -258,6 +258,7 @@ const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
   "central_device_target_missing",
   "central_device_target_ambiguous",
   "central_session_owner_selection_required",
+  "central_owner_selection_in_progress",
   "central_session_revoked",
   "central_session_target_mismatch",
 ]);
