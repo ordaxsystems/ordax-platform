@@ -510,7 +510,6 @@ export function createCanonicalProductMcpGateway(
           ...reads,
           createAction: async () => respond({
             ok: false, error: "product_device_action_invalid",
-            action_dispatched: false,
           }, 400),
         };
       } else if (toolName && allowedTools.has(toolName)
