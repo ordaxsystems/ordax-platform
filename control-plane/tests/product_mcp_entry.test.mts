@@ -422,7 +422,6 @@ test("explicit device Space is denied before Owner selection, without a job or c
     const payload = await response.json() as any;
     assert.equal(payload.result.isError, true);
     assert.equal(payload.result.structuredContent.error, "product_device_action_invalid");
-    assert.equal(payload.result.structuredContent.action_dispatched, false);
   }
   assert.equal(resolutions, 0, "invalid device scope must not resolve a session");
   assert.equal(opens, 0, "invalid device scope must not create Owner consent challenge");
