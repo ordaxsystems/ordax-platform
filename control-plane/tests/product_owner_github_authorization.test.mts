@@ -316,6 +316,22 @@ test("Provider catalog rejects spoofed, duplicate or oversized repository author
     ],
   }), /github_repository_catalog_invalid/);
 
+  // Both counts below previously reached the candidate persistence boundary:
+  // unique IDs are insufficient if the provider page contradicts total_count.
+  for (const total_count of [0, 1]) {
+    await assert.rejects(base({
+      total_count,
+      repositories: [
+        { id: 4, full_name: "org/a", default_branch: "main" },
+        ...(total_count === 0 ? [] : [{ id: 5, full_name: "org/b", default_branch: "main" }]),
+      ],
+    }), /github_repository_catalog_invalid/);
+  }
+  // A consistent zero-result installation is legitimate: do not turn
+  // "no repositories selected" into a fabricated authorization failure.
+  const empty = await base({ total_count: 0, repositories: [] });
+  assert.deepEqual(empty.candidates, []);
+
   await assert.rejects(collectVerifiedGithubRepositories(token, async url => {
     if (url === "https://api.github.com/user") return jsonResponse({ id: 1, login: "owner" });
     return jsonResponse({
