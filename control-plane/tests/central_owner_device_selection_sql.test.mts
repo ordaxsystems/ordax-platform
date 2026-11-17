@@ -106,6 +106,7 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     await db.exec(read("20261113085000_central_session_sliding_binding_v1.sql"));
     await db.exec(read("20261113085500_central_session_activity_lease_v1.sql"));
     await db.exec(read("20261113151500_central_session_persistent_binding_v1.sql"));
+    await db.exec(read("20261117065000_owner_central_selection_single_flight_v1.sql"));
 
     await db.query("insert into auth.users values($1)",[owner]);
     await db.query("insert into auth.oauth_clients values($1,null),($2,null)",[client,otherClient]);
@@ -130,6 +131,16 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     assert.equal(waiting.device_id,undefined);
     assert.equal((await open()).challenge_id,waiting.challenge_id,"same session idempotent");
     assert.equal((await list()).pending_selections.length,1);
+    // A second GPT conversation for the same OAuth client must not create an
+    // unconfirmable Owner queue with two awaiting_owner choices. This is the
+    // exact production failure seen when both Desktop identities have grants.
+    const competing=await open(secondHash);
+    assert.equal(competing.ok,false);
+    assert.equal(competing.error,"central_owner_selection_in_progress");
+    assert.equal((await list()).pending_selections.length,1,
+      "another session must not manufacture an ambiguous owner choice");
+    assert.equal((await open()).challenge_id,waiting.challenge_id,
+      "the original chat keeps its exact Owner ticket");
     assert.equal((await list(other)).ok,false);
     assert.equal((await list(owner,otherClient)).error,"owner_central_client_not_consented");
     assert.equal((await choose(other,client,waiting.challenge_id)).ok,false);
@@ -218,23 +229,20 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     ]);
     assert.equal(selections.filter(x=>x.ok).length,1,"concurrent Owner choices have one winner");
     assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where state='pending' and session_sha256=$1",[secondHash])).rows[0].total,1);
-    // Two distinct provider sessions for this OAuth client are currently
-    // indistinguishable in the Owner picker. Refuse an arbitrary ticket.
-    const ambiguousA=await open("1".repeat(64));
-    const ambiguousB=await open("2".repeat(64));
-    assert.equal(ambiguousA.status,"awaiting_owner");
-    assert.equal(ambiguousB.status,"awaiting_owner");
-    assert.equal((await list()).count,2);
-    assert.equal((await choose(owner,client,ambiguousA.challenge_id,desktop)).error,
-      "owner_central_selection_ambiguous",
-      "two waiting conversations cannot be selected without an identity proof");
-    assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where state='pending' and session_sha256 in ($1,$2)",
-      ["1".repeat(64),"2".repeat(64)])).rows[0].total,0,
-      "ambiguous Owner action must not mint a pending Device ticket");
-    await db.query("update private.ordax_central_device_session_challenges set state='expired' where challenge_id=$1",
-      [ambiguousB.challenge_id]);
-    assert.equal((await choose(owner,client,ambiguousA.challenge_id,desktop)).ok,true,
-      "one remaining unexpired Owner ticket can be selected");
+    // Two distinct provider sessions still cannot share an Owner ticket.
+    // Rather than allow an ambiguous, impossible-to-confirm pair, the
+    // canonical Owner+client queue admits exactly one live choice.
+    const firstChoice=await open("1".repeat(64));
+    const competingChoice=await open("2".repeat(64));
+    assert.equal(firstChoice.status,"awaiting_owner");
+    assert.equal(competingChoice.ok,false);
+    assert.equal(competingChoice.error,"central_owner_selection_in_progress");
+    assert.equal((await list()).count,1);
+    assert.equal((await choose(owner,client,firstChoice.challenge_id,desktop)).ok,true,
+      "the single exact Owner ticket can still be selected");
+    assert.equal((await db.query("select count(*)::int as total from private.ordax_central_device_session_challenges where state='pending' and session_sha256=$1",
+      ["2".repeat(64)])).rows[0].total,0,
+      "refused competing session never receives a Device ticket");
 
     // Expired Owner ticket may not be rescued by knowledge of its UUID.
     const thirdHash="c".repeat(64);
