@@ -107,6 +107,7 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     await db.exec(read("20261113085500_central_session_activity_lease_v1.sql"));
     await db.exec(read("20261113151500_central_session_persistent_binding_v1.sql"));
     await db.exec(read("20261117065000_owner_central_selection_single_flight_v1.sql"));
+    await db.exec(read("20261117132500_central_confirm_revocation_revalidation_v1.sql"));
 
     await db.query("insert into auth.users values($1)",[owner]);
     await db.query("insert into auth.oauth_clients values($1,null),($2,null)",[client,otherClient]);
@@ -163,9 +164,21 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     assert.equal((await poll()).challenge_id,waiting.challenge_id);
     assert.equal((await confirm(notebook,tokenNote,waiting.challenge_id)).ok,false,
       "Notebook credential cannot confirm Desktop");
+    // A withdrawn OAuth consent blocks Device confirmation even when the
+    // Owner previously selected this exact device.
+    await db.exec("update auth.oauth_consents set revoked_at=now()");
+    assert.equal((await confirm(desktop,tokenDesk,waiting.challenge_id)).error,
+      "owner_central_client_not_consented");
+    await db.exec("update auth.oauth_consents set revoked_at=null");
     const confirmed=await confirm(desktop,tokenDesk,waiting.challenge_id);
     assert.equal(confirmed.ok,true);
     assert.equal(confirmed.status,"bound");
+    assert.equal((await confirm(desktop,tokenDesk,waiting.challenge_id)).request_id,
+      confirmed.request_id,"valid idempotent Device retries retain the original binding");
+    await db.query("update private.ordax_central_conversation_bindings set state='revoked' where request_id=$1",[confirmed.request_id]);
+    assert.equal((await confirm(desktop,tokenDesk,waiting.challenge_id)).error,
+      "central_session_revoked","a confirmed ticket cannot resurrect a revoked binding");
+    await db.query("update private.ordax_central_conversation_bindings set state='active' where request_id=$1",[confirmed.request_id]);
     assert.equal((await resolve()).device_id,desktop);
     assert.equal((await open()).device_id,desktop,
       "previous attested binding prevails over subsequent multiple grants");
@@ -192,6 +205,8 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     // OAuth consent revocation invalidates routing immediately even though the
     // binding itself has no inactivity expiry.
     await db.exec("update auth.oauth_consents set revoked_at=now()");
+    assert.equal((await confirm(desktop,tokenDesk,waiting.challenge_id)).error,
+      "owner_central_client_not_consented","confirmed receipts cannot bypass OAuth revocation");
     assert.equal((await resolve()).error,"owner_central_client_not_consented");
     assert.equal((await open()).error,"owner_central_client_not_consented");
     await db.exec("update auth.oauth_consents set revoked_at=null");
@@ -208,6 +223,8 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
 
     // Grant revocation is still immediate and fail-closed.
     await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",[grantDesk]);
+    assert.equal((await confirm(desktop,tokenDesk,waiting.challenge_id)).error,
+      "central_device_grant_revoked","confirmed receipt cannot bypass revoked Product grant");
     assert.equal((await resolve()).error,"central_device_grant_revoked");
     assert.equal((await open()).error,"central_device_grant_revoked");
     assert.equal((await db.query("select count(*)::int as total from public.ordax_remote_capability_grants")).rows[0].total,2,
