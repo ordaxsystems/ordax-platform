@@ -615,8 +615,15 @@ test("omitted Space remains explicitly unscoped, not a fabricated Space grant", 
 });
 
 
-test("MCP projects cross-device attestation errors without leaking the bound device or proposing a grant", async () => {
+test("MCP presents cross-device attestation denial as actionable guidance without leaking identities, dispatch or metering", async () => {
+  let metered = 0;
   const { body } = await call("computer_terminal_exec", {
+    session: async () => Response.json({ ok: true, session: {
+      subject_id: "11111111-1111-4111-8111-111111111111",
+      client_id: "22222222-2222-4222-8222-222222222222",
+    } }),
+    usageFingerprintKey: "fixture-only-random-secret-key-with-32-bytes",
+    recordUsage: async () => { metered++; },
     createAction: async () => Response.json({
       ok: false,
       error: "product_attested_device_mismatch",
@@ -626,7 +633,7 @@ test("MCP projects cross-device attestation errors without leaking the bound dev
     }, { status: 403 }),
     getAction: async () => { assert.fail("no action status after attestation denial"); },
   }, { device_id: "22222222-2222-4222-8222-222222222222", argv: ["id"] });
-  assert.equal(body.result.isError, true);
+  assert.equal(body.result.isError, false, "the host must display Owner remediation, not a generic tool error");
   assert.deepEqual(body.result.structuredContent, {
     ok: false,
     error: "product_attested_device_mismatch",
@@ -634,11 +641,15 @@ test("MCP projects cross-device attestation errors without leaking the bound dev
     owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
     selection_location: "ordax_owner",
     selection_scope: "new_unbound_session_only",
+    question: "Esta conversa ja esta vinculada a outro dispositivo. Para acessar o dispositivo solicitado, abra uma nova conversa e confirme a escolha na Conta OrdaX.",
     owner_confirmation_required: true,
     action_dispatched: false,
     grant_evaluated: false,
   });
+  assert.equal(metered, 0, "a declined action is never counted as successful");
   assert.equal(JSON.stringify(body).includes("private-device"), false);
+  assert.equal(JSON.stringify(body).includes("66666666-6666"), false);
+  assert.equal(JSON.stringify(body).includes("22222222-2222-4222-8222"), false);
 });
 
 test("shadow usage records one successful authenticated tool call and ignores MCP protocol or error responses", async () => {
