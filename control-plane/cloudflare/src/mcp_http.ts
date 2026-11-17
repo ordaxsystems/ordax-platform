@@ -1239,10 +1239,14 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
         owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
         selection_location: "ordax_owner",
         selection_scope: "new_unbound_session_only",
+        question: "Esta conversa ja esta vinculada a outro dispositivo. Para acessar o dispositivo solicitado, abra uma nova conversa e confirme a escolha na Conta OrdaX.",
         owner_confirmation_required: true,
         action_dispatched: false,
         grant_evaluated: false,
-      }, true);
+      // A denied cross-device action is a fulfilled *guidance* result, not a
+      // successful dispatch. MCP clients may hide isError=true behind a generic
+      // tool failure. structuredContent.ok=false prevents success metering.
+      }, false);
     }
     return textToolResult({ ok: false, error: publicErrorCode(createdPayload.error, "product_action_unavailable") }, true);
   }
