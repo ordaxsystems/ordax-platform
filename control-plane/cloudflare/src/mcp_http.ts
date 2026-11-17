@@ -1186,7 +1186,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
                     return isCanonicalUuid(entry.device_id)
                       && typeof entry.display_name === "string"
                       && entry.display_name.length <= 128
-                      && !/[\\x00-\\x1f]/.test(entry.display_name)
+                      && !/[\x00-\x1f]/.test(entry.display_name)
                       && (entry.reported_online === true || entry.reported_online === false
                         || entry.reported_online === null)
                       && entry.target_type === "ordax_runtime_endpoint";
