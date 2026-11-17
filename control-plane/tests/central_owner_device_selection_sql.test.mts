@@ -106,6 +106,7 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     await db.exec(read("20261113085000_central_session_sliding_binding_v1.sql"));
     await db.exec(read("20261113085500_central_session_activity_lease_v1.sql"));
     await db.exec(read("20261113151500_central_session_persistent_binding_v1.sql"));
+    await db.exec(read("20261117065000_owner_central_selection_single_flight_v1.sql"));
 
     await db.query("insert into auth.users values($1)",[owner]);
     await db.query("insert into auth.oauth_clients values($1,null),($2,null)",[client,otherClient]);
@@ -130,6 +131,16 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     assert.equal(waiting.device_id,undefined);
     assert.equal((await open()).challenge_id,waiting.challenge_id,"same session idempotent");
     assert.equal((await list()).pending_selections.length,1);
+    // A second GPT conversation for the same OAuth client must not create an
+    // unconfirmable Owner queue with two awaiting_owner choices. This is the
+    // exact production failure seen when both Desktop identities have grants.
+    const competing=await open(secondHash);
+    assert.equal(competing.ok,false);
+    assert.equal(competing.error,"central_owner_selection_in_progress");
+    assert.equal((await list()).pending_selections.length,1,
+      "another session must not manufacture an ambiguous owner choice");
+    assert.equal((await open()).challenge_id,waiting.challenge_id,
+      "the original chat keeps its exact Owner ticket");
     assert.equal((await list(other)).ok,false);
     assert.equal((await list(owner,otherClient)).error,"owner_central_client_not_consented");
     assert.equal((await choose(other,client,waiting.challenge_id)).ok,false);
