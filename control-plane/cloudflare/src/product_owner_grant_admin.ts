@@ -87,6 +87,110 @@ function ownerCentralSelectionStatus(result: { ok: boolean; error?: string }): n
   }
 }
 
+// SQL is the authority for Owner and client eligibility, but its JSON value
+// is NOT the public HTTP schema. Project only the fields the first-party
+// Account bridge consumes. Never reflect new internal SQL columns or errors.
+function ownerRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+const OWNER_CENTRAL_PUBLIC_ERRORS = new Set([
+  "owner_central_client_not_consented",
+  "owner_auth_ineligible",
+  "owner_central_targets_invalid",
+  "owner_central_selection_invalid",
+  "owner_central_selection_not_found",
+  "owner_central_selection_not_pending",
+  "owner_central_selection_ambiguous",
+  "central_session_target_mismatch",
+  "central_device_runtime_not_ready",
+  "central_device_grant_revoked",
+]);
+
+function ownerCentralError(raw: unknown, kind: "targets" | "selections"): Response | null {
+  if (!ownerRecord(raw) || raw.ok !== false) return null;
+  if (typeof raw.error !== "string" || !OWNER_CENTRAL_PUBLIC_ERRORS.has(raw.error)) {
+    return json({ ok: false, error: "owner_central_response_unavailable" }, 503);
+  }
+  const error = raw.error;
+  return json({ ok: false, error },
+    kind === "targets" ? 403 : ownerCentralSelectionStatus({ ok: false, error }));
+}
+
+function validOwnerDate(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 64
+    && Number.isFinite(Date.parse(value));
+}
+
+function ownerCentralTargetsResponse(raw: unknown, clientId: string): Response {
+  const failure = ownerCentralError(raw, "targets");
+  if (failure) return failure;
+  if (!ownerRecord(raw) || raw.ok !== true || raw.client_id !== clientId
+      || !Array.isArray(raw.targets)
+      || !Number.isSafeInteger(raw.eligible_device_count)
+      || (raw.eligible_device_count as number) < 0
+      || (raw.eligible_device_count as number) > 25
+      || raw.targets.length !== raw.eligible_device_count
+      || raw.attested !== false || raw.dispatch_authorized !== false
+      || raw.owner_choice_performed !== false) {
+    return json({ ok: false, error: "owner_central_targets_response_invalid" }, 502);
+  }
+  const expectedState = raw.targets.length === 0 ? "no_action_grant"
+    : raw.targets.length === 1 ? "single_granted_target" : "owner_selection_required";
+  if (raw.state !== expectedState) {
+    return json({ ok: false, error: "owner_central_targets_response_invalid" }, 502);
+  }
+  const ids = new Set<string>();
+  const targets: { device_id: string; reported_online: boolean; runtime_ready: boolean }[] = [];
+  for (const value of raw.targets) {
+    if (!ownerRecord(value) || !isCanonicalUuid(value.device_id)
+        || typeof value.reported_online !== "boolean"
+        || typeof value.runtime_ready !== "boolean"
+        || ids.has(value.device_id)) {
+      return json({ ok: false, error: "owner_central_targets_response_invalid" }, 502);
+    }
+    ids.add(value.device_id);
+    targets.push({
+      device_id: value.device_id, reported_online: value.reported_online,
+      runtime_ready: value.runtime_ready,
+    });
+  }
+  return json({
+    ok: true, client_id: clientId, state: expectedState,
+    eligible_device_count: targets.length, targets,
+    attested: false, dispatch_authorized: false, owner_choice_performed: false,
+  });
+}
+
+function ownerCentralSelectionsResponse(raw: unknown): Response {
+  const failure = ownerCentralError(raw, "selections");
+  if (failure) return failure;
+  if (!ownerRecord(raw) || raw.ok !== true || !Array.isArray(raw.pending_selections)
+      || !Number.isSafeInteger(raw.count) || (raw.count as number) < 0
+      || (raw.count as number) > 25 || raw.pending_selections.length !== raw.count
+      || raw.attested !== false || raw.dispatch_authorized !== false) {
+    return json({ ok: false, error: "owner_central_selections_response_invalid" }, 502);
+  }
+  const ids = new Set<string>();
+  const pending: { challenge_id: string; created_at: string; expires_at: string }[] = [];
+  for (const value of raw.pending_selections) {
+    if (!ownerRecord(value) || !isCanonicalUuid(value.challenge_id)
+        || ids.has(value.challenge_id) || !validOwnerDate(value.created_at)
+        || !validOwnerDate(value.expires_at)) {
+      return json({ ok: false, error: "owner_central_selections_response_invalid" }, 502);
+    }
+    ids.add(value.challenge_id);
+    pending.push({
+      challenge_id: value.challenge_id,
+      created_at: value.created_at, expires_at: value.expires_at,
+    });
+  }
+  return json({
+    ok: true, count: pending.length, pending_selections: pending,
+    attested: false, dispatch_authorized: false,
+  });
+}
+
 function optionalUuid(value: unknown): string | null | undefined {
   // null is the *explicit* unscoped choice. Empty/omitted form fields are
   // not permission to create a device-wide grant.
@@ -145,7 +249,7 @@ export async function handleProductOwnerGrantAdmin(
         const result = await (deps.listSelections ?? listOwnerCentralSelections)(env, {
           ownerUserId: ownerId, clientId,
         });
-        return json(result, result.ok === true ? 200 : 403);
+        return ownerCentralSelectionsResponse(result);
       }
       if (request.method !== "POST")
         return json({ ok: false, error: "method_not_allowed" }, 405);
@@ -187,7 +291,20 @@ export async function handleProductOwnerGrantAdmin(
           );
         } catch { /* SQL receipt remains pending; no duplicate Owner action */ }
       }
-      return json(result, ownerCentralSelectionStatus(result));
+      if (result.ok === false) {
+        return ownerCentralError(result, "selections")
+          ?? json({ ok: false, error: "owner_central_selection_response_invalid" }, 502);
+      }
+      if (result.ok !== true) {
+        return json({ ok: false, error: "owner_central_selection_response_invalid" }, 502);
+      }
+      // A SQL receipt is not a public response envelope. Keep the confirmed
+      // ticket visible but discard SQL columns added in future migrations.
+      return json({
+        ok: true, status: "pending", device_id: deviceId,
+        challenge_id: challengeId, expires_at: result.expires_at,
+        attested: false, dispatch_authorized: false,
+      });
     }
     if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH) {
       // Advisory-only Owner preflight: not a device selector, grant or dispatch.
@@ -202,7 +319,7 @@ export async function handleProductOwnerGrantAdmin(
       const result = await (deps.inspectCentralTargets ?? inspectOwnerCentralSessionTargets)(env, {
         ownerUserId: ownerId, clientId,
       });
-      return json(result, result.ok === true ? 200 : 403);
+      return ownerCentralTargetsResponse(result, clientId);
     }
     if (url.pathname.startsWith(WORKSPACE_RESOURCES)) {
       // Owner consent cannot be issued just because the READ verifier gate is
