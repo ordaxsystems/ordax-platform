@@ -29,16 +29,6 @@ def d1_worker_sources() -> dict[str, str]:
 OLD_ACCOUNT_ID = "ac1ca1b50d09c7a4cb81274d2aa1e78f"
 DEDICATED_ACCOUNT_ID = "42586bf13b61436219d21def299833e4"
 
-LEGACY_D1_MIGRATION_ALLOWLIST = {
-    "0001_initial.sql",
-    "0002_device_enrollment.sql",
-    "0003_terminal_report_replay.sql",
-    "0004_artifact_multipart_uploads.sql",
-    "0005_product_grants_audit.sql",
-    "0006_product_action_requests.sql",
-    "0007_product_device_pairing.sql",
-    "0008_product_device_owner.sql",
-}
 LEGACY_OPERATOR_HANDLER_ALLOWLIST = set()
 
 
@@ -157,17 +147,21 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
             d1_sources.issubset(set(ceilings)),
             f"untracked D1 source files are forbidden: {sorted(d1_sources - set(ceilings))}",
         )
-        self.assertTrue(
-            migrations.issubset(LEGACY_D1_MIGRATION_ALLOWLIST),
-            f"new D1 migrations are forbidden: {sorted(migrations - LEGACY_D1_MIGRATION_ALLOWLIST)}",
+        self.assertFalse(
+            migrations,
+            f"Retired D1 migrations must not reappear in canonical source: {sorted(migrations)}",
+        )
+        self.assertFalse(
+            (ROOT / "control-plane/cloudflare/wrangler.ci.toml").exists(),
+            "Retired v3-ci Worker configuration must not be restored",
         )
         self.assertTrue(
             referenced_tables.issubset(mapped_tables),
             f"new D1 tables are forbidden: {sorted(referenced_tables - mapped_tables)}",
         )
-        if d1_sources or migrations:
-            self.assertFalse(foundation["policy"]["allow_d1"])
-            self.assertIn("worker_d1_cutover_incomplete", blockers)
+        self.assertFalse(d1_sources, "D1 access must remain absent in all Worker sources")
+        self.assertFalse(foundation["policy"]["allow_d1"])
+        self.assertIn("worker_d1_cutover_incomplete", blockers)
 
     def test_main_worker_json_ingress_uses_shared_byte_bounded_reader(self):
         source = WORKER_SOURCE.read_text(encoding="utf-8")
@@ -292,7 +286,7 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
             WORKER_SOURCE.read_text(encoding="utf-8"),
             "Retired retention must not be advertised by /health",
         )
-        for config_name in ("wrangler.toml", "wrangler.ci.toml"):
+        for config_name in ("wrangler.toml",):
             config_path = ROOT / "control-plane/cloudflare" / config_name
             with config_path.open("rb") as handle:
                 config = tomllib.load(handle)
