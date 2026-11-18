@@ -31,15 +31,14 @@ class OwnerCentralTargetsContract(unittest.TestCase):
         import tomllib
         mcp_config = tomllib.loads((ROOT /
             "control-plane/cloudflare/wrangler.mcp.toml").read_text("utf-8"))
-        other_config = tomllib.loads((ROOT /
-            "control-plane/cloudflare/wrangler.toml").read_text("utf-8"))
+        self.assertFalse((ROOT / "control-plane/cloudflare/wrangler.toml").exists())
         self.assertEqual(mcp_config["name"], "ordax-mcp")
         self.assertEqual(mcp_config["main"], "src/product_mcp_entry.ts")
         pinned = mcp_config["vars"].get("PRODUCT_OWNER_OAUTH_CLIENT_ID")
         self.assertIsInstance(pinned, str)
         self.assertRegex(pinned, r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
-        # Do not put Owner-session authority on the unshipped legacy Worker.
-        self.assertNotIn("PRODUCT_OWNER_OAUTH_CLIENT_ID", other_config["vars"])
+        # Only the published MCP Worker can carry the Owner-session pin.
+        self.assertIn("CENTRAL_OWNER_SELECTION_ENABLED", mcp_config["vars"])
         source = OWNER.read_text(encoding="utf-8")
         authority = AUTH.read_text(encoding="utf-8")
         self.assertIn("authorizeProductOwnerIdentity(", source)
