@@ -85,13 +85,18 @@ class CloudflareMainSourceFreshnessTests(unittest.TestCase):
             )
         self.assertNotIn("CLOUDFLARE_API_TOKEN", FRESHNESS.read_text(encoding="utf-8"))
 
-    def test_deploy_workflow_rejects_foreign_ci_and_non_main_manual_dispatch(self) -> None:
+    def test_retired_v3_deploy_has_no_automatic_ci_trigger_or_second_release(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("  workflow_dispatch:", workflow)
+        self.assertNotIn("  workflow_run:", workflow)
+        self.assertNotIn("github.event.workflow_run", workflow)
         self.assertIn("github.ref == 'refs/heads/main'", workflow)
-        self.assertIn("github.event.workflow_run.head_repository.full_name == github.repository", workflow)
-        self.assertIn("github.event.workflow_run.head_branch == 'main'", workflow)
-        self.assertIn("github.event.workflow_run.conclusion == 'success'", workflow)
-        self.assertIn("github.event.workflow_run.head_sha", workflow)
+        self.assertIn("needs.foundation.outputs.deployment_ready == 'true'", workflow)
+        self.assertIn("python scripts/cloudflare/check_deploy_readiness.py --allow-blocked", workflow)
+        self.assertIn('ref: ${{ github.sha }}', workflow)
+        canonical = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text("utf-8")
+        self.assertIn("Deploy canonical production MCP", canonical)
+        self.assertIn("npx --yes wrangler@4.141.0 deploy --config wrangler.mcp.toml", canonical)
 
 
 if __name__ == "__main__":
