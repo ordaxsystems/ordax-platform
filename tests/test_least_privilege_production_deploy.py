@@ -14,7 +14,7 @@ class LeastPrivilegeProductionDeployTests(unittest.TestCase):
         cls.workflow = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text(encoding="utf-8")
         cls.deploy = cls.workflow.split("  deploy-production:", 1)[1]
         cls.wrangler = tomllib.loads(
-            (ROOT / "control-plane/cloudflare/wrangler.toml").read_text(encoding="utf-8")
+            (ROOT / "control-plane/cloudflare/wrangler.mcp.toml").read_text(encoding="utf-8")
         )
         cls.foundation = json.loads(
             (ROOT / "control-plane/cloudflare/production-foundation.json").read_text(encoding="utf-8")
@@ -43,7 +43,7 @@ class LeastPrivilegeProductionDeployTests(unittest.TestCase):
         self.assertNotIn("deploy-production-v3.sh", self.deploy)
 
     def test_canonical_config_has_authorized_bindings_and_auth(self) -> None:
-        self.assertEqual(self.wrangler["name"], self.foundation["worker_name"])
+        self.assertEqual(self.wrangler["name"], self.foundation["mcp_release"]["worker_name"])
         self.assertEqual(
             self.wrangler["vars"]["PRODUCT_AUTH_AUDIENCE"], "authenticated"
         )
@@ -52,7 +52,9 @@ class LeastPrivilegeProductionDeployTests(unittest.TestCase):
             f"https://{self.foundation['postgres']['project_ref']}.supabase.co/auth/v1",
         )
         self.assertFalse(self.wrangler.get("r2_buckets", []))
-        self.assertFalse(self.wrangler.get("durable_objects", {}).get("bindings", []))
+        self.assertEqual(self.wrangler["durable_objects"]["bindings"], [
+            {"name": "DEVICE_WAKE", "class_name": "ProductDeviceWake"}
+        ])
         self.assertEqual(
             [(b["binding"], b["id"]) for b in self.wrangler.get("hyperdrive", [])],
             [(
