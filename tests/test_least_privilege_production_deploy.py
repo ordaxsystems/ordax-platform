@@ -65,12 +65,10 @@ class LeastPrivilegeProductionDeployTests(unittest.TestCase):
 
     def test_legacy_d1_binding_is_a_blocker_not_a_requirement(self) -> None:
         self.assertFalse(self.foundation["policy"]["allow_d1"])
-        if self.wrangler.get("d1_databases"):
-            self.assertIn(
-                "worker_d1_cutover_incomplete",
-                self.foundation["readiness_blockers"],
-            )
-            self.assertFalse(self.foundation["deployment_ready"])
+        self.assertFalse(self.foundation["policy"]["allow_dual_write"])
+        self.assertNotIn("d1_databases", self.wrangler)
+        self.assertNotIn("deployment_ready", self.foundation)
+        self.assertEqual(self.foundation["mcp_release"]["authority"], "postgresql")
 
     def test_retired_v3_scripts_are_physically_removed_not_deployment_fallbacks(self) -> None:
         for name in ("deploy-v3.sh", "deploy-production-v3.sh", "bootstrap-worker-v3.sh"):
