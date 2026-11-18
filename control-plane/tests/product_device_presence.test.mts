@@ -191,8 +191,8 @@ test("default production adapter fails closed when PostgreSQL is absent", async 
 });
 
 test("Worker dispatches the canonical presence path without adding D1 or another session transport", () => {
-  const index = readFileSync(new URL("../cloudflare/src/index.ts", import.meta.url), "utf8");
-  assert.match(index, /if \(url\.pathname === PRODUCT_DEVICE_PRESENCE_PATH\) \{\s*return handleProductDevicePresence\(request, env\);/);
+  const entry = readFileSync(new URL("../cloudflare/src/product_mcp_entry.ts", import.meta.url), "utf8");
+  assert.match(entry, /if \(url\.pathname === PRODUCT_DEVICE_PRESENCE_PATH\) \{[\s\S]*?handleProductDevicePresence\(request, env\);/);
   const source = readFileSync(new URL("../cloudflare/src/product_device_presence.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\bDB\b|\.prepare\(|DEVICE_SESSIONS|setInterval|setTimeout|console\./);
   assert.match(source, /dependencies\.authenticate \?\? authenticateProductDevice/);
