@@ -11,6 +11,7 @@ import {
   type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
 import { ownerMcpGrantProfile } from "./product_owner_grant_profiles.ts";
+import { scheduleProductDeviceWake } from "./product_device_wake.ts";
 import {
   inspectOwnerCentralSessionTargets,
   listOwnerCentralSelections,
@@ -111,6 +112,8 @@ export async function handleProductOwnerGrantAdmin(
     inspectCentralTargets?: typeof inspectOwnerCentralSessionTargets;
     listSelections?: typeof listOwnerCentralSelections;
     selectDevice?: typeof selectOwnerCentralDevice;
+    signalWake?: typeof scheduleProductDeviceWake;
+    scheduleWake?: (wake: Promise<void>) => void;
     replaceGrantGroup?: typeof replaceOwnerMcpGrantGroup;
     listDevices?: typeof listOwnerMcpDevices;
     retireDevice?: typeof retireOwnerProductDevice;
@@ -163,6 +166,27 @@ export async function handleProductOwnerGrantAdmin(
       const result = await (deps.selectDevice ?? selectOwnerCentralDevice)(env, {
         ownerUserId: ownerId, clientId, challengeId, deviceId,
       });
+      if (result.ok === true) {
+        // A committed selection is still only a pending Runtime challenge,
+        // never a grant or an attested conversation binding. Validate the
+        // canonical SQL receipt before signalling the exact chosen device.
+        if (result.status !== "pending" || result.challenge_id !== challengeId
+            || result.device_id !== deviceId || result.attested !== false
+            || result.dispatch_authorized !== false
+            || typeof result.expires_at !== "string"
+            || !Number.isFinite(Date.parse(result.expires_at))
+            || Date.parse(result.expires_at) <= Date.now()) {
+          return json({ ok: false, error: "owner_central_selection_response_invalid" }, 502);
+        }
+        try {
+          // Reuse the existing non-authoritative Product wake after PostgreSQL
+          // accepted the Owner choice. Lost wake never retries selection or
+          // implies that Runtime confirmed: its existing polling is fallback.
+          await (deps.signalWake ?? scheduleProductDeviceWake)(
+            env, deviceId, deps.scheduleWake,
+          );
+        } catch { /* SQL receipt remains pending; no duplicate Owner action */ }
+      }
       return json(result, ownerCentralSelectionStatus(result));
     }
     if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH) {

@@ -456,7 +456,8 @@ export function createCanonicalProductMcpGateway(
         || url.pathname.startsWith(PRODUCT_OWNER_MCP_DEVICES_PATH + "/")
         || url.pathname === PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH
         || url.pathname.startsWith(PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH + "/")) {
-      return handleProductOwnerGrantAdmin(request, env);
+      return handleProductOwnerGrantAdmin(request, env,
+        context ? { scheduleWake: (wake: Promise<void>) => context.waitUntil(wake) } : {});
     }
     if (url.pathname === "/mcp") {
       const routingHint = await mcpRoutingHint(request);
