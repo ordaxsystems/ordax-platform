@@ -69,89 +69,52 @@ class ProductPostgresDeviceIdentityTests(unittest.TestCase):
         self.assertIn("pg_advisory_xact_lock", lowered)
 
     def test_product_setup_uses_only_canonical_postgres_identity(self) -> None:
-        worker = (
-            ROOT / "control-plane/cloudflare/src/index.ts"
-        ).read_text(encoding="utf-8")
-        setup = worker.split(
-            "async function deviceSetup(", 1
-        )[1].split("type ProductGrantRow =", 1)[0]
+        setup = (ROOT / "control-plane/cloudflare/src/product_device_setup.ts").read_text(
+            encoding="utf-8",
+        )
+        entry = (ROOT / "control-plane/cloudflare/src/product_mcp_entry.ts").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn("handleProductDeviceSetup(request, env)", entry)
         self.assertIn("identifyProductDevice(env,", setup)
         self.assertIn("enrollProductDevice(env,", setup)
         self.assertIn("ownerUserId: identity.subjectId", setup)
-        self.assertIn("deviceKind,", setup)
-        self.assertIn('deviceKind !== "desktop"', setup)
-        self.assertIn("channel,", setup)
-        self.assertIn('channel !== "stable"', setup)
-        self.assertIn('channel !== "development"', setup)
+        self.assertIn("DEVICE_KINDS", setup)
+        self.assertIn("CHANNELS", setup)
         self.assertIn("sha256Text(rawToken)", setup)
         self.assertIn("ProductPostgresError", setup)
         self.assertIn("enrollment_rate_limited: 429", setup)
         self.assertNotIn("env.DB", setup)
-        self.assertNotIn("ENROLLMENT_SESSIONS", worker)
-        self.assertNotIn("export class EnrollmentSession", worker)
+        self.assertNotIn("ENROLLMENT_SESSIONS", entry)
 
-    def test_product_business_enrollment_does_not_allocate_durable_objects(self) -> None:
+    def test_product_enrollment_uses_one_canonical_worker_and_no_database_d1(self):
         import tomllib
-        self.assertFalse(
-            (ROOT / "control-plane/cloudflare/wrangler.ci.toml").exists(),
-            "retired v3-ci Worker config must not reappear",
-        )
-        for file_name in ("wrangler.toml",):
-            config_path = ROOT / "control-plane/cloudflare" / file_name
-            with config_path.open("rb") as stream:
-                config = tomllib.load(stream)
-            self.assertFalse(config.get("durable_objects", {}).get("bindings", []))
-            self.assertFalse(config.get("d1_databases", []))
-            self.assertFalse(config.get("r2_buckets", []))
-            self.assertFalse(
-                any(
-                    "EnrollmentSession" in migration.get("new_sqlite_classes", [])
-                    for migration in config.get("migrations", [])
-                )
-            )
-        # The live MCP Worker intentionally has a DeviceWake Durable Object,
-        # but it must never receive a second enrollment authority or D1.
+        self.assertFalse((ROOT / "control-plane/cloudflare/wrangler.toml").exists())
+        self.assertFalse((ROOT / "control-plane/cloudflare/wrangler.ci.toml").exists())
         with (ROOT / "control-plane/cloudflare/wrangler.mcp.toml").open("rb") as stream:
-            canonical = tomllib.load(stream)
-        self.assertFalse(canonical.get("d1_databases", []))
-        self.assertFalse(canonical.get("r2_buckets", []))
-        self.assertFalse(
-            any(
-                "EnrollmentSession" in entry.get("new_sqlite_classes", [])
-                for entry in canonical.get("migrations", [])
-            )
-        )
+            config = tomllib.load(stream)
+        self.assertEqual(config["name"], "ordax-mcp")
+        self.assertEqual(config["main"], "src/product_mcp_entry.ts")
+        self.assertFalse(config.get("d1_databases", []))
+        self.assertFalse(config.get("r2_buckets", []))
+        self.assertEqual(config["durable_objects"]["bindings"], [{
+            "name": "DEVICE_WAKE", "class_name": "ProductDeviceWake",
+        }])
+        self.assertFalse(any(
+            "EnrollmentSession" in item.get("new_sqlite_classes", [])
+            for item in config.get("migrations", [])
+        ))
 
-    def test_d1_callsite_ceiling_was_reduced_after_enrollment_cutover(self) -> None:
-        import json
-        worker = (
-            ROOT / "control-plane/cloudflare/src/index.ts"
-        ).read_text(encoding="utf-8")
-        manifest = json.loads(
-            (ROOT / "control-plane/cloudflare/d1-cutover-authority-map.json")
-            .read_text(encoding="utf-8")
+    def test_legacy_d1_source_and_config_are_physically_absent(self):
+        from scripts.cloudflare.check_mcp_release import (
+            SOURCES, d1_source_names, worker_source_texts,
         )
-        self.assertLessEqual(
-            worker.count("env.DB"),
-            manifest["legacy_source_callsite_ceilings"]["index.ts"],
-        )
-        self.assertLessEqual(
-            manifest["legacy_source_callsite_ceilings"]["index.ts"], 71,
-        )
-        foundation = json.loads(
-            (ROOT / "control-plane/cloudflare/production-foundation.json")
-            .read_text(encoding="utf-8")
-        )
-        self.assertNotIn(
-            "product_device_setup_client_contract_not_verified",
-            foundation["readiness_blockers"],
-        )
-        canonical_entry = (
-            ROOT / "control-plane/cloudflare/src/product_mcp_entry.ts"
-        ).read_text(encoding="utf-8")
-        self.assertIn("handleProductDeviceSetup", canonical_entry)
-        self.assertIn("PRODUCT_DEVICE_SETUP_PATH", canonical_entry)
-        self.assertFalse(foundation["deployment_ready"])
+        self.assertFalse((SOURCES / "index.ts").exists())
+        self.assertFalse((ROOT / "control-plane/cloudflare/d1-cutover-authority-map.json").exists())
+        self.assertEqual(d1_source_names(worker_source_texts(SOURCES)), set())
+        entry = (SOURCES / "product_mcp_entry.ts").read_text(encoding="utf-8")
+        self.assertIn("handleProductDeviceSetup", entry)
+        self.assertIn("PRODUCT_DEVICE_SETUP_PATH", entry)
 
     def test_worker_adapter_exposes_hash_only_device_methods(self) -> None:
         for method in (
