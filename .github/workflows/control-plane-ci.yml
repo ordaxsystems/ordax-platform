@@ -55,33 +55,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install pinned Worker runtime dependency
         run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false --prefix control-plane/cloudflare
-      - name: Build production Worker bundle without deployment authority
+      - name: Build exact canonical MCP Worker bundle without deployment authority
         run: |
-          outdir="$RUNNER_TEMP/ordax-control-plane-worker"
+          outdir="$RUNNER_TEMP/ordax-mcp-ci-worker"
           rm -rf "$outdir"
-          npx --yes wrangler@4.141.0 deploy --dry-run --cwd control-plane/cloudflare --outdir "$outdir"
+          (cd control-plane/cloudflare && npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.mcp.toml --outdir "$outdir")
+          python scripts/cloudflare/assert_canonical_mcp_bundle.py "$outdir"
           find "$outdir" -maxdepth 2 -type f -print
-          # Inspect executable JS, never the sourcemap or a random first file.
-          bundle="$outdir/index.js"
-          test -s "$bundle"
-          grep -q 'legacy_mcp_retired' "$bundle"
-          grep -q 'legacy_product_action_retired' "$bundle"
-          # Runtime-backed App Intelligence MCP read tools legitimately contain
-          # app_intelligence_catalog/detail in the bundle. Their names cannot
-          # identify the retired D1 action dispatcher. Validate the actual
-          # legacy route boundary and explicit 410 behavior instead.
-          python -m unittest discover -s tests -p 'test_legacy_mcp_retirement.py'
-          # The compiled production Worker must not receive a retired D1 binding.
-          if grep -Eq '^\\[\\[d1_databases\\]\\]|^[[:space:]]*binding[[:space:]]*=[[:space:]]*"DB"' control-plane/cloudflare/wrangler.toml; then
-            echo "::error::Retired D1 binding configured for production Worker."
-            exit 1
-          fi
-          printf 'WORKER_BUNDLE=%s\n' "$bundle"
+          printf 'WORKER_BUNDLE=%s\n' "$outdir"
       - name: Publish exact tested Worker bundle
         uses: actions/upload-artifact@v4
         with:
-          name: ordax-control-plane-worker-${{ github.sha }}
-          path: ${{ runner.temp }}/ordax-control-plane-worker/
+          name: ordax-mcp-ci-worker-${{ github.sha }}
+          path: ${{ runner.temp }}/ordax-mcp-ci-worker/
           if-no-files-found: error
           retention-days: 3
 
@@ -108,5 +94,5 @@ jobs:
       - name: Verify canonical MCP surface revision exists
         run: |
           node --test control-plane/tests/product_mcp_surface_revision.test.mts
-          test -f control-plane/cloudflare/src/index.ts
+          test -f control-plane/cloudflare/src/product_mcp_entry.ts
           test -f control-plane/cloudflare/migrations/0008_product_device_owner.sql
