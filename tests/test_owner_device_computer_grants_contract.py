@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCOPE = ROOT / "control-plane/cloudflare/src/product_action_scope.ts"
 MCP = ROOT / "control-plane/cloudflare/src/mcp_http.ts"
-WORKER = ROOT / "control-plane/cloudflare/src/index.ts"
+WORKER = ROOT / "control-plane/cloudflare/src/product_mcp_entry.ts"
 
 class ComputerProfileContractTests(unittest.TestCase):
     def test_profiles_are_in_canonical_scope_not_d1(self):
@@ -25,7 +25,8 @@ class ComputerProfileContractTests(unittest.TestCase):
         for action in ("createOwnerDeviceComputerGrant", "revokeOwnerDeviceComputerGrant", "listOwnerDeviceComputerGrants"):
             self.assertNotIn(action, mcp)
             self.assertNotIn(action, worker)
-        self.assertIn('error: "legacy_product_grants_retired"', worker)
+        self.assertNotIn("legacy_product_grants_retired", worker)
+        self.assertIn("handleProductOwnerGrantAdmin", worker)
 
 if __name__ == "__main__":
     unittest.main()

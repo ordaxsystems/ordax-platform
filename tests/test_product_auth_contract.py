@@ -11,7 +11,7 @@ class ProductAuthContractTests(unittest.TestCase):
             self.root / "control-plane" / "cloudflare" / "src" / "product_auth.ts"
         ).read_text(encoding="utf-8")
         self.worker = (
-            self.root / "control-plane" / "cloudflare" / "src" / "index.ts"
+            self.root / "control-plane" / "cloudflare" / "src" / "product_mcp_entry.ts"
         ).read_text(encoding="utf-8")
 
     def test_product_auth_is_jwks_signature_based_and_fail_closed(self) -> None:
@@ -62,7 +62,7 @@ class ProductAuthContractTests(unittest.TestCase):
 
     def test_product_owner_session_and_mcp_client_have_distinct_authorization(self) -> None:
         self.assertIn('return productOwnerAccountSession(request, env)', self.worker)
-        self.assertIn('"/v3/product/session"', self.worker)
+        self.assertIn("PRODUCT_OWNER_SESSION_PATH", self.worker)
         self.assertIn('export async function productOwnerAccountSession(', self.auth)
         self.assertIn('const identity = await authenticateProductRequest(request, env)', self.auth)
         self.assertIn('identity.role !== "authenticated"', self.auth)

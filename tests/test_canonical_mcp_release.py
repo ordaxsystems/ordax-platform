@@ -18,6 +18,83 @@ class McpReleaseContract(unittest.TestCase):
         cls.foundation=json.loads(FOUNDATION.read_text(encoding="utf-8"))
         with CONFIG.open("rb") as f: cls.config=tomllib.load(f)
 
+    def test_no_duplicate_retired_worker_publication_authority(self):
+        f=self.foundation
+        for obsolete in ("worker_name", "deployment", "deployment_ready",
+                         "readiness_blockers", "dns"):
+            self.assertNotIn(obsolete, f)
+        self.assertEqual(f["mcp_release"]["worker_name"], "ordax-mcp")
+        for rel in ("src/index.ts", "wrangler.toml", "wrangler.ci.toml",
+                    "d1-cutover-authority-map.json"):
+            candidate=(ROOT / "control-plane/cloudflare" / rel)
+            self.assertFalse(candidate.exists(), f"Retired Worker artifact restored: {rel}")
+        for rel in ("check_deploy_readiness.py",):
+            self.assertFalse((ROOT / "scripts/cloudflare" / rel).exists())
+
+    def test_release_rejects_legacy_foundation_and_weak_security(self):
+        f=copy.deepcopy(self.foundation)
+        f["worker_name"]="ordax-control-plane-v3"
+        with self.assertRaisesRegex(McpReleaseError,"mcp_legacy_foundation"):
+            validate(f,self.config)
+        for key,value,expected in (
+            ("allow_d1",True,"mcp_foundation_forbids_d1"),
+            ("allow_dual_write",True,"mcp_foundation_forbids_d1"),
+        ):
+            f=copy.deepcopy(self.foundation)
+            f["policy"][key]=value
+            with self.assertRaisesRegex(McpReleaseError,expected):
+                validate(f,self.config)
+        for key in ("member_two_factor_enabled","account_enforce_twofactor"):
+            f=copy.deepcopy(self.foundation)
+            f["live_evidence"]["security"][key]=False
+            with self.assertRaisesRegex(McpReleaseError,"mcp_account_2fa"):
+                validate(f,self.config)
+        f=copy.deepcopy(self.foundation)
+        f["security"]["require_two_factor"]=False
+        with self.assertRaisesRegex(McpReleaseError,"mcp_account_2fa"):
+            validate(f,self.config)
+        f=copy.deepcopy(self.foundation)
+        f["policy"]["forbidden_runtime_secrets"]=[]
+        with self.assertRaisesRegex(McpReleaseError,"mcp_foundation_forbidden"):
+            validate(f,self.config)
+
+    def test_recursive_source_scanner_rejects_computed_d1_access(self):
+        from scripts.cloudflare.check_mcp_release import (
+            d1_access_count, d1_source_names, worker_source_texts, SOURCES,
+            assert_no_legacy_worker_authority,
+        )
+        samples=(
+            "env.DB", "this.env.DB", "env['DB']", 'env["DB"]',
+            "env[`DB`]", "env?.DB", "env?.['DB']", "this?.env?.DB",
+        )
+        self.assertEqual(d1_access_count("; ".join(samples)),len(samples))
+        self.assertEqual(
+            d1_source_names({"bad.mts":"env?.['DB']", "good.ts":"export {}"}),
+            {"bad.mts"},
+        )
+        sources=worker_source_texts(SOURCES)
+        self.assertIn("product_mcp_entry.ts",sources)
+        self.assertNotIn("index.ts",sources)
+        self.assertEqual(d1_source_names(sources),set())
+        assert_no_legacy_worker_authority()
+
+    def test_release_gate_is_blocked_without_proofs_and_inspection_is_readonly(self):
+        import subprocess
+        import sys
+        gate=ROOT / "scripts/cloudflare/check_mcp_release.py"
+        inspected=subprocess.run(
+            [sys.executable,str(gate),"--inspect"],cwd=ROOT,
+            capture_output=True,text=True,check=False,
+        )
+        self.assertEqual(inspected.returncode,0,inspected.stderr)
+        self.assertIn("ORDAX_MCP_RELEASE=BLOCKED",inspected.stdout)
+        direct=subprocess.run(
+            [sys.executable,str(gate)],cwd=ROOT,
+            capture_output=True,text=True,check=False,
+        )
+        self.assertEqual(direct.returncode,3,direct.stderr)
+        self.assertIn("ORDAX_MCP_RELEASE=BLOCKED",direct.stdout)
+
     def test_canonical_worker_and_domain_exist_in_one_ssot(self):
         f=self.foundation;c=self.config
         self.assertEqual(f["mcp_release"]["worker_name"],"ordax-mcp")

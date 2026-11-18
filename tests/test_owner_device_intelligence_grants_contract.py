@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKER = ROOT / "control-plane/cloudflare/src/index.ts"
+WORKER = ROOT / "control-plane/cloudflare/src/product_mcp_entry.ts"
 MCP = ROOT / "control-plane/cloudflare/src/mcp_http.ts"
 SCOPE = ROOT / "control-plane/cloudflare/src/product_action_scope.ts"
 
@@ -17,9 +17,9 @@ class IntelligenceAuthorizationRetirementTests(unittest.TestCase):
 
     def test_old_d1_grant_writers_are_absent_from_entrypoint(self):
         worker = WORKER.read_text(encoding="utf-8")
-        self.assertEqual(worker.count('"device-intelligence-grants"'), 1)
-        self.assertIn('path.startsWith("/v3/product/" + segment)', worker)
-        self.assertIn('error: "legacy_product_grants_retired"', worker)
+        self.assertNotIn('"device-intelligence-grants"', worker)
+        self.assertNotIn("legacy_product_grants_retired", worker)
+        self.assertIn("handleProductOwnerGrantAdmin", worker)
         for handler in ("createOwnerDeviceIntelligenceGrant", "listOwnerDeviceIntelligenceGrants", "revokeOwnerDeviceIntelligenceGrant"):
             self.assertNotIn(handler, worker)
 

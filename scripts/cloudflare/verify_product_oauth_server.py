@@ -80,7 +80,7 @@ def _canonical_project_issuer() -> str:
         foundation = json.loads(
             (root / "control-plane/cloudflare/production-foundation.json").read_text(encoding="utf-8")
         )
-        with (root / "control-plane/cloudflare/wrangler.toml").open("rb") as stream:
+        with (root / "control-plane/cloudflare/wrangler.mcp.toml").open("rb") as stream:
             wrangler = tomllib.load(stream)
     except (OSError, json.JSONDecodeError, tomllib.TOMLDecodeError) as exc:
         raise SystemExit("Cannot read the canonical PostgreSQL/Worker identity") from exc

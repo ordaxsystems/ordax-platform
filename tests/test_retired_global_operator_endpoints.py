@@ -1,50 +1,34 @@
-"""Retired global-operator endpoints cannot regain D1 mutation authority."""
+"""The MCP must never restore global operator tokens or engineering endpoints."""
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "control-plane/cloudflare/src/index.ts"
+ENTRY = ROOT / "control-plane/cloudflare/src/product_mcp_entry.ts"
 
 
 class RetiredOperatorEndpointsTests(unittest.TestCase):
     def test_global_operator_auth_and_handlers_absent(self):
-        src = SOURCE.read_text(encoding="utf-8")
-        for legacy in (
-            "ORDAX_OPERATOR_TOKEN",
-            "operatorAuthorized(",
-            "async function provisionDevice(",
-            "async function enqueueJob(",
-            "async function getJob(",
-        ):
+        src = ENTRY.read_text(encoding="utf-8")
+        for legacy in ("ORDAX_OPERATOR_TOKEN", "operatorAuthorized(",
+                       "async function provisionDevice(", "async function enqueueJob(",
+                       "async function getJob(", "D1Database", "env.DB"):
             with self.subTest(legacy=legacy):
                 self.assertNotIn(legacy, src)
 
-    def test_legacy_routes_explicitly_retired(self):
-        src = SOURCE.read_text(encoding="utf-8")
-        # The canonical Worker now handles all retired engineering routes in
-        # one fail-closed dispatch branch; do not recreate old per-route RPCs.
-        for route in (
-            'path === "/v3/devices"',
-            'path === "/v3/jobs"',
-            'path.startsWith("/v3/jobs/")',
-            'path.startsWith("/v3/product-grants")',
-        ):
-            with self.subTest(route=route):
-                self.assertIn(route, src)
-        self.assertIn('if (legacy) return json({ok:false,error:"legacy_endpoint_retired"},410);', src)
+    def test_retired_engineering_routes_not_published(self):
+        src = ENTRY.read_text(encoding="utf-8")
+        for route in ("/v3/jobs", "/v3/product-grants", "/v3/device/ws",
+                      "/v3/artifacts/", "legacy_endpoint_retired"):
+            self.assertNotIn(route, src)
+        self.assertIn('error: "not_found"', src)
+        self.assertIn("createAttestedDeviceActionHandler", src)
 
     def test_legacy_openai_review_grant_workflow_is_retired(self):
-        # The old manual workflow could mint grants via a shared operator
-        # bearer and a D1 endpoint. Owner/PostgreSQL is the only live writer.
         workflow = ROOT / ".github/workflows/openai-review-grant.yml"
         self.assertFalse(workflow.exists())
         runbook = (ROOT / "docs/OPENAI_PLUGIN_REVIEW.md").read_text(encoding="utf-8")
-        for retired in (
-            "ORDAX_OPERATOR_TOKEN",
-            "/v3/product-grants/from-link",
-            "ordax-ac1ca1b50d09.workers.dev",
-            "eobcxuyvhkvdmkbaihwh",
-        ):
+        for retired in ("ORDAX_OPERATOR_TOKEN", "/v3/product-grants/from-link",
+                        "ordax-ac1ca1b50d09.workers.dev", "eobcxuyvhkvdmkbaihwh"):
             with self.subTest(retired=retired):
                 self.assertNotIn(retired, runbook)
         import json

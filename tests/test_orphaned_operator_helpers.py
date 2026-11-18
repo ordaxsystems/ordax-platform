@@ -1,21 +1,30 @@
-"""Legacy operator job utilities must not reappear in the D1 Worker."""
+"""No global-operator job executor survives in the MCP production entrypoint."""
 import unittest
 from pathlib import Path
 
-SOURCE = Path(__file__).resolve().parents[1] / "control-plane/cloudflare/src/index.ts"
+ROOT = Path(__file__).resolve().parents[1]
+ENTRY = ROOT / "control-plane/cloudflare/src/product_mcp_entry.ts"
+TRANSPORT = ROOT / "control-plane/cloudflare/src/product_device_transport.ts"
+
 
 class OrphanedLegacyHelpersTests(unittest.TestCase):
-    def test_no_orphaned_global_operator_job_helpers(self):
-        source = SOURCE.read_text(encoding="utf-8")
-        for token in ("ACTION_PREFIXES", "actionAllowed(", "bytesToBase64(", "ORDAX_OPERATOR_TOKEN"):
-            with self.subTest(token=token):
-                self.assertNotIn(token, source)
+    def test_no_operator_executor_or_duplicated_job_queue(self):
+        entry = ENTRY.read_text(encoding="utf-8")
+        for legacy in ("ACTION_PREFIXES", "actionAllowed(", "ORDAX_OPERATOR_TOKEN",
+                       "async function enqueueJob(", "async function recoverTerminalReport(",
+                       "operatorAuthorized("):
+            self.assertNotIn(legacy, entry)
 
-    def test_canonical_device_transport_and_recovery_not_deleted(self):
-        source = SOURCE.read_text(encoding="utf-8")
-        self.assertIn('url.pathname === "/v3/device/recover-report"', source)
-        self.assertIn("async function recoverTerminalReport(", source)
-        self.assertIn('error: "legacy_operator_job_enqueue_retired"', source)
+    def test_native_transport_reuses_postgres_leases_and_reports(self):
+        entry = ENTRY.read_text(encoding="utf-8")
+        transport = TRANSPORT.read_text(encoding="utf-8")
+        self.assertIn("handleProductDeviceTransport(request, env)", entry)
+        self.assertIn("claimProductAction", transport)
+        self.assertIn("renewProductActionLease", transport)
+        self.assertIn("reportProductAction", transport)
+        self.assertIn("authenticateProductDevice", transport)
+        self.assertNotIn("env.DB", transport)
+
 
 if __name__ == "__main__":
     unittest.main()

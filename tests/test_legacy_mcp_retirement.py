@@ -1,40 +1,41 @@
-"""The canonical Worker cannot re-expose D1 engineering or MCP authority."""
-from pathlib import Path
-import json
+"""The only production entrypoint is the authenticated PostgreSQL MCP Worker."""
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKER = (ROOT/"control-plane/cloudflare/src/index.ts").read_text("utf-8")
-NEW = (ROOT/"control-plane/cloudflare/src/product_mcp_entry.ts").read_text("utf-8")
-D1_MAP = json.loads((ROOT/"control-plane/cloudflare/d1-cutover-authority-map.json").read_text("utf-8"))
+SRC = ROOT / "control-plane/cloudflare/src"
+ENTRY = SRC / "product_mcp_entry.ts"
+WRANGLER = ROOT / "control-plane/cloudflare/wrangler.mcp.toml"
 
 
 class RetiredLegacyMcp(unittest.TestCase):
-    def test_main_worker_never_mounts_mcp_or_d1(self):
-        self.assertNotIn("handleOrdaxMcp(request", WORKER)
-        self.assertNotIn("env.DB", WORKER)
-        self.assertIn('path === "/mcp"', WORKER)
-        self.assertIn('error:"legacy_mcp_retired"', WORKER)
-        self.assertNotIn("async function createProductAction(", WORKER)
+    def test_v3_worker_config_and_deploy_scripts_are_absent(self):
+        for path in (
+            SRC / "index.ts",
+            ROOT / "control-plane/cloudflare/wrangler.toml",
+            ROOT / "scripts/cloudflare/check_deploy_readiness.py",
+            ROOT / "control-plane/cloudflare/d1-cutover-authority-map.json",
+        ):
+            self.assertFalse(path.exists(), f"Retired Worker artifact restored: {path}")
 
-    def test_legacy_write_authority_removed(self):
-        self.assertNotIn("return createProductAction(", WORKER)
-        self.assertIn('error:"legacy_product_action_retired"', WORKER)
-        self.assertEqual(D1_MAP["legacy_source_callsite_ceilings"]["index.ts"], 0)
+    def test_canonical_worker_exclusively_mounts_authenticated_mcp(self):
+        entry = ENTRY.read_text(encoding="utf-8")
+        config = WRANGLER.read_text(encoding="utf-8")
+        self.assertIn('main = "src/product_mcp_entry.ts"', config)
+        self.assertIn('name = "ordax-mcp"', config)
+        for required in ("handleOrdaxMcp", "createCanonicalProductMcpReadHandlers",
+                         "trusted_operation_required", "resolveOrBootstrapAttestedSession"):
+            self.assertIn(required, entry)
+        for forbidden in ("D1Database", "env.DB", "operatorAuthorized(",
+                          "ORDAX_OPERATOR_TOKEN", "legacy_mcp_retired"):
+            self.assertNotIn(forbidden, entry)
 
-    def test_new_mcp_remains_separate(self):
-        self.assertNotIn("src/index.ts", NEW)
-        self.assertNotIn("D1Database", NEW)
-        self.assertIn("createCanonicalProductMcpReadHandlers", NEW)
-        self.assertIn("trusted_operation_required", NEW)
-        self.assertIn("supports_remote_actions: false", NEW)
-
-    def test_explicit_legacy_routes_fail_closed(self):
-        for route in ("/mcp", "/v3/device/ws", "/v3/device/recover-report",
-                      "/v3/jobs", "/v3/artifacts/"):
-            self.assertIn(route, WORKER)
-        self.assertIn("legacy_endpoint_retired", WORKER)
-        self.assertIn("410", WORKER)
+    def test_retired_engineering_routes_are_not_mounted(self):
+        entry = ENTRY.read_text(encoding="utf-8")
+        for forbidden in ("/v3/device/ws", "/v3/device/recover-report", "/v3/jobs",
+                          "/v3/artifacts/", "/v3/product-grants", "legacy_endpoint_retired"):
+            self.assertNotIn(forbidden, entry)
+        self.assertIn('error: "not_found"', entry)
 
 
 if __name__ == "__main__":

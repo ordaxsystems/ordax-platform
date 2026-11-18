@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKER = ROOT / "control-plane" / "cloudflare" / "src" / "index.ts"
+WORKER = ROOT / "control-plane" / "cloudflare" / "src" / "product_mcp_entry.ts"
 MCP = ROOT / "control-plane" / "cloudflare" / "src" / "mcp_http.ts"
 SCOPE = ROOT / "control-plane" / "cloudflare" / "src" / "product_action_scope.ts"
 
@@ -38,7 +38,7 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
         )
 
     def test_worker_delegates_device_actions_to_canonical_transport(self) -> None:
-        self.assertIn("handleProductDeviceTransport(request,env)", self.worker)
+        self.assertIn("handleProductDeviceTransport(request, env)", self.worker)
         self.assertIn("handleProductDevicePresence(request, env)", self.worker)
         self.assertNotIn("from \"./product_action_scope\"", self.worker)
         self.assertIn('from "./product_action_scope.ts"', self.mcp)
@@ -62,9 +62,9 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
         for handler in ("createOwnerDeviceComputerGrant", "listOwnerDeviceComputerGrants", "revokeOwnerDeviceComputerGrant"):
             self.assertNotIn(handler, self.worker)
             self.assertNotIn(handler, self.mcp)
-        self.assertEqual(self.worker.count('"device-computer-grants"'), 1)
-        self.assertIn('path.startsWith("/v3/product/" + segment)', self.worker)
-        self.assertIn('error: "legacy_product_grants_retired"', self.worker)
+        self.assertNotIn("legacy_product_grants_retired", self.worker)
+        self.assertIn("handleProductOwnerGrantAdmin", self.worker)
+        self.assertIn("createAttestedDeviceActionHandler", self.worker)
 
     def test_cloudflare_mcp_device_actions_do_not_require_project(self) -> None:
         for action in sorted(self.device_actions):
@@ -103,7 +103,8 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
 
     def test_legacy_d1_owner_grant_module_is_unmounted(self) -> None:
         self.assertNotIn('from "./product_device_grants"', self.worker)
-        self.assertIn('error: "legacy_product_grants_retired"', self.worker)
+        self.assertNotIn("legacy_product_grants_retired", self.worker)
+        self.assertNotIn("/v3/product/device-computer-grants", self.worker)
 
 
 if __name__ == "__main__":

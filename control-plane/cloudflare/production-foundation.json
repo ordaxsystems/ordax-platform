@@ -1,7 +1,6 @@
 {
   "version": 31,
   "account_id": "42586bf13b61436219d21def299833e4",
-  "worker_name": "ordax-control-plane-v3",
   "r2_bucket": "ordax-device-artifacts",
   "hyperdrive_name": "ordax-control-plane-postgres",
   "postgres": {
@@ -21,13 +20,6 @@
   "security": {
     "require_two_factor": true
   },
-  "dns": {
-    "zone": "ordax.com.br",
-    "cutover_ready": false,
-    "cutover_blockers": [
-      "catalogo_media_dependency_not_removed"
-    ]
-  },
   "policy": {
     "allow_d1": false,
     "allow_dual_write": false,
@@ -37,32 +29,7 @@
       "ORDAX_OPERATOR_TOKEN"
     ]
   },
-  "deployment_ready": false,
-  "readiness_blockers": [
-    "worker_d1_cutover_incomplete",
-    "artifact_retention_authority_not_ready",
-    "engineering_device_deletion_lifecycle_not_ready",
-    "worker_operator_auth_cutover_incomplete",
-    "worker_not_provisioned",
-    "cloudflare_ci_worker_editor_token_not_provisioned"
-  ],
   "workers_dev_subdomain": "ordaxsystems",
-  "deployment": {
-    "bootstrap": {
-      "scope": "workers_product",
-      "role": "admin",
-      "temporary": true,
-      "purpose": "create_initial_worker"
-    },
-    "routine": {
-      "scope": "individual_worker",
-      "role": "editor",
-      "worker_name": "ordax-control-plane-v3",
-      "requires_existing_worker": true
-    },
-    "zone_workers_routes_write_required": false,
-    "bound_resource_direct_access_required": false
-  },
   "live_evidence": {
     "r2": {
       "enabled": true,

@@ -1,94 +1,91 @@
-"""Canonical Platform Worker transport and legacy-retirement contracts."""
-
+"""Native/desktop device transport remains PostgreSQL-owned and fail-closed."""
 from pathlib import Path
 import json
 import tomllib
 import unittest
-from tests.test_cloudflare_deploy_gate import gate
+
+from scripts.cloudflare.check_mcp_release import (
+    d1_source_names, worker_source_texts, validate, McpReleaseError,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "control-plane/cloudflare/src"
+CONFIG = ROOT / "control-plane/cloudflare/wrangler.mcp.toml"
+FOUNDATION = ROOT / "control-plane/cloudflare/production-foundation.json"
 
 
 class DeviceTransportContractTests(unittest.TestCase):
     def test_product_heartbeat_distinguishes_native_os_from_windows_without_grants(self):
-        """Authenticated heartbeat provenance is metadata, not action authority."""
-        root = Path(__file__).resolve().parents[1]
-        source = (
-            root / "control-plane/cloudflare/src/product_device_transport.ts"
-        ).read_text(encoding="utf-8")
+        source = (SRC / "product_device_transport.ts").read_text(encoding="utf-8")
         block = source.split("async function heartbeat(", 1)[1].split(
             "async function claim(", 1
         )[0]
-        self.assertIn(
+        for required in (
             'const runtimeKind = body.runtime_kind === undefined ? "desktop-agent" : body.runtime_kind',
-            block,
-        )
-        self.assertIn("RUNTIME_KINDS.has(runtimeKind as RuntimeKind)", block)
-        self.assertIn(
+            "RUNTIME_KINDS.has(runtimeKind as RuntimeKind)",
             'Object.prototype.hasOwnProperty.call(body, "capabilities_digest")',
-            block,
-        )
-        self.assertIn("runtimeKind: runtimeKind as RuntimeKind", block)
-        self.assertIn("const capabilityDigest = canonicalDeviceHeartbeatDigest(body)", block)
-        self.assertIn("recordProductPresence(env,", block)
+            "runtimeKind: runtimeKind as RuntimeKind",
+            "const capabilityDigest = canonicalDeviceHeartbeatDigest(body)",
+            "recordProductPresence(env,",
+        ):
+            self.assertIn(required, block)
         self.assertNotIn("createProductGrant", block)
         self.assertNotIn("dispatch", block)
-        self.assertIn('new Set<RuntimeKind>(["ordax-os", "desktop-agent", "mobile-client", "other"])', source)
+        self.assertIn(
+            'new Set<RuntimeKind>(["ordax-os", "desktop-agent", "mobile-client", "other"])',
+            source,
+        )
 
-
-    def test_legacy_d1_and_websocket_implementation_is_deleted(self):
-        root = Path(__file__).resolve().parents[1]
-        worker = (root / "control-plane/cloudflare/src/index.ts").read_text(encoding="utf-8")
-        with (root / "control-plane/cloudflare/wrangler.toml").open("rb") as handle:
-            wrangler = tomllib.load(handle)
-        self.assertNotIn("d1_databases", wrangler)
-        self.assertNotIn("env.DB", worker)
-        self.assertNotIn("this.env.DB", worker)
-        self.assertNotIn("createMultipartUpload", worker)
-        self.assertNotIn("recoverTerminalReport", worker)
-        self.assertNotIn("fenceExpiredForeignRunningJobs", worker)
-        self.assertNotIn("ordax_jobs", worker)
-        self.assertNotIn("ordax_artifact_uploads", worker)
-        self.assertIn("legacy_endpoint_retired", worker)
+    def test_retired_d1_websocket_and_worker_entry_are_physically_absent(self):
+        self.assertFalse((SRC / "index.ts").exists())
+        self.assertFalse((ROOT / "control-plane/cloudflare/wrangler.toml").exists())
+        self.assertEqual(d1_source_names(worker_source_texts(SRC)), set())
+        with CONFIG.open("rb") as stream:
+            config = tomllib.load(stream)
+        self.assertEqual(config["main"], "src/product_mcp_entry.ts")
+        self.assertNotIn("d1_databases", config)
+        self.assertNotIn("r2_buckets", config)
+        entry = (SRC / "product_mcp_entry.ts").read_text(encoding="utf-8")
+        for forbidden in ("createMultipartUpload", "recoverTerminalReport",
+                          "fenceExpiredForeignRunningJobs", "ordax_artifact_uploads"):
+            self.assertNotIn(forbidden, entry)
 
     def test_only_canonical_postgres_device_authority_is_routed(self):
-        root = Path(__file__).resolve().parents[1]
-        worker = (root / "control-plane/cloudflare/src/index.ts").read_text(encoding="utf-8")
-        self.assertIn("handleProductDeviceTransport(request,env)", worker)
-        self.assertIn("handleProductDevicePresence(request, env)", worker)
-        self.assertIn("enrollProductDevice(env,", worker)
-        self.assertIn("identifyProductDevice(env,", worker)
-        self.assertNotIn("env.DEVICE_SESSIONS.get(", worker)
-        self.assertNotIn("class DeviceSession", worker)
-        self.assertNotIn("DurableObject", worker)
+        entry = (SRC / "product_mcp_entry.ts").read_text(encoding="utf-8")
+        setup = (SRC / "product_device_setup.ts").read_text(encoding="utf-8")
+        transport = (SRC / "product_device_transport.ts").read_text(encoding="utf-8")
+        self.assertIn("handleProductDeviceTransport(request, env)", entry)
+        self.assertIn("handleProductDevicePresence(request, env)", entry)
+        self.assertIn("handleProductDeviceSetup(request, env)", entry)
+        self.assertIn("enrollProductDevice(env,", setup)
+        self.assertIn("identifyProductDevice(env,", setup)
+        self.assertIn("authenticateProductDevice(env,", transport)
+        self.assertNotIn("env.DEVICE_SESSIONS.get(", entry)
+        self.assertNotIn("class DeviceSession", entry)
+        self.assertNotIn("env.DB", entry)
 
-    def test_retired_operator_and_artifact_routes_fail_closed(self):
-        root = Path(__file__).resolve().parents[1]
-        worker = (root / "control-plane/cloudflare/src/index.ts").read_text(encoding="utf-8")
-        self.assertIn('path === "/v3/device/ws"', worker)
-        self.assertIn('path === "/v3/device/recover-report"', worker)
-        self.assertIn('path.startsWith("/v3/artifacts/")', worker)
-        self.assertIn('path === "/v3/jobs"', worker)
-        self.assertNotIn("const ACTION_PREFIXES", worker)
-        self.assertNotIn("function actionAllowed", worker)
-        self.assertIn('error:"legacy_endpoint_retired"', worker)
+    def test_retired_operator_and_artifact_routes_are_not_mounted(self):
+        entry = (SRC / "product_mcp_entry.ts").read_text(encoding="utf-8")
+        for forbidden in ("/v3/device/ws", "/v3/device/recover-report",
+                          "/v3/artifacts/", "/v3/jobs", "const ACTION_PREFIXES",
+                          "function actionAllowed", "legacy_endpoint_retired"):
+            self.assertNotIn(forbidden, entry)
+        self.assertIn('error: "not_found"', entry)
 
-    def test_artifact_retention_remains_a_canonical_deployment_blocker(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        cloudflare = root / "control-plane/cloudflare"
-        foundation = json.loads((cloudflare / "production-foundation.json").read_text(encoding="utf-8"))
-        with (cloudflare / "wrangler.toml").open("rb") as stream:
-            wrangler = tomllib.load(stream)
-        worker = (cloudflare / "src/index.ts").read_text(encoding="utf-8")
-        # The retired D1 prototype's retention implementation is not present.
-        # Check the current canonical gate instead of claiming a scheduled
-        # deletion service or restoring a second persistence authority.
-        self.assertIn("artifact_retention_authority_not_ready", foundation["readiness_blockers"])
-        self.assertIs(foundation["deployment_ready"], False)
-        self.assertIs(foundation["policy"]["allow_d1"], False)
-        self.assertIs(foundation["policy"]["allow_dual_write"], False)
-        self.assertFalse(gate.validate(foundation, wrangler, worker, foundation["account_id"]))
-        foundation["deployment_ready"] = True
-        with self.assertRaises(gate.DeployGateError):
-            gate.validate(foundation, wrangler, worker, foundation["account_id"])
+    def test_artifact_authority_is_not_an_implicit_mcp_grant(self):
+        foundation = json.loads(FOUNDATION.read_text(encoding="utf-8"))
+        with CONFIG.open("rb") as stream:
+            config = tomllib.load(stream)
+        self.assertFalse(foundation["policy"]["allow_d1"])
+        self.assertFalse(foundation["policy"]["allow_dual_write"])
+        self.assertNotIn("r2_buckets", config)
+        self.assertNotIn("deployment_ready", foundation)
+        self.assertNotIn("readiness_blockers", foundation)
+        self.assertFalse(validate(foundation, config))
+        f = json.loads(FOUNDATION.read_text(encoding="utf-8"))
+        f["policy"]["allow_d1"] = True
+        with self.assertRaisesRegex(McpReleaseError, "mcp_foundation_forbids_d1"):
+            validate(f, config)
 
 
 if __name__ == "__main__":
