@@ -57,8 +57,7 @@ test("Owner central list projection excludes SQL secrets and rejects inconsisten
       });
       assert.equal(response.status,value.ok?502:503);
       assert.equal(JSON.stringify(await response.json()).includes("private"),false);
-      assert.equal(JSON.stringify(value).includes("session_sha256")
-        && JSON.stringify(response).includes("session_sha256"),false);
+      assert.equal(JSON.stringify(await response.clone().json()).includes("session_sha256"),false);
     }
   });
 });
