@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class LeastPrivilegeProductionDeployTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.workflow = (ROOT / ".github/workflows/cloudflare-v3-deploy.yml").read_text(encoding="utf-8")
+        cls.workflow = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text(encoding="utf-8")
         cls.deploy = (ROOT / "scripts/cloudflare/deploy-production-v3.sh").read_text(encoding="utf-8")
         cls.wrangler = tomllib.loads(
             (ROOT / "control-plane/cloudflare/wrangler.toml").read_text(encoding="utf-8")
@@ -24,7 +24,8 @@ class LeastPrivilegeProductionDeployTests(unittest.TestCase):
         self.assertIn("CLOUDFLARE_API_TOKEN", self.workflow)
         self.assertNotIn("ORDAX_OPERATOR_TOKEN", self.workflow)
         self.assertNotIn("verify_cloudflare_v3.py", self.workflow)
-        self.assertIn("verify_cloudflare_public.py", self.workflow)
+        self.assertIn("Verify public attested interactive health and readiness", self.workflow)
+        self.assertFalse((ROOT / ".github/workflows/cloudflare-v3-deploy.yml").exists())
 
     def test_routine_deploy_does_not_provision_bound_infrastructure(self) -> None:
         for forbidden in (

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRESHNESS = ROOT / "scripts/cloudflare/assert-current-main.sh"
 ROUTINE = ROOT / "scripts/cloudflare/deploy-production-v3.sh"
 BOOTSTRAP = ROOT / "scripts/cloudflare/bootstrap-worker-v3.sh"
-WORKFLOW = ROOT / ".github/workflows/cloudflare-v3-deploy.yml"
+WORKFLOW = ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml"
 
 
 def run_git(*args: str, cwd: Path) -> None:
@@ -85,18 +85,20 @@ class CloudflareMainSourceFreshnessTests(unittest.TestCase):
             )
         self.assertNotIn("CLOUDFLARE_API_TOKEN", FRESHNESS.read_text(encoding="utf-8"))
 
-    def test_retired_v3_deploy_has_no_automatic_ci_trigger_or_second_release(self) -> None:
+    def test_retired_v3_deploy_file_is_gone_and_only_canonical_mcp_release_remains(self) -> None:
+        self.assertFalse(
+            (ROOT / ".github/workflows/cloudflare-v3-deploy.yml").exists(),
+            "a blocked legacy Worker must not retain a manual or automatic deploy workflow",
+        )
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("  workflow_dispatch:", workflow)
+        self.assertIn("  push:", workflow)
+        self.assertIn("    branches: [main]", workflow)
         self.assertNotIn("  workflow_run:", workflow)
         self.assertNotIn("github.event.workflow_run", workflow)
-        self.assertIn("github.ref == 'refs/heads/main'", workflow)
-        self.assertIn("needs.foundation.outputs.deployment_ready == 'true'", workflow)
-        self.assertIn("python scripts/cloudflare/check_deploy_readiness.py --allow-blocked", workflow)
-        self.assertIn('ref: ${{ github.sha }}', workflow)
-        canonical = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text("utf-8")
-        self.assertIn("Deploy canonical production MCP", canonical)
-        self.assertIn("npx --yes wrangler@4.141.0 deploy --config wrangler.mcp.toml", canonical)
+        self.assertIn("needs.validate-candidate.outputs.maintenance_ready == 'true'", workflow)
+        self.assertIn("Deploy canonical production MCP", workflow)
+        self.assertIn("npx --yes wrangler@4.141.0 deploy --config wrangler.mcp.toml", workflow)
 
 
 if __name__ == "__main__":
