@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 MIGRATION=(ROOT/"control-plane/supabase/migrations/20261007203000_product_client_grant_isolation_v1.sql").read_text("utf-8").lower()
 POSTFLIGHT=(ROOT/"control-plane/supabase/tests/product_client_grant_isolation_postflight.sql").read_text("utf-8").lower()
-LEGACY=(ROOT/"control-plane/cloudflare/src/index.ts").read_text("utf-8")
+ENTRY=(ROOT/"control-plane/cloudflare/src/product_mcp_entry.ts").read_text("utf-8")
 STORE=(ROOT/"control-plane/cloudflare/src/product_postgres_store.ts").read_text("utf-8")
 
 class ProductCanonicalGrantContract(unittest.TestCase):
@@ -24,8 +24,9 @@ class ProductCanonicalGrantContract(unittest.TestCase):
             "async function createProductGrant(",
             "async function revokeProductGrant(",
         ):
-            self.assertNotIn(name,LEGACY)
-        self.assertIn('error: "legacy_product_grants_retired"',LEGACY)
+            self.assertNotIn(name,ENTRY)
+        self.assertFalse((ROOT/"control-plane/cloudflare/src/index.ts").exists())
+        self.assertIn("createAttestedDeviceActionHandler",ENTRY)
 
     def test_exact_space_and_client_in_postgres_resolver(self):
         for predicate in (
