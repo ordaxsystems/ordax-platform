@@ -15,6 +15,8 @@ class RetiredLegacyMcp(unittest.TestCase):
             ROOT / "control-plane/cloudflare/wrangler.toml",
             ROOT / "scripts/cloudflare/check_deploy_readiness.py",
             ROOT / "control-plane/cloudflare/d1-cutover-authority-map.json",
+            ROOT / "scripts/verify_cloudflare_public.py",
+            ROOT / "scripts/verify_cloudflare_v3.py",
         ):
             self.assertFalse(path.exists(), f"Retired Worker artifact restored: {path}")
 
