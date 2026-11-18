@@ -8,8 +8,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FRESHNESS = ROOT / "scripts/cloudflare/assert-current-main.sh"
-ROUTINE = ROOT / "scripts/cloudflare/deploy-production-v3.sh"
-BOOTSTRAP = ROOT / "scripts/cloudflare/bootstrap-worker-v3.sh"
 WORKFLOW = ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml"
 
 
@@ -62,27 +60,24 @@ class CloudflareMainSourceFreshnessTests(unittest.TestCase):
             self.assertEqual(unavailable.returncode, 4)
             self.assertIn("Cannot verify current remote main", unavailable.stderr)
 
-    def test_all_worker_publication_paths_require_fresh_source_before_tokens(self) -> None:
-        for script in (ROUTINE, BOOTSTRAP):
-            content = script.read_text(encoding="utf-8")
-            self.assertIn('bash "$ROOT/scripts/cloudflare/assert-current-main.sh" "$ROOT"', content)
-            self.assertLess(
-                content.index("check_deploy_readiness.py"),
-                content.index("assert-current-main.sh"),
-            )
-            self.assertLess(
-                content.index("assert-current-main.sh"),
-                content.index("CLOUDFLARE_API_TOKEN:?"),
-            )
-            self.assertEqual(content.count("assert-current-main.sh"), 2)
-            self.assertLess(
-                content.rindex("assert-current-main.sh"),
-                content.index('npx --yes "wrangler@'),
-            )
-            self.assertLess(
-                content.index("CLOUDFLARE_API_TOKEN:?"),
-                content.rindex("assert-current-main.sh"),
-            )
+    def test_only_canonical_mcp_publisher_exists_and_validates_release_before_token(self):
+        for name in ("deploy-v3.sh", "deploy-production-v3.sh", "bootstrap-worker-v3.sh"):
+            self.assertFalse((ROOT / "scripts/cloudflare" / name).exists())
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        candidate, production = workflow.split("  deploy-production:", 1)
+        self.assertIn("Checkout exact main source", candidate)
+        self.assertIn("deploy --dry-run --config wrangler.mcp.toml", candidate)
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", candidate)
+        self.assertIn("Checkout exact main source for production only", production)
+        self.assertLess(
+            production.index("Revalidate exact release mode directly before publication"),
+            production.index("CLOUDFLARE_API_TOKEN"),
+        )
+        self.assertEqual(
+            production.count("npx --yes wrangler@4.141.0 deploy --config wrangler.mcp.toml"),
+            1,
+        )
+        self.assertNotIn("github.event.workflow_run", workflow)
         self.assertNotIn("CLOUDFLARE_API_TOKEN", FRESHNESS.read_text(encoding="utf-8"))
 
     def test_retired_v3_deploy_file_is_gone_and_only_canonical_mcp_release_remains(self) -> None:
