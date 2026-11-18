@@ -13,8 +13,6 @@ from scripts.cloudflare.check_deploy_readiness import (
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ordax-mcp-validation-deploy.yml"
-BOOTSTRAP = ROOT / "scripts" / "cloudflare" / "deploy-v3.sh"
-ROUTINE_DEPLOY = ROOT / "scripts" / "cloudflare" / "deploy-production-v3.sh"
 FOUNDATION = ROOT / "control-plane" / "cloudflare" / "production-foundation.json"
 WRANGLER = ROOT / "control-plane" / "cloudflare" / "wrangler.toml"
 WORKER_PACKAGE = ROOT / "control-plane" / "cloudflare" / "package.json"
@@ -397,32 +395,22 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
         self.assertIn("check_mcp_release.py --maintenance-upgrade", workflow)
         self.assertNotIn("ordax-control-plane-v3", workflow)
 
-    def test_legacy_d1_bootstrap_is_retired_unconditionally(self):
-        script = BOOTSTRAP.read_text(encoding="utf-8")
-        self.assertIn("Legacy D1/bootstrap deployment has been retired", script)
-        self.assertIn("exit 3", script)
-        self.assertNotIn("wrangler d1 create", script)
-        self.assertNotIn("wrangler deploy", script)
-        self.assertNotIn("d1 migrations apply", script)
-
-    def test_routine_script_runs_canonical_gate_before_cloudflare_calls(self):
-        script = ROUTINE_DEPLOY.read_text(encoding="utf-8")
-        self.assertIn('python "$ROOT/scripts/cloudflare/check_deploy_readiness.py"', script)
-        gate_at = script.index("check_deploy_readiness.py")
-        self.assertLess(gate_at, script.index('CLOUDFLARE_API_TOKEN:?'))
-        self.assertLess(gate_at, script.index('cloudflare_api()'))
-        self.assertLess(gate_at, script.index('npx --yes "wrangler@'))
-
-    def test_routine_deploy_has_no_legacy_account_or_workers_dev_url_fallback(self):
-        script = ROUTINE_DEPLOY.read_text(encoding="utf-8")
-        self.assertNotIn(OLD_ACCOUNT_ID, script)
-        self.assertNotIn("ordax-ac1ca1b50d09", script)
-        self.assertIn(
-            'ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required}"',
-            script,
+    def test_retired_v3_shell_entrypoints_are_deleted_and_canonical_deploy_remains(self):
+        retired = ("deploy-v3.sh", "deploy-production-v3.sh", "bootstrap-worker-v3.sh")
+        for script in retired:
+            self.assertFalse(
+                (ROOT / "scripts/cloudflare" / script).exists(),
+                f"Retired Cloudflare v3 publisher must not remain callable: {script}",
+            )
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("Revalidate exact release mode directly before publication", workflow)
+        self.assertIn("python scripts/cloudflare/check_mcp_release.py --maintenance-upgrade", workflow)
+        self.assertEqual(
+            workflow.count("npx --yes wrangler@4.141.0 deploy --config wrangler.mcp.toml"),
+            1,
         )
-        self.assertIn("/workers/subdomain", script)
-        self.assertNotIn("workers/subdomain\" -X PUT", script)
+        self.assertNotIn("wrangler.toml", workflow.replace("wrangler.mcp.toml", ""))
+        self.assertNotIn(OLD_ACCOUNT_ID, workflow)
 
 
 if __name__ == "__main__":

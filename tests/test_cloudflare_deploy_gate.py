@@ -13,9 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 GUARD = ROOT / "scripts/cloudflare/check_deploy_readiness.py"
 FOUNDATION = ROOT / "control-plane/cloudflare/production-foundation.json"
 WRANGLER = ROOT / "control-plane/cloudflare/wrangler.toml"
-LEGACY = ROOT / "scripts/cloudflare/deploy-v3.sh"
-ROUTINE = ROOT / "scripts/cloudflare/deploy-production-v3.sh"
-BOOTSTRAP = ROOT / "scripts/cloudflare/bootstrap-worker-v3.sh"
 PUBLIC_SMOKE = ROOT / "scripts/verify_cloudflare_public.py"
 
 spec = importlib.util.spec_from_file_location("ordax_cloudflare_deploy_gate", GUARD)
@@ -217,41 +214,26 @@ class CloudflareDirectDeployGateTests(unittest.TestCase):
             gate.validate(self.foundation, self.wrangler, "export default {}",
                           self.foundation["account_id"], bootstrap=True)
 
-    def test_bootstrap_script_is_blocked_before_using_admin_credential(self):
-        source = BOOTSTRAP.read_text(encoding="utf-8")
-        self.assertIn("check_deploy_readiness.py", source)
-        self.assertIn("--bootstrap", source)
-        self.assertIn("workers/scripts/$WORKER_NAME", source)
-        self.assertNotIn("wrangler d1", source)
-        self.assertNotIn("d1 migrations apply", source)
-        self.assertLess(source.index("check_deploy_readiness.py"),
-                        source.index("CLOUDFLARE_API_TOKEN:?"))
-        command = ["bash", str(BOOTSTRAP)]
-        result = subprocess.run(command, cwd=ROOT,
-                                env={**os.environ, "CLOUDFLARE_ACCOUNT_ID": self.foundation["account_id"]},
-                                capture_output=True, text=True)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("initial Worker bootstrap", result.stderr)
-        self.assertNotIn("CLOUDFLARE_API_TOKEN is required", result.stderr)
-
-    def test_routine_deploy_requires_preexisting_worker(self):
-        source = ROUTINE.read_text(encoding="utf-8")
-        self.assertIn("workers/scripts/$WORKER_NAME", source)
-        self.assertIn("Existing Worker identity could not be verified", source)
-        self.assertLess(source.index("workers/scripts/$WORKER_NAME"),
-                        source.index("npx --yes"))
+    def test_retired_v3_shell_publishers_cannot_be_invoked(self):
+        for script in ("deploy-v3.sh", "bootstrap-worker-v3.sh", "deploy-production-v3.sh"):
+            self.assertFalse((ROOT / "scripts/cloudflare" / script).exists())
+        workflow = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn("Revalidate exact release mode directly before publication", workflow)
+        self.assertIn("Deploy canonical production MCP", workflow)
+        self.assertEqual(
+            workflow.count("npx --yes wrangler@4.141.0 deploy --config wrangler.mcp.toml"), 1
+        )
+        self.assertNotIn("deploy-production-v3.sh", workflow)
+        self.assertNotIn("bootstrap-worker-v3.sh", workflow)
+        self.assertNotIn("deploy-v3.sh", workflow)
 
     def test_public_smoke_must_not_fall_back_to_legacy_account(self):
         source = PUBLIC_SMOKE.read_text(encoding="utf-8")
         self.assertNotIn("ordax-ac1ca1b50d09", source)
         self.assertIn("Pass --base-url or ORDAX_E2E_CONTROL_PLANE_URL", source)
 
-    def test_retired_bootstrap_exits_without_deploy_credentials(self):
-        result = subprocess.run(["bash", str(LEGACY)], cwd=ROOT,
-                                capture_output=True, text=True)
-        self.assertEqual(result.returncode, 3)
-        self.assertIn("retired", result.stderr)
-        self.assertNotIn("CLOUDFLARE_API_TOKEN", result.stderr)
 
 
 if __name__ == "__main__":

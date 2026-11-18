@@ -12,7 +12,7 @@ class LeastPrivilegeProductionDeployTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.workflow = (ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml").read_text(encoding="utf-8")
-        cls.deploy = (ROOT / "scripts/cloudflare/deploy-production-v3.sh").read_text(encoding="utf-8")
+        cls.deploy = cls.workflow.split("  deploy-production:", 1)[1]
         cls.wrangler = tomllib.loads(
             (ROOT / "control-plane/cloudflare/wrangler.toml").read_text(encoding="utf-8")
         )
@@ -36,7 +36,11 @@ class LeastPrivilegeProductionDeployTests(unittest.TestCase):
             "--secrets-file",
         ):
             self.assertNotIn(forbidden, self.deploy)
-        self.assertIn('wrangler@${WRANGLER_VERSION}" deploy', self.deploy)
+        self.assertEqual(
+            self.deploy.count("npx --yes wrangler@4.141.0 deploy --config wrangler.mcp.toml"),
+            1,
+        )
+        self.assertNotIn("deploy-production-v3.sh", self.deploy)
 
     def test_canonical_config_has_authorized_bindings_and_auth(self) -> None:
         self.assertEqual(self.wrangler["name"], self.foundation["worker_name"])
@@ -66,13 +70,11 @@ class LeastPrivilegeProductionDeployTests(unittest.TestCase):
             )
             self.assertFalse(self.foundation["deployment_ready"])
 
-    def test_retired_d1_bootstrap_cannot_be_routine_deploy(self) -> None:
-        self.assertNotIn("scripts/cloudflare/deploy-v3.sh", self.workflow)
-        bootstrap = (ROOT / "scripts/cloudflare/deploy-v3.sh").read_text(encoding="utf-8")
-        self.assertIn("Legacy D1/bootstrap deployment has been retired", bootstrap)
-        self.assertIn("exit 3", bootstrap)
-        self.assertNotIn("wrangler d1 create", bootstrap)
-        self.assertNotIn("wrangler deploy", bootstrap)
+    def test_retired_v3_scripts_are_physically_removed_not_deployment_fallbacks(self) -> None:
+        for name in ("deploy-v3.sh", "deploy-production-v3.sh", "bootstrap-worker-v3.sh"):
+            self.assertFalse((ROOT / "scripts/cloudflare" / name).exists())
+            self.assertNotIn(name, self.workflow)
+        self.assertIn("Deploy canonical production MCP", self.deploy)
 
 
 if __name__ == "__main__":
