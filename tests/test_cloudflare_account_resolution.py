@@ -12,7 +12,7 @@ from scripts.cloudflare.check_deploy_readiness import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "cloudflare-v3-deploy.yml"
+WORKFLOW = ROOT / ".github" / "workflows" / "ordax-mcp-validation-deploy.yml"
 BOOTSTRAP = ROOT / "scripts" / "cloudflare" / "deploy-v3.sh"
 ROUTINE_DEPLOY = ROOT / "scripts" / "cloudflare" / "deploy-production-v3.sh"
 FOUNDATION = ROOT / "control-plane" / "cloudflare" / "production-foundation.json"
@@ -373,31 +373,35 @@ class CloudflareAccountResolutionContractTests(unittest.TestCase):
             wrangler = tomllib.load(handle)
         self.assertIn("nodejs_compat", wrangler.get("compatibility_flags") or [])
 
-    def test_routine_workflow_reads_account_from_single_source_of_truth(self):
+    def test_only_canonical_mcp_workflow_can_publish_after_retiring_v3(self):
         workflow = WORKFLOW.read_text(encoding="utf-8-sig")
+        foundation = json.loads(FOUNDATION.read_text(encoding="utf-8"))
+        self.assertFalse((ROOT / ".github/workflows/cloudflare-v3-deploy.yml").exists())
         self.assertNotIn("secrets.CLOUDFLARE_ACCOUNT_ID", workflow)
         self.assertNotIn(OLD_ACCOUNT_ID, workflow)
-        self.assertNotIn(DEDICATED_ACCOUNT_ID, workflow)
         self.assertIn(
-            "control-plane/cloudflare/production-foundation.json",
-            (ROOT / "scripts/cloudflare/check_deploy_readiness.py").read_text(encoding="utf-8"),
+            f'CLOUDFLARE_ACCOUNT_ID: "{foundation["account_id"]}"',
+            workflow,
         )
-        self.assertIn("needs.foundation.outputs.account_id", workflow)
-        self.assertIn("needs.foundation.outputs.deployment_ready == 'true'", workflow)
-        self.assertIn("secrets.CLOUDFLARE_API_TOKEN", workflow)
+        self.assertIn("environment: cloudflare-v3", workflow)
+        self.assertIn("needs.validate-candidate.outputs.production_ready == 'true'", workflow)
+        self.assertIn("needs.validate-candidate.outputs.maintenance_ready == 'true'", workflow)
+        self.assertIn(
+            "npx --yes wrangler@4.141.0 deploy --config wrangler.mcp.toml",
+            workflow,
+        )
+        self.assertNotIn("deploy-production-v3.sh", workflow)
+        self.assertNotIn("github.event.workflow_run", workflow)
         self.assertNotIn("secrets.ORDAX_OPERATOR_TOKEN", workflow)
-        self.assertIn("check_deploy_readiness.py --allow-blocked", workflow)
-        self.assertIn('--github-output "$GITHUB_OUTPUT"', workflow)
-        self.assertNotIn("python - <<'PY'", workflow)
 
-    def test_not_ready_foundation_skips_deploy_instead_of_creating_false_incident(self):
+    def test_retired_foundation_is_explicitly_blocked_independent_of_live_mcp(self):
         foundation = json.loads(FOUNDATION.read_text(encoding="utf-8"))
         workflow = WORKFLOW.read_text(encoding="utf-8-sig")
         self.assertFalse(foundation["deployment_ready"])
         self.assertTrue(foundation["readiness_blockers"])
-        self.assertIn("foundation:", workflow)
-        self.assertIn("deploy:", workflow)
-        self.assertNotIn("Enforce dedicated-account migration gate", workflow)
+        self.assertIn("deploy-production:", workflow)
+        self.assertIn("check_mcp_release.py --maintenance-upgrade", workflow)
+        self.assertNotIn("ordax-control-plane-v3", workflow)
 
     def test_legacy_d1_bootstrap_is_retired_unconditionally(self):
         script = BOOTSTRAP.read_text(encoding="utf-8")
