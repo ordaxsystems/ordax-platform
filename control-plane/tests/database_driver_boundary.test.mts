@@ -5,7 +5,7 @@ import { test } from "node:test";
 const root = new URL("../cloudflare/src/", import.meta.url);
 const driver = readFileSync(new URL("data_postgres_driver.ts", root), "utf8");
 const store = readFileSync(new URL("product_postgres_store.ts", root), "utf8");
-const entry = readFileSync(new URL("index.ts", root), "utf8");
+const entry = readFileSync(new URL("product_mcp_entry.ts", root), "utf8");
 
 test("database driver dependency is isolated behind an explicit session boundary", () => {
   assert.match(driver, /import \{ Client \} from "pg"/);
