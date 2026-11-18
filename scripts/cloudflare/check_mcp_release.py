@@ -19,6 +19,55 @@ ROOT=Path(__file__).resolve().parents[2]
 FOUNDATION=ROOT/"control-plane/cloudflare/production-foundation.json"
 CONFIG=ROOT/"control-plane/cloudflare/wrangler.mcp.toml"
 ENTRY=ROOT/"control-plane/cloudflare/src/product_mcp_entry.ts"
+SOURCES=ROOT/"control-plane/cloudflare/src"
+
+D1_ACCESS_RE = re.compile(
+    r"""(?<![A-Za-z0-9_])(?:this\s*\??\.\s*)?env\s*(?:\??\.\s*DB\b|(?:\?\.\s*)?\[\s*['"`]DB['"`]\s*\])"""
+)
+D1_TABLE_RE = re.compile(
+    r"\b(?:from|join|into|update|table)\s+(ordax_[a-z0-9_]+)",
+    re.IGNORECASE,
+)
+
+
+def d1_access_count(source: str) -> int:
+    """Count direct, computed and optional-chained legacy D1 environment access."""
+    return len(D1_ACCESS_RE.findall(source))
+
+
+def d1_source_names(sources: dict[str, str]) -> set[str]:
+    """Shared Worker inventory rule for CI tests and the deployment boundary."""
+    return {
+        name for name, source in sources.items()
+        if "D1Database" in source or d1_access_count(source) > 0
+    }
+
+
+WORKER_CODE_SUFFIXES = frozenset({".ts", ".tsx", ".mts", ".js", ".jsx", ".mjs"})
+
+
+def worker_source_texts(root: Path) -> dict[str, str]:
+    """Use one recursive source inventory in CI audits and production deploy."""
+    return {
+        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.suffix in WORKER_CODE_SUFFIXES
+    }
+
+
+
+def assert_no_legacy_worker_authority()->None:
+    sources=worker_source_texts(SOURCES)
+    if "product_mcp_entry.ts" not in sources or "index.ts" in sources:
+        raise McpReleaseError("mcp_canonical_entrypoint_missing_or_v3_restored")
+    bad=d1_source_names(sources)
+    if bad:
+        raise McpReleaseError("mcp_d1_source_forbidden: "+", ".join(sorted(bad)))
+    if any("operatorAuthorized(" in content or "ORDAX_OPERATOR_TOKEN" in content
+           or "SUPABASE_SERVER_KEY" in content or "SUPABASE_SERVICE_ROLE_KEY" in content
+           for content in sources.values()):
+        raise McpReleaseError("mcp_global_operator_or_server_secret_source_forbidden")
+
 
 class McpReleaseError(ValueError):
     pass
@@ -112,6 +161,22 @@ TRUSTED_CLIENT_INGRESS={
 
 def validate(foundation:dict,config:dict)->bool:
     release=foundation.get("mcp_release")
+    if any(name in foundation for name in (
+        "worker_name", "deployment", "deployment_ready", "readiness_blockers", "dns"
+    )):
+        raise McpReleaseError("mcp_legacy_foundation_release_authority_present")
+    policy_root=foundation.get("policy") or {}
+    if policy_root.get("allow_d1") is not False or policy_root.get("allow_dual_write") is not False:
+        raise McpReleaseError("mcp_foundation_forbids_d1_and_dual_write")
+    required_forbidden={"SUPABASE_SERVER_KEY","SUPABASE_SERVICE_ROLE_KEY","ORDAX_OPERATOR_TOKEN"}
+    if not required_forbidden.issubset(set(policy_root.get("forbidden_runtime_secrets") or [])):
+        raise McpReleaseError("mcp_foundation_forbidden_runtime_secrets_incomplete")
+    security=foundation.get("live_evidence",{}).get("security") or {}
+    if (foundation.get("security",{}).get("require_two_factor") is not True
+        or security.get("member_two_factor_enabled") is not True
+        or security.get("account_enforce_twofactor") is not True):
+        raise McpReleaseError("mcp_account_2fa_evidence_missing")
+    assert_no_legacy_worker_authority()
     if not isinstance(release,dict):
         raise McpReleaseError("canonical_mcp_release_missing")
     if release.get("worker_name")!="ordax-mcp" or config.get("name")!="ordax-mcp":
