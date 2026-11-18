@@ -560,6 +560,63 @@ test("session projects only the canonical Device-attested conversation binding",
   assert.equal(resolved, 1);
 });
 
+test("ordax_session exposes only pending Owner challenge correlation, never an auto-selected device", async () => {
+  const { handlers } = fakeHandlers();
+  const challengeId = "44444444-4444-4444-8444-444444444444";
+  const client = "22222222-2222-4222-8222-222222222222";
+  const expiry = new Date(Date.now() + 120_000).toISOString();
+  handlers.session = async () => Response.json({ ok: true, session: {
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    client_kind: "product-mcp", client_id: client,
+  } });
+  let opens = 0;
+  const gateway = createCanonicalProductMcpGateway(
+    ENV, handlers, fetch, PRODUCT_MCP_DIRECT_TOOLS, {
+      open: async () => {
+        opens++;
+        return Response.json({
+          ok: true, status: "awaiting_owner",
+          challenge_id: challengeId, expires_at: expiry,
+          device_id: "33333333-3333-4333-8333-333333333333",
+          owner_user_id: "do-not-project",
+        }, { status: 202 });
+      },
+      resolve: async () => ({ ok: false as const, error: "central_session_unbound" }),
+    },
+  );
+  const response = await gateway(request("ordax_session"));
+  const projected = (await response.json() as any).result.structuredContent;
+  assert.equal(projected.authenticated, true);
+  assert.equal(projected.client_id, client);
+  assert.deepEqual(projected.owner_selection, {
+    state: "awaiting_owner", challenge_id: challengeId, expires_at: expiry,
+    selection_location: "ordax_owner",
+    owner_confirmation_required: true, action_dispatched: false,
+  });
+  assert.equal("device_binding" in projected, false);
+  assert.equal("device_id" in projected.owner_selection, false);
+  assert.ok(!JSON.stringify(projected).includes("do-not-project"));
+  assert.equal(opens, 1);
+
+  // An expired or invalid response is not made into a selectable challenge.
+  for (const [badId, badExpiry] of [
+    ["not-a-uuid", expiry],
+    [challengeId, "2000-01-01T00:00:00.000Z"],
+  ]) {
+    const badGateway = createCanonicalProductMcpGateway(
+      ENV, handlers, fetch, PRODUCT_MCP_DIRECT_TOOLS, {
+        open: async () => Response.json({ ok: true, status: "awaiting_owner",
+          challenge_id: badId, expires_at: badExpiry }, { status: 202 }),
+        resolve: async () => ({ ok: false as const, error: "central_session_unbound" }),
+      },
+    );
+    const bad = (await (await badGateway(request("ordax_session"))).json() as any)
+      .result.structuredContent;
+    assert.equal("owner_selection" in bad, false);
+    assert.equal("device_binding" in bad, false);
+  }
+});
+
 test("session never invents Device authority when canonical binding is unresolved", async () => {
   const { handlers } = fakeHandlers();
   const gateway = createCanonicalProductMcpGateway(
@@ -572,6 +629,7 @@ test("session never invents Device authority when canonical binding is unresolve
   const json = await response.json() as any;
   assert.equal(json.result.structuredContent.authenticated, true);
   assert.equal("device_binding" in json.result.structuredContent, false);
+  assert.equal("owner_selection" in json.result.structuredContent, false);
 });
 
 test("restricted MCP projection reports only allowed names in session diagnostics", async () => {

@@ -37,6 +37,16 @@ export interface OrdaxMcpHandlers {
     dispatch_target_resolved: true;
     capability_authorization: "checked_per_action";
   }>;
+  /** Advisory Owner challenge issued by the same authenticated session.
+   * This is NOT a device choice, grant, bearer token or Runtime attestation. */
+  sessionOwnerSelection?: Readonly<{
+    state: "awaiting_owner";
+    challenge_id: string;
+    expires_at: string;
+    selection_location: "ordax_owner";
+    owner_confirmation_required: true;
+    action_dispatched: false;
+  }>;
 }
 
 interface ToolSpec {
@@ -80,7 +90,7 @@ const REPLACEMENTS = {
 };
 
 const TOOLS: ToolSpec[] = [
-  { name: "ordax_session", description: "Inspect the authenticated ORDAX Product session, the signed non-secret OAuth client_id, the durable Device-attested conversation binding when one exists, and the canonical MCP tool catalog (names, count, revision). device_binding resolves routing only; each action still requires its current capability grant. Compare mcp_tool_names with the tools available to this conversation; if different, refresh the MCP connection." },
+  { name: "ordax_session", description: "Inspect the authenticated ORDAX Product session, the signed non-secret OAuth client_id, the durable Device-attested conversation binding when one exists, and the canonical MCP tool catalog (names, count, revision). A pending owner_selection is only a short-lived challenge code; show it to the user to compare in Conta OrdaX > Dispositivos > Vínculo MCP, where Owner must confirm the desired device. The chat cannot make that choice or treat a challenge as a grant. device_binding resolves routing only; each action still requires its current capability grant. Compare mcp_tool_names with the tools available to this conversation; if different, refresh the MCP connection." },
   { name: "ordax_profile", description: "Return the authenticated OrdaX account subject id for connector identity display. Compatibility tool: not an OS Profile, Profile Pack, Space or preferences." },
   { name: "ordax_targets", description: "List OAuth-scoped ORDAX devices, reported presence and Owner grants. client_device_routing is only a grant-catalog preflight and never overrides a durable ordax_session.device_binding. Each complete target has a nonauthoritative connection_diagnostic: online and granted does not prove action dispatch or Runtime attestation. A partially outdated profile retains its old permissions; new capabilities need explicit Owner reauthorization. Never select an execution target solely from discovery." },
   { name: "ordax_action_status", description: "Read the status/result of an existing ORDAX request_id. Keep the original ID and poll until terminal; never re-enqueue a potentially non-idempotent command just because status is queued or temporarily unavailable. Optional wait_for_completion_ms long-polls up to 20 seconds without re-executing.", properties: { request_id: STRING, wait_for_completion_ms: { ...WAIT, default: 0, description: "Optional verified status long-poll, 0-20000 milliseconds; default 0 for immediate read." } }, required: ["request_id"] },
@@ -1044,6 +1054,24 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
           dispatch_target_resolved: true as const,
           capability_authorization: "checked_per_action" as const,
         } : null;
+    const rawSelection = handlers.sessionOwnerSelection;
+    const ownerSelection = authenticated && signedClientId && !deviceBinding
+      && rawSelection?.state === "awaiting_owner"
+      && isCanonicalUuid(rawSelection.challenge_id)
+      && typeof rawSelection.expires_at === "string"
+      && Number.isFinite(Date.parse(rawSelection.expires_at))
+      && Date.parse(rawSelection.expires_at) > Date.now()
+      && rawSelection.selection_location === "ordax_owner"
+      && rawSelection.owner_confirmation_required === true
+      && rawSelection.action_dispatched === false
+      ? {
+          state: "awaiting_owner" as const,
+          challenge_id: rawSelection.challenge_id.toLowerCase(),
+          expires_at: rawSelection.expires_at,
+          selection_location: "ordax_owner" as const,
+          owner_confirmation_required: true as const,
+          action_dispatched: false as const,
+        } : null;
     // Derived from the same filtered catalog as tools/list, never a second inventory.
     const toolNames = toolDefinitions(allowedTools).map((tool) => String(tool.name));
     return textToolResult(
@@ -1053,6 +1081,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
             authenticated: true,
             ...(signedClientId ? { client_id: signedClientId, client_kind: "product-mcp" } : {}),
             ...(deviceBinding ? { device_binding: deviceBinding } : {}),
+            ...(ownerSelection ? { owner_selection: ownerSelection } : {}),
             mcp_tool_surface_revision: await currentMcpToolSurfaceRevision(),
             mcp_tool_count: toolNames.length,
             mcp_tool_names: toolNames,

@@ -471,12 +471,31 @@ export function createCanonicalProductMcpGateway(
       // challenge from the hidden provider correlation marker. This is session
       // coordination for the direct MCP path; it is not Central model relay.
       let sessionDeviceBinding: OrdaxMcpHandlers["sessionDeviceBinding"];
+      let sessionOwnerSelection: OrdaxMcpHandlers["sessionOwnerSelection"];
       if (toolName === "ordax_session") {
         try {
-          await (recoveryDependencies.open ?? openCentralSessionFromMcp)(
+          const opened = await (recoveryDependencies.open ?? openCentralSessionFromMcp)(
             request.clone(), env, wakeDependencies,
           );
-        } catch { /* fail closed */ }
+          if (opened.ok) {
+            const raw = await opened.json() as Record<string, unknown>;
+            const challengeId = raw?.challenge_id;
+            const expiresAt = raw?.expires_at;
+            if (raw?.ok === true && raw.status === "awaiting_owner"
+                && isCanonicalUuid(challengeId) && typeof expiresAt === "string"
+                && Number.isFinite(Date.parse(expiresAt))
+                && Date.parse(expiresAt) > Date.now()) {
+              // The Owner challenge is a short-lived correlation code, not
+              // device routing authority. Only a separately signed Owner
+              // decision and enrolled Runtime confirmation can bind it.
+              sessionOwnerSelection = Object.freeze({
+                state: "awaiting_owner", challenge_id: challengeId.toLowerCase(),
+                expires_at: expiresAt, selection_location: "ordax_owner",
+                owner_confirmation_required: true, action_dispatched: false,
+              });
+            }
+          }
+        } catch { /* missing/malformed opening result never becomes authority */ }
         // Project only the SAME durable binding authority that action routing
         // resolves. A target-list candidate never becomes session authority.
         try {
@@ -498,7 +517,9 @@ export function createCanonicalProductMcpGateway(
 
       let handlers: OrdaxMcpHandlers = sessionDeviceBinding
         ? { ...deniedHandlers, sessionDeviceBinding }
-        : deniedHandlers;
+        : sessionOwnerSelection
+          ? { ...deniedHandlers, sessionOwnerSelection }
+          : deniedHandlers;
       if (toolName && allowedTools.has(toolName)
         && ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)
         && routingHint?.explicitNonNullSpace) {
