@@ -8,7 +8,7 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKER = ROOT / "control-plane/cloudflare/src/index.ts"
+WORKER = ROOT / "control-plane/cloudflare/src/product_mcp_entry.ts"
 READS = ROOT / "control-plane/cloudflare/src/product_mcp_reads.ts"
 ENTRY = ROOT / "control-plane/cloudflare/src/product_mcp_entry.ts"
 TRANSPORT = ROOT / "control-plane/cloudflare/src/product_device_transport.ts"
@@ -24,10 +24,11 @@ class ProductReadonlyWorkerContractTests(unittest.TestCase):
         cls.transport = TRANSPORT.read_text(encoding="utf-8")
         cls.authority = AUTHORITY.read_text(encoding="utf-8").lower()
 
-    def test_legacy_mutation_route_is_retired_instead_of_parallel_authority(self):
-        self.assertIn('path === "/v3/product/actions" && request.method === "POST"', self.worker)
-        self.assertIn('"legacy_product_action_retired"', self.worker)
-        self.assertIn('product_typed_actions_v2', self.worker)
+    def test_no_legacy_mutation_route_or_parallel_authority(self):
+        self.assertNotIn('path === "/v3/product/actions"', self.worker)
+        self.assertNotIn('"legacy_product_action_retired"', self.worker)
+        self.assertIn("createAttestedDeviceActionHandler", self.worker)
+        self.assertIn("createAttestedProjectActionHandler", self.worker)
         self.assertNotIn("'ordax.product.invoke'", self.worker)
         self.assertNotIn("env.DB", self.worker)
 
@@ -70,8 +71,8 @@ class ProductReadonlyWorkerContractTests(unittest.TestCase):
         self.assertNotIn("ORDAX_OPERATOR_TOKEN", self.entry)
 
     def test_product_audit_is_private_not_an_anonymous_worker_route(self):
-        self.assertIn('path === "/v3/product/audit"', self.worker)
-        self.assertIn('"legacy_endpoint_retired"', self.worker)
+        self.assertNotIn('path === "/v3/product/audit"', self.worker)
+        self.assertNotIn('"legacy_endpoint_retired"', self.worker)
         self.assertIn("revoke all on table private.ordax_product_action_audit", self.authority)
 
 
