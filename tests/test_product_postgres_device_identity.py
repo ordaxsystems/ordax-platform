@@ -92,7 +92,11 @@ class ProductPostgresDeviceIdentityTests(unittest.TestCase):
 
     def test_product_business_enrollment_does_not_allocate_durable_objects(self) -> None:
         import tomllib
-        for file_name in ("wrangler.toml", "wrangler.ci.toml"):
+        self.assertFalse(
+            (ROOT / "control-plane/cloudflare/wrangler.ci.toml").exists(),
+            "retired v3-ci Worker config must not reappear",
+        )
+        for file_name in ("wrangler.toml",):
             config_path = ROOT / "control-plane/cloudflare" / file_name
             with config_path.open("rb") as stream:
                 config = tomllib.load(stream)
@@ -105,6 +109,18 @@ class ProductPostgresDeviceIdentityTests(unittest.TestCase):
                     for migration in config.get("migrations", [])
                 )
             )
+        # The live MCP Worker intentionally has a DeviceWake Durable Object,
+        # but it must never receive a second enrollment authority or D1.
+        with (ROOT / "control-plane/cloudflare/wrangler.mcp.toml").open("rb") as stream:
+            canonical = tomllib.load(stream)
+        self.assertFalse(canonical.get("d1_databases", []))
+        self.assertFalse(canonical.get("r2_buckets", []))
+        self.assertFalse(
+            any(
+                "EnrollmentSession" in entry.get("new_sqlite_classes", [])
+                for entry in canonical.get("migrations", [])
+            )
+        )
 
     def test_d1_callsite_ceiling_was_reduced_after_enrollment_cutover(self) -> None:
         import json
