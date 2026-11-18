@@ -95,4 +95,7 @@ jobs:
         run: |
           node --test control-plane/tests/product_mcp_surface_revision.test.mts
           test -f control-plane/cloudflare/src/product_mcp_entry.ts
-          test -f control-plane/cloudflare/migrations/0008_product_device_owner.sql
+          test -f control-plane/cloudflare/wrangler.mcp.toml
+          # D1 migrations are physically gone. Product authority is
+          # PostgreSQL-only; never require an obsolete D1 artifact in CI.
+          test ! -d control-plane/cloudflare/migrations
