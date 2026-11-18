@@ -1,12 +1,8 @@
 name: Deploy ORDAX Control Plane
 
 on:
+  # Retired foundation is not a second production target: manual gate only.
   workflow_dispatch:
-  workflow_run:
-    workflows:
-      - ORDAX Control Plane CI
-    types:
-      - completed
 
 permissions:
   contents: read
@@ -17,13 +13,7 @@ concurrency:
 
 jobs:
   foundation:
-    if: >-
-      (github.event_name == 'workflow_dispatch' &&
-       github.ref == 'refs/heads/main') ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -33,7 +23,7 @@ jobs:
       - name: Checkout exact successful source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Validate canonical Cloudflare production foundation
         id: foundation
@@ -53,15 +43,13 @@ jobs:
       - name: Checkout exact successful source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Record deploy source
         shell: bash
         run: |
           echo "ORDAX_DEPLOY_SOURCE_SHA=$(git rev-parse HEAD)"
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            test "$(git rev-parse HEAD)" = "${{ github.event.workflow_run.head_sha }}"
-          fi
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
 
       - name: Install pinned Worker runtime dependency
         run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false --prefix control-plane/cloudflare
