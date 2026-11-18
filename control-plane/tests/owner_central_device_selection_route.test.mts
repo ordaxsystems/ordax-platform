@@ -23,7 +23,9 @@ const req=(url:string,jwt?:string,method="GET",body?:unknown)=>
 test("Owner selection requires independent rollout gate and signed Owner JWT",async()=>{
   await withIssuer(async()=>{
     let calls=0;
-    const select=async()=>{calls++;return {ok:true,status:"pending" as const};};
+    const select=async()=>{calls++;return {ok:true,status:"pending" as const,
+      device_id:device,challenge_id:challenge,expires_at:new Date(Date.now()+60_000).toISOString(),
+      attested:false,dispatch_authorized:false};};
     const jwt=await token({client_id:null});
     assert.equal((await handleProductOwnerGrantAdmin(req(base,jwt,"POST",{
       client_id:client,challenge_id:challenge,device_id:device,
@@ -68,6 +70,7 @@ test("Owner route only permits exact IDs and one explicit selected challenge",as
       assert.deepEqual(input,{ownerUserId:owner,clientId:client,
         challengeId:challenge,deviceId:device});
       return {ok:true,status:"pending" as const,device_id:device,challenge_id:challenge,
+        expires_at:new Date(Date.now()+60_000).toISOString(),
         attested:false,dispatch_authorized:false};
     };
     const deps={listSelections:list,selectDevice:select};
@@ -94,6 +97,75 @@ test("Owner route only permits exact IDs and one explicit selected challenge",as
     assert.equal(selected.status,200);
     assert.equal((await selected.json()).attested,false);
     assert.equal(selectionCalls,1);
+  });
+});
+
+test("confirmed Owner choice wakes only the selected Runtime after the SQL receipt",async()=>{
+  await withIssuer(async()=>{
+    const jwt=await token({client_id:null});
+    const enabled={...env,CENTRAL_OWNER_SELECTION_ENABLED:"enabled"};
+    const body={client_id:client,challenge_id:challenge,device_id:device};
+    const expires_at=new Date(Date.now()+90_000).toISOString();
+    const order:string[]=[];
+    const tasks:Promise<void>[]=[];
+    const accepted=await handleProductOwnerGrantAdmin(req(base,jwt,"POST",body),enabled,{
+      selectDevice:async()=>{
+        order.push("postgres");
+        return {ok:true,status:"pending" as const,device_id:device,challenge_id:challenge,
+          expires_at,attested:false,dispatch_authorized:false};
+      },
+      signalWake:async(_env,selected,scheduler)=>{
+        order.push("wake");
+        assert.equal(selected,device,"only the SQL-confirmed device is signalled");
+        assert.equal(typeof scheduler,"function");
+        scheduler!(Promise.resolve());
+      },
+      scheduleWake:promise=>tasks.push(promise),
+    });
+    assert.equal(accepted.status,200);
+    assert.deepEqual(order,["postgres","wake"],"signalling follows the committed Owner choice");
+    assert.equal(tasks.length,1,"reuse request-context wake scheduler");
+    assert.deepEqual(await accepted.json(),{
+      ok:true,status:"pending",device_id:device,challenge_id:challenge,
+      expires_at,attested:false,dispatch_authorized:false,
+    });
+    await Promise.all(tasks);
+
+    // Lost advisory signal cannot undo an already committed pending choice,
+    // and it must not retry the selector or claim attestation.
+    let writes=0,wakes=0;
+    const recovered=await handleProductOwnerGrantAdmin(req(base,jwt,"POST",body),enabled,{
+      selectDevice:async()=>{
+        writes++;
+        return {ok:true,status:"pending" as const,device_id:device,challenge_id:challenge,
+          expires_at,attested:false,dispatch_authorized:false};
+      },
+      signalWake:async()=>{wakes++;throw Error("wake transport unavailable");},
+    });
+    assert.equal(recovered.status,200);
+    assert.equal((await recovered.json()).attested,false);
+    assert.equal(writes,1);
+    assert.equal(wakes,1);
+
+    // A denied, stale or inconsistent SQL receipt never signals a device.
+    for(const raw of [
+      {ok:false,error:"owner_central_selection_not_pending"},
+      {ok:true,status:"pending",device_id:"44444444-4444-4444-8444-444444444444",
+        challenge_id:challenge,expires_at,attested:false,dispatch_authorized:false},
+      {ok:true,status:"pending",device_id:device,
+        challenge_id:challenge,expires_at,attested:true,dispatch_authorized:true},
+      {ok:true,status:"pending",device_id:device,
+        challenge_id:challenge,expires_at:"2000-01-01T00:00:00Z",
+        attested:false,dispatch_authorized:false},
+    ]){
+      let notified=0;
+      const response=await handleProductOwnerGrantAdmin(req(base,jwt,"POST",body),enabled,{
+        selectDevice:async()=>raw,
+        signalWake:async()=>{notified++;},
+      });
+      assert.equal(notified,0,"invalid SQL receipt must never wake Runtime");
+      assert.equal(response.status,raw.ok?502:409);
+    }
   });
 });
 
