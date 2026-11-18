@@ -1,6 +1,9 @@
 """Pure regression tests for the canonical public MCP probe classification."""
 import unittest
-from scripts.cloudflare.probe_live_product_mcp import analyze, load_identity
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from unittest.mock import patch
+from scripts.cloudflare.probe_live_product_mcp import analyze, load_identity, main
 
 
 class PublicProbeClassification(unittest.TestCase):
@@ -91,6 +94,17 @@ class PublicProbeClassification(unittest.TestCase):
         p = self.probe(oauth_http=200)
         self.assertEqual(p["oauth_state"], "DISCOVERY_READY")
         self.assertEqual(p["public_surface"], "INCONSISTENT_READINESS")
+
+    def test_public_probe_reports_network_failure_without_crashing_or_claiming_success(self):
+        stdout, stderr = StringIO(), StringIO()
+        with patch("scripts.cloudflare.probe_live_product_mcp.get_json", return_value=(None, None)):
+            with patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": ""}):
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    exit_code = main()
+        self.assertEqual(exit_code, 2)
+        self.assertIn("LIVE_CANONICAL_MCP_SURFACE=FAIL_OR_INCONCLUSIVE", stderr.getvalue())
+        self.assertIn('"public_surface": "INCONCLUSIVE"', stdout.getvalue())
+        self.assertNotIn("LIVE_CANONICAL_MCP_SURFACE=PASS", stdout.getvalue())
 
     def test_network_failure_is_not_reclassified_as_successful_oauth(self):
         responses = self.responses()
