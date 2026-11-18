@@ -33,9 +33,14 @@ test("only a signed Owner can inspect an exact consented client; model device ca
       calls++;
       assert.deepEqual(input,{ownerUserId:owner,clientId:client});
       assert.equal("deviceId" in input,false);
-      return {ok:true,state:"owner_selection_required",eligible_device_count:2,
-        targets:[{device_id:target},{device_id:"33333333-3333-4333-8333-333333333333"}],
-        attested:false,dispatch_authorized:false,owner_choice_performed:false};
+      return {ok:true,client_id:client,state:"owner_selection_required",eligible_device_count:2,
+        targets:[
+          {device_id:target,reported_online:true,runtime_ready:true,token_sha256:"private"},
+          {device_id:"33333333-3333-4333-8333-333333333333",
+            reported_online:false,runtime_ready:true},
+        ],
+        attested:false,dispatch_authorized:false,owner_choice_performed:false,
+        private_owner_identity:owner};
     };
     const absent=await handleProductOwnerGrantAdmin(request(query()),active,{inspectCentralTargets:inspect});
     assert.equal(absent.status,401);
@@ -52,9 +57,54 @@ test("only a signed Owner can inspect an exact consented client; model device ca
     const good=await handleProductOwnerGrantAdmin(request(query(),jwt),active,{inspectCentralTargets:inspect});
     assert.equal(good.status,200);
     assert.equal(calls,1);
-    assert.equal((await good.json()).dispatch_authorized,false);
+    assert.deepEqual(await good.json(),{
+      ok:true,client_id:client,state:"owner_selection_required",eligible_device_count:2,
+      targets:[
+        {device_id:target,reported_online:true,runtime_ready:true},
+        {device_id:"33333333-3333-4333-8333-333333333333",
+          reported_online:false,runtime_ready:true},
+      ],
+      attested:false,dispatch_authorized:false,owner_choice_performed:false,
+    });
   });
 });
+test("Owner target projection rejects wrong client and false readiness, no leaked SQL fields",async()=>{
+  await withIssuer(async()=>{
+    const jwt=await token({client_id:null});
+    const active={...env,CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED:"enabled"};
+    const normal={
+      ok:true,client_id:client,state:"single_granted_target",
+      eligible_device_count:1,targets:[{device_id:target,reported_online:true,runtime_ready:true}],
+      attested:false,dispatch_authorized:false,owner_choice_performed:false,
+    };
+    for(const raw of [
+      {...normal,client_id:"44444444-4444-4444-8444-444444444444"},
+      {...normal,owner_choice_performed:true},
+      {...normal,eligible_device_count:2},
+      {...normal,state:"owner_selection_required"},
+      {...normal,targets:[{device_id:target,reported_online:true,runtime_ready:"true"}]},
+      {...normal,targets:[{device_id:target,reported_online:true,runtime_ready:true},
+        {device_id:target,reported_online:true,runtime_ready:true}],eligible_device_count:2,
+        state:"owner_selection_required"},
+    ]){
+      const res=await handleProductOwnerGrantAdmin(request(query(),jwt),active,{
+        inspectCentralTargets:async()=>raw,
+      });
+      assert.equal(res.status,502);
+      assert.deepEqual(await res.json(),{
+        ok:false,error:"owner_central_targets_response_invalid",
+      });
+    }
+    const sqlError=await handleProductOwnerGrantAdmin(request(query(),jwt),active,{
+      inspectCentralTargets:async()=>({ok:false,error:"internal_sql_token",private:"value"}),
+    });
+    assert.equal(sqlError.status,503);
+    assert.deepEqual(await sqlError.json(),{
+      ok:false,error:"owner_central_response_unavailable",
+    });
+  });
+});
+
 test("an unconsented client error cannot mint authority or dispatch",async()=>{
   await withIssuer(async()=>{
     const r=await handleProductOwnerGrantAdmin(request(query(),await token({client_id:null})),
