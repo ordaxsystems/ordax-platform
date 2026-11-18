@@ -42,6 +42,7 @@ on:
       - "tests/test_canonical_mcp_release.py"
       - ".github/workflows/ordax-mcp-canonical.yml"
       - "tests/test_mcp_candidate_suite_ssot.py"
+      - "scripts/cloudflare/assert_canonical_mcp_bundle.py"
       - "scripts/cloudflare/run_mcp_candidate_tests.sh"
   push:
     branches: [main]
@@ -82,6 +83,7 @@ on:
       - "tests/test_canonical_mcp_release.py"
       - ".github/workflows/ordax-mcp-canonical.yml"
       - "tests/test_mcp_candidate_suite_ssot.py"
+      - "scripts/cloudflare/assert_canonical_mcp_bundle.py"
       - "scripts/cloudflare/run_mcp_candidate_tests.sh"
   workflow_dispatch:
 
@@ -121,28 +123,7 @@ jobs:
         working-directory: control-plane/cloudflare
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.mcp.toml --outdir .mcp-candidate-bundle
       - name: Prove compiled candidate is interactive, attested, client-scoped and legacy-free
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          bundle=Path('control-plane/cloudflare/.mcp-candidate-bundle')
-          scripts=list(bundle.glob('*.js'))
-          assert len(scripts)==1, f'Expected one canonical MCP bundle: {scripts}'
-          code=scripts[0].read_text('utf-8')
-          for forbidden in ['D1Database', 'env.DB.prepare', 'operatorAuthorized(', 'ordax-control-plane-v3']:
-              assert forbidden not in code, f'Legacy authority bundled: {forbidden}'
-          for required in [
-              'trusted_operation_required', 'attested-device-control',
-              'computer-observe', 'interactive-computer-control',
-              'ordax_action_status', 'computer.click', 'computer.type',
-              'ordax-mcp.ordaxsystems.workers.dev', '/v3/product/session',
-              '/v3/product/device/central-session', '/v3/device/transport',
-              '/v3/owner/remote-authority', '/v3/owner/remote-grant-groups',
-          ]:
-              assert required in code, f'Missing trusted/attested contract: {required}'
-          print('ORDAX_CANONICAL_MCP_ATTESTED_INTERACTIVE=PASS')
-          print('ORDAX_MCP_TRUSTED_CLIENT_INGRESS_GUARD=PASS')
-          print('ORDAX_CANONICAL_MCP_PRODUCTION_RELEASE=BLOCKED_UNTIL_E2E')
-          PY
+        run: python scripts/cloudflare/assert_canonical_mcp_bundle.py control-plane/cloudflare/.mcp-candidate-bundle
       - name: Retain the exact verified canonical MCP bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

@@ -84,6 +84,28 @@ class CanonicalMcpCandidateSuiteTests(unittest.TestCase):
                     self.assertIn('"scripts/cloudflare/run_mcp_candidate_tests.sh"', section)
                     self.assertIn('"tests/test_mcp_candidate_suite_ssot.py"', section)
 
+    def test_every_canonical_worker_build_uses_one_bundle_guard_and_never_builds_retired_worker(self):
+        checker = ROOT / "scripts/cloudflare/assert_canonical_mcp_bundle.py"
+        self.assertTrue(checker.is_file())
+        ci = (ROOT / ".github/workflows/control-plane-ci.yml").read_text("utf-8")
+        for path in (
+            ROOT / ".github/workflows/control-plane-ci.yml",
+            ROOT / ".github/workflows/ordax-mcp-canonical.yml",
+            ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml",
+        ):
+            source = path.read_text("utf-8")
+            self.assertIn("deploy --dry-run --config wrangler.mcp.toml", source)
+            self.assertEqual(source.count("python scripts/cloudflare/assert_canonical_mcp_bundle.py"), 1)
+        self.assertNotIn("grep -q 'legacy_mcp_retired'", ci)
+        self.assertNotIn('outdir="$RUNNER_TEMP/ordax-control-plane-worker"', ci)
+        self.assertIn('name: ordax-mcp-ci-worker-${{ github.sha }}', ci)
+        self.assertIn('test -f control-plane/cloudflare/src/product_mcp_entry.ts', ci)
+        for path in (
+            ROOT / ".github/workflows/ordax-mcp-canonical.yml",
+            ROOT / ".github/workflows/ordax-mcp-validation-deploy.yml",
+        ):
+            self.assertIn('"scripts/cloudflare/assert_canonical_mcp_bundle.py"', path.read_text("utf-8"))
+
     def test_validation_release_auto_maintains_existing_worker_and_stays_fail_closed(self):
         source = WORKFLOWS[0].read_text("utf-8")
         self.assertNotIn("inputs.publish_production == true", source)
