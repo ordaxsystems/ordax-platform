@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
-LEGACY=(ROOT/"control-plane/cloudflare/src/index.ts").read_text("utf-8")
+
 MCP=(ROOT/"control-plane/cloudflare/src/product_mcp_entry.ts").read_text("utf-8")
 SELECTOR=(ROOT/"control-plane/cloudflare/src/product_relay_scope.ts").read_text("utf-8")
 GRANT_SQL=(ROOT/"control-plane/supabase/migrations/20261007213500_central_durable_conversation_binding_v1.sql").read_text("utf-8").lower()
@@ -17,18 +17,16 @@ class ProductLinkAwareGrantContractTests(unittest.TestCase):
             "resolveProductGrantAdmin(", "revokeProductGrant(",
             "persistProductGrant(", "recordProductAudit(",
         ):
-            self.assertNotIn(name,LEGACY)
-        self.assertIn('"legacy_product_grants_retired"',LEGACY)
-        self.assertNotIn('return createProductGrant(',LEGACY)
-        self.assertNotIn('return revokeProductGrant(',LEGACY)
+            self.assertNotIn(name,MCP)
+        self.assertFalse((ROOT/"control-plane/cloudflare/src/index.ts").exists())
+        self.assertIn("createAttestedDeviceActionHandler",MCP)
 
     def test_legacy_endpoints_cannot_mint_or_revoke(self):
-        self.assertIn('path.startsWith("/v3/product-grants")', LEGACY)
-        self.assertIn('path === "/v3/product/audit"', LEGACY)
-        self.assertIn('error:"legacy_endpoint_retired"', LEGACY)
-        self.assertIn('410', LEGACY)
-        self.assertNotIn('env.DB', LEGACY)
-        self.assertNotIn('operatorAuthorized', LEGACY)
+        self.assertNotIn("/v3/product-grants", MCP)
+        self.assertNotIn('path === "/v3/product/audit"', MCP)
+        self.assertNotIn("legacy_endpoint_retired", MCP)
+        self.assertNotIn("env.DB", MCP)
+        self.assertNotIn("operatorAuthorized(", MCP)
 
     def test_authority_uses_exact_space_and_oauth_client(self):
         for p in (
