@@ -35,6 +35,7 @@ on:
       - "tests/test_canonical_mcp_release.py"
       - ".github/workflows/ordax-mcp-validation-deploy.yml"
       - "tests/test_mcp_candidate_suite_ssot.py"
+      - "scripts/cloudflare/assert_canonical_mcp_bundle.py"
       - "scripts/cloudflare/run_mcp_candidate_tests.sh"
 
 permissions:
@@ -106,25 +107,7 @@ jobs:
         run: npx --yes wrangler@4.141.0 deploy --dry-run --config wrangler.mcp.toml --outdir .mcp-validation-deploy-bundle
 
       - name: Assert compiled Worker is attested interactive, trusted-client scoped and D1-free
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          scripts=list(Path('control-plane/cloudflare/.mcp-validation-deploy-bundle').glob('*.js'))
-          assert len(scripts)==1, scripts
-          code=scripts[0].read_text('utf-8')
-          for forbidden in ['D1Database','env.DB.prepare','operatorAuthorized(','ordax-control-plane-v3']:
-              assert forbidden not in code, forbidden
-          for required in [
-              'trusted_operation_required','attested-device-control','computer-observe',
-              'interactive-computer-control','ordax_action_status','computer.click','computer.type',
-              'ordax-mcp.ordaxsystems.workers.dev','/v3/product/session','/v3/device/setup',
-              '/v3/product/device/central-session','/v3/device/transport','/v3/owner/remote-authority',
-              '/v3/owner/remote-grant-groups',
-          ]:
-              assert required in code, required
-          print('ORDAX_MCP_ATTESTED_INTERACTIVE_BUNDLE=PASS')
-          print('ORDAX_MCP_TRUSTED_CLIENT_INGRESS_GUARD=PASS')
-          PY
+        run: python scripts/cloudflare/assert_canonical_mcp_bundle.py control-plane/cloudflare/.mcp-validation-deploy-bundle
 
 
   deploy-production:
