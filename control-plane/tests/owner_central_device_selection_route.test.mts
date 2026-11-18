@@ -20,6 +20,49 @@ const req=(url:string,jwt?:string,method="GET",body?:unknown)=>
     ...(body?{"content-type":"application/json"}:{}),
   },...(body?{body:JSON.stringify(body)}:{})});
 
+test("Owner central list projection excludes SQL secrets and rejects inconsistent receipts",async()=>{
+  await withIssuer(async()=>{
+    const jwt=await token({client_id:null});
+    const enabled={...env,CENTRAL_OWNER_SELECTION_ENABLED:"enabled"};
+    const created_at=new Date(Date.now()-1000).toISOString();
+    const expires_at=new Date(Date.now()+60_000).toISOString();
+    const normal=await handleProductOwnerGrantAdmin(req(base+"?client_id="+client,jwt),enabled,{
+      listSelections:async()=>({
+        ok:true,count:1,attested:false,dispatch_authorized:false,
+        pending_selections:[{challenge_id:challenge,created_at,expires_at,
+          session_sha256:"internal-session-hash",owner_user_id:owner}],
+        private_audit:"secret",
+      }),
+    });
+    assert.equal(normal.status,200);
+    assert.deepEqual(await normal.json(),{
+      ok:true,count:1,attested:false,dispatch_authorized:false,
+      pending_selections:[{challenge_id:challenge,created_at,expires_at}],
+    });
+    for(const value of [
+      {ok:true,count:1,pending_selections:[{challenge_id:challenge,created_at,expires_at}],
+        attested:true,dispatch_authorized:false},
+      {ok:true,count:2,pending_selections:[{challenge_id:challenge,created_at,expires_at}],
+        attested:false,dispatch_authorized:false},
+      {ok:true,count:1,pending_selections:[{challenge_id:challenge,created_at:"bad",expires_at}],
+        attested:false,dispatch_authorized:false},
+      {ok:true,count:2,pending_selections:[
+        {challenge_id:challenge,created_at,expires_at},
+        {challenge_id:challenge,created_at,expires_at}],
+        attested:false,dispatch_authorized:false},
+      {ok:false,error:"sql_backend_details",session_sha256:"private"},
+    ]){
+      const response=await handleProductOwnerGrantAdmin(req(base+"?client_id="+client,jwt),enabled,{
+        listSelections:async()=>value,
+      });
+      assert.equal(response.status,value.ok?502:503);
+      const projected=await response.json();
+      assert.equal(JSON.stringify(projected).includes("private"),false);
+      assert.equal(JSON.stringify(projected).includes("session_sha256"),false);
+    }
+  });
+});
+
 test("Owner selection requires independent rollout gate and signed Owner JWT",async()=>{
   await withIssuer(async()=>{
     let calls=0;
@@ -62,7 +105,11 @@ test("Owner route only permits exact IDs and one explicit selected challenge",as
     let listCalls=0,selectionCalls=0;
     const list=async(_env:unknown,input:{ownerUserId:string,clientId:string})=>{
       listCalls++;assert.deepEqual(input,{ownerUserId:owner,clientId:client});
-      return {ok:true,pending_selections:[{challenge_id:challenge}],count:1};
+      return {ok:true,pending_selections:[{
+        challenge_id:challenge,created_at:new Date(Date.now()-1000).toISOString(),
+        expires_at:new Date(Date.now()+60_000).toISOString(),
+        private_session_sha256:"must-never-leak",
+      }],count:1,attested:false,dispatch_authorized:false,owner_user_id:owner};
     };
     const select=async(_env:unknown,input:{
       ownerUserId:string,clientId:string,challengeId:string,deviceId:string})=>{
@@ -112,7 +159,8 @@ test("confirmed Owner choice wakes only the selected Runtime after the SQL recei
       selectDevice:async()=>{
         order.push("postgres");
         return {ok:true,status:"pending" as const,device_id:device,challenge_id:challenge,
-          expires_at,attested:false,dispatch_authorized:false};
+          expires_at,attested:false,dispatch_authorized:false,
+          private_session_sha256:"never-reflect-sql-session-hash"};
       },
       signalWake:async(_env,selected,scheduler)=>{
         order.push("wake");
@@ -186,7 +234,7 @@ test("Owner selection reports missing/stale/ambiguous challenge separately from 
       ["owner_central_client_not_consented",403],
       ["central_device_grant_revoked",403],
       ["owner_auth_ineligible",403],
-      ["unknown_error",403],
+      ["unknown_error",503],
     ] as const;
     let calls=0;
     for(const [error,expectedStatus] of cases){
@@ -197,7 +245,9 @@ test("Owner selection reports missing/stale/ambiguous challenge separately from 
         },
       });
       assert.equal(response.status,expectedStatus,error);
-      assert.deepEqual(await response.json(),{ok:false,error},error);
+      assert.deepEqual(await response.json(),{
+        ok:false,error:error==="unknown_error"?"owner_central_response_unavailable":error,
+      },error);
     }
     assert.equal(calls,cases.length,"no status handling may retry a failed selection");
   });
