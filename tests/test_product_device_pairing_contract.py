@@ -20,12 +20,17 @@ class ProductDevicePairingRetirementTests(unittest.TestCase):
                         "listProductDeviceLinks", "revokeProductDeviceLink"):
             self.assertNotIn(handler, self.worker)
 
-    def test_historical_schema_is_preserved_for_migration_evidence(self):
-        migration = HISTORICAL_MIGRATION.read_text(encoding="utf-8")
-        self.assertIn("ordax_product_device_pairings", migration)
-        self.assertIn("ordax_product_device_links", migration)
-        self.assertIn("secret_sha256", migration)
-        self.assertNotIn("ordax_product_grants", migration)
+    def test_retired_device_pairing_schema_does_not_remain_in_source(self):
+        self.assertFalse(
+            HISTORICAL_MIGRATION.exists(),
+            "D1 pairing migrations must not remain beside the PostgreSQL owner",
+        )
+        canonical_sql = (
+            ROOT / "control-plane/supabase/migrations"
+            / "20261007154000_product_device_identity_v1.sql"
+        ).read_text(encoding="utf-8").lower()
+        self.assertIn("private.ordax_product_device_credentials", canonical_sql)
+        self.assertIn("machine_binding_sha256", canonical_sql)
 
 if __name__ == "__main__":
     unittest.main()
