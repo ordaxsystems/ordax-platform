@@ -577,6 +577,9 @@ export function createAttestedDeviceActionHandler(
         // PostgreSQL rejects new work with no live executor; never advertise
         // a queued request that cannot currently be claimed. Replay receipts
         // for previously accepted effects remain authoritative in the SQL RPC.
+        if (result.error === "product_device_busy") {
+          return json({ ok: false, error: "product_device_busy", action_dispatched: false }, 503);
+        }
         if (result.error === "product_device_offline") {
           return json({ ok: false, error: "product_device_offline", action_dispatched: false }, 503);
         }

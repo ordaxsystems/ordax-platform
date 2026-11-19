@@ -343,3 +343,19 @@ test("offline project executor produces an explicit nonqueued response", async (
     ok: false, error: "product_device_offline", action_dispatched: false,
   });
 });
+
+test("saturated project reports busy instead of fabricating a queued receipt", async () => {
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity, resolveProject,
+    listTargets: async () => catalog(grantGroup("terminal.exec", "write")),
+    enqueue: async () => ({ ok: false, error: "product_device_busy" }),
+  });
+  const response = await handler(
+    actionRequest("terminal.exec", { argv: ["python", "--version"] }),
+    "f".repeat(64),
+  );
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    ok: false, error: "product_device_busy", action_dispatched: false,
+  });
+});

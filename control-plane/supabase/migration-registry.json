@@ -1353,6 +1353,18 @@
         "blob_sha": "db0adfc24124f019c16d4cc8a193badb289cbea5"
       },
       "ledger_name": "product_offline_action_admission_v1"
+    },
+    {
+      "name": "20261119213655_product_capacity_admission_v1",
+      "applied_version": "20261119214223",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261119213655_product_capacity_admission_v1.sql",
+        "blob_sha": "2c29fb7e129d5802850bfe274222753efaab43b7"
+      },
+      "ledger_name": "product_capacity_admission_v1"
     }
   ]
 }
