@@ -1365,6 +1365,18 @@
         "blob_sha": "2c29fb7e129d5802850bfe274222753efaab43b7"
       },
       "ledger_name": "product_capacity_admission_v1"
+    },
+    {
+      "name": "20261119214606_product_admission_active_lease_accounting_v1",
+      "applied_version": "20261119214724",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261119214606_product_admission_active_lease_accounting_v1.sql",
+        "blob_sha": "9b587fcbdfc8ba42b4a943fb14e7ff19ad34e76b"
+      },
+      "ledger_name": "product_admission_active_lease_accounting_v1"
     }
   ]
 }
