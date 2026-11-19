@@ -798,3 +798,21 @@ test("Native read-grant cannot be inherited from Windows observation profile",()
     catalog(grantGroup("ordax-surface-read","ordax.surface.open","write")),
     DEVICE,"ordax.surface.open"),false);
 });
+
+test("offline device is reported immediately without a fabricated queued receipt", async () => {
+  let accepted = 0;
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("device-native-terminal", "computer.terminal_exec", "write")),
+    enqueue: async () => {
+      accepted++;
+      return { ok: false, error: "product_device_offline" };
+    },
+  });
+  const response = await handler(actionRequest("computer.terminal_exec", { argv: ["cmd.exe", "/c", "echo", "hi"] }), "a".repeat(64));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    ok: false, error: "product_device_offline", action_dispatched: false,
+  });
+  assert.equal(accepted, 1);
+});
