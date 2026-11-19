@@ -1188,6 +1188,21 @@ export async function recordProductPresence(
   });
 }
 
+/** Capacity reported by the authenticated Device heartbeat, never by MCP clients. */
+export async function recordProductCapacity(
+  env: ProductPostgresEnv,
+  input: { deviceId: string; maxConcurrentJobs: number },
+): Promise<boolean> {
+  if (!Number.isInteger(input.maxConcurrentJobs)
+      || input.maxConcurrentJobs < 1 || input.maxConcurrentJobs > 32) {
+    throw new ProductPostgresError("product_device_capacity_invalid", 400);
+  }
+  return callRpc<boolean>(env, "ordax_record_product_capacity_v1", {
+    p_device_id: input.deviceId,
+    p_max_concurrent_jobs: input.maxConcurrentJobs,
+  });
+}
+
 export function productMcpUsageMeterEnabled(env: ProductPostgresEnv): boolean {
   return env.MCP_USAGE_METER_MODE === "shadow"
     && typeof env.MCP_USAGE_FINGERPRINT_KEY === "string"
