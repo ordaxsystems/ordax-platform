@@ -330,3 +330,16 @@ test("Blender project MCP refuses model-selected slug and foreign Space", async 
   assert.equal((await handler(actionRequest(action, {}, { spaceId: REQUEST }))).status, 409);
   assert.equal(enqueued, 0);
 });
+
+test("offline project executor produces an explicit nonqueued response", async () => {
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity, resolveProject,
+    listTargets: async () => catalog(grantGroup("terminal.exec", "write")),
+    enqueue: async () => ({ ok: false, error: "product_device_offline" }),
+  });
+  const response = await handler(actionRequest("terminal.exec", { argv: ["python", "--version"] }), "a".repeat(64));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    ok: false, error: "product_device_offline", action_dispatched: false,
+  });
+});
