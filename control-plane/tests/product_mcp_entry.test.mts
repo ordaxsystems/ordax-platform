@@ -658,10 +658,16 @@ test("advertised MCP projection includes device terminal and supervised processe
     "computer_terminal_exec",
     "computer_process_start", "computer_process_status", "computer_process_list",
     "computer_process_logs", "computer_process_write_stdin", "computer_process_stop",
+    "blender_status", "blender_scene_snapshot", "blender_object_inspect",
+    "blender_modeling_schema", "blender_start", "blender_transform",
+    "blender_create_primitive", "blender_rig_create", "blender_apply_material", "blender_save",
   ]) {
     assert.equal(names.has(name), true, name);
   }
   assert.equal(names.has("project_create"), false);
+  assert.equal(names.has("blender_run_script"), false);
+  const rig = payload.result.tools.find((tool: { name: string }) => tool.name === "blender_rig_create");
+  assert.equal(rig?.inputSchema.properties.project.pattern, "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$");
 });
 
 test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {

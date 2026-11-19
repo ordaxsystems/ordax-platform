@@ -24,6 +24,7 @@ import {
   resolveOwnerProjectScope,
 } from "./product_owner_project_scope.ts";
 import { productCapabilityAccessMode } from "./product_owner_grant_profiles.ts";
+import { PROJECT_BLENDER_ACTIONS } from "./product_action_scope.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import type { AttestedMcpDevice } from "./product_mcp_attested_device_action.ts";
@@ -54,6 +55,7 @@ const PROCESS_PROFILE = "project-native-process";
 const PROJECT_NATIVE_ACTIONS = new Set(["terminal.exec", "process.start", "process.status",
   "process.list", "process.logs", "process.write_stdin", "process.stop"]);
 function profileForAction(action: string): string | null {
+  if (PROJECT_BLENDER_ACTIONS.has(action)) return "project-blender-control";
   if (action === "terminal.exec") return TERMINAL_PROFILE;
   return PROJECT_NATIVE_ACTIONS.has(action) ? PROCESS_PROFILE : null;
 }
@@ -113,7 +115,109 @@ function validArgv(value: unknown, limit: number): boolean {
   return Array.isArray(value) && value.length >= 1 && value.length <= limit
     && value.every((v) => boundedString(v, 8192) && !v.includes("\x00"));
 }
+
+/** Product exposes only typed Blender operations, never arbitrary bpy/Python. */
+function finiteNumber(value: unknown, min: number, max: number): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+}
+function blenderVector(value: unknown, min = -100000, max = 100000): value is number[] {
+  return Array.isArray(value) && value.length === 3 && value.every(v => finiteNumber(v, min, max));
+}
+function blenderName(value: unknown, max = 127): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/u.test(value);
+}
+function blenderSelector(value: Json): boolean {
+  const name = value.object_name, id = value.ordax_object_id;
+  return (name === undefined && blenderName(id)) || (id === undefined && blenderName(name));
+}
+function optionalTimeout(value: Json): boolean {
+  return value.timeout_seconds === undefined || finiteNumber(value.timeout_seconds, 1, 300);
+}
+function rigBoneName(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z][A-Za-z0-9_. -]{0,62}$/.test(value.trim());
+}
+function validRigBones(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 64) return false;
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (!isRecord(raw) || !keysOnly(raw, ["name", "head", "tail", "parent"])
+        || !rigBoneName(raw.name) || !blenderVector(raw.head, -10000, 10000)
+        || !blenderVector(raw.tail, -10000, 10000)) return false;
+    const name = raw.name.trim();
+    if (seen.has(name) || (raw.parent !== undefined
+        && (!rigBoneName(raw.parent) || !seen.has(raw.parent.trim())))) return false;
+    const head = raw.head as number[], tail = raw.tail as number[];
+    if (Math.hypot(head[0] - tail[0], head[1] - tail[1], head[2] - tail[2]) < 0.0001) return false;
+    seen.add(name);
+  }
+  return true;
+}
+export function validAttestedBlenderActionArguments(action: string, value: unknown): value is Json {
+  if (!PROJECT_BLENDER_ACTIONS.has(action) || !isRecord(value) || !optionalTimeout(value)) return false;
+  if (action === "blender.live_status" || action === "blender.live_modeling_schema") {
+    return Object.keys(value).length === 0;
+  }
+  if (action === "blender.live_scene_snapshot") {
+    return keysOnly(value, ["max_objects", "object_names", "timeout_seconds"])
+      && (value.max_objects === undefined || boundedInteger(value.max_objects, 1, 500))
+      && (value.object_names === undefined || (Array.isArray(value.object_names)
+        && value.object_names.length <= 500 && value.object_names.every(x => blenderName(x))));
+  }
+  if (action === "blender.live_object_inspect") {
+    return keysOnly(value, ["object_name", "ordax_object_id", "timeout_seconds"])
+      && blenderSelector(value);
+  }
+  if (action === "blender.live_start") {
+    return keysOnly(value, ["wait_seconds", "timeout_seconds", "pid", "adopt_blank"])
+      && (value.wait_seconds === undefined || finiteNumber(value.wait_seconds, 1, 120))
+      && (value.pid === undefined || boundedInteger(value.pid, 1, 2147483647))
+      && (value.adopt_blank === undefined || typeof value.adopt_blank === "boolean");
+  }
+  if (action === "blender.live_object_transform") {
+    return keysOnly(value, ["object_name", "ordax_object_id", "location", "rotation_euler", "scale", "dimensions", "timeout_seconds"])
+      && blenderSelector(value)
+      && (value.location === undefined || blenderVector(value.location))
+      && (value.rotation_euler === undefined || blenderVector(value.rotation_euler))
+      && (value.scale === undefined || blenderVector(value.scale, 0.00001, 1000))
+      && (value.dimensions === undefined || blenderVector(value.dimensions, 0.00001, 100000))
+      && ["location", "rotation_euler", "scale", "dimensions"].some(key => value[key] !== undefined);
+  }
+  if (action === "blender.live_create_primitive") {
+    return keysOnly(value, ["name", "primitive", "location", "size", "radius", "depth", "segments", "timeout_seconds"])
+      && blenderName(value.name) && ["cube", "sphere", "cylinder"].includes(value.primitive as string)
+      && (value.location === undefined || blenderVector(value.location))
+      && (value.size === undefined || finiteNumber(value.size, 0.0001, 10000))
+      && (value.radius === undefined || finiteNumber(value.radius, 0.0001, 10000))
+      && (value.depth === undefined || finiteNumber(value.depth, 0.0001, 10000))
+      && (value.segments === undefined || boundedInteger(value.segments, 8, 64));
+  }
+  if (action === "blender.live_rig_create") {
+    return keysOnly(value, ["name", "bones", "location", "timeout_seconds"])
+      && rigBoneName(value.name) && validRigBones(value.bones)
+      && (value.location === undefined || blenderVector(value.location, -10000, 10000));
+  }
+  if (action === "blender.live_material_apply") {
+    return keysOnly(value, ["object_name", "ordax_object_id", "material_name", "base_color", "roughness", "metallic", "transmission", "alpha", "ior", "surface_render_method", "transparency_overlap", "timeout_seconds"])
+      && blenderSelector(value) && blenderName(value.material_name)
+      && (value.base_color === undefined || (Array.isArray(value.base_color)
+        && [3, 4].includes(value.base_color.length) && value.base_color.every(v => finiteNumber(v, 0, 1))))
+      && (value.roughness === undefined || finiteNumber(value.roughness, 0, 1))
+      && (value.metallic === undefined || finiteNumber(value.metallic, 0, 1))
+      && (value.transmission === undefined || finiteNumber(value.transmission, 0, 1))
+      && (value.alpha === undefined || finiteNumber(value.alpha, 0, 1))
+      && (value.ior === undefined || finiteNumber(value.ior, 1, 3))
+      && (value.surface_render_method === undefined || blenderName(value.surface_render_method, 64))
+      && (value.transparency_overlap === undefined || typeof value.transparency_overlap === "boolean");
+  }
+  if (action === "blender.live_save") {
+    return keysOnly(value, ["target_path", "timeout_seconds"])
+      && (value.target_path === undefined || boundedString(value.target_path, 4096));
+  }
+  return false;
+}
+
 export function validAttestedProjectActionArguments(action: string, value: unknown): value is Json {
+  if (PROJECT_BLENDER_ACTIONS.has(action)) return validAttestedBlenderActionArguments(action, value);
   if (!PROJECT_NATIVE_ACTIONS.has(action) || !isRecord(value)) return false;
   if (action === "terminal.exec") {
     if (!keysOnly(value, ["argv", "command", "shell", "cwd", "timeout_seconds", "env"])
@@ -193,7 +297,8 @@ export function catalogAllowsAttestedProjectAction(
 ): boolean {
   if (!isRecord(catalog) || catalog.ok !== true || !Array.isArray(catalog.targets)
     || catalog.targets.length < 1 || catalog.targets.length > 128
-    || !isCanonicalUuid(trustedDeviceId) || !PROJECT_NATIVE_ACTIONS.has(action)) return false;
+    || !isCanonicalUuid(trustedDeviceId)
+    || (!PROJECT_NATIVE_ACTIONS.has(action) && !PROJECT_BLENDER_ACTIONS.has(action))) return false;
 
   const accessMode = productCapabilityAccessMode(action);
   const ids = new Set<string>();

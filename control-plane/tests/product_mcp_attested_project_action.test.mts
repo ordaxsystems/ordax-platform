@@ -259,3 +259,74 @@ test("attested project action forwards the Worker wake scheduler without alterin
   });
   assert.equal((await noContext(actionRequest("terminal.exec", { argv: ["node", "--version"] }))).status, 202);
 });
+
+
+test("Blender Product MCP keeps typed rigging within canonical Project authority", async () => {
+  const bones = [
+    { name: "Root", head: [0, 0, 0], tail: [0, 0, 1] },
+    { name: "Spine", head: [0, 0, 1], tail: [0, 0, 2], parent: "Root" },
+  ];
+  assert.equal(validAttestedProjectActionArguments("blender.live_rig_create", {
+    name: "Rig", bones, location: [0, 0, 0],
+  }), true);
+  for (const value of [
+    { name: "Rig", bones: [], },
+    { name: "Rig", bones, script: "import os" },
+    { name: "Rig", bones: [{ name: "Broken", head: [0, 0, 0], tail: [0, 0, 0] }] },
+    { name: "Rig", bones: [{ ...bones[0], parent: "Spine" }, bones[1]] },
+    { name: "Rig", bones: [bones[0], { ...bones[1], name: "Root" }] },
+    { name: "Rig", bones, location: [Number.NaN, 0, 0] },
+  ]) {
+    assert.equal(validAttestedProjectActionArguments("blender.live_rig_create", value), false);
+  }
+  assert.equal(validAttestedProjectActionArguments("blender.live_run_script", { script_path: "unsafe.py" }), false);
+  assert.equal(validAttestedProjectActionArguments("blender.live_save", { target_path: "scene.blend" }), true);
+  assert.equal(validAttestedProjectActionArguments("blender.live_start", { adopt_blank: true }), true);
+
+  const allowed = grantGroup("blender.live_rig_create", "write", { profile: "project-blender-control" });
+  assert.equal(catalogAllowsAttestedProjectAction(catalog(allowed), DEVICE, SCOPE, "blender.live_rig_create"), true);
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("blender.live_rig_create", "read", { profile: "project-blender-control" })),
+    DEVICE, SCOPE, "blender.live_rig_create"), false);
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("blender.live_rig_create", "write", { profile: "project-native-terminal" })),
+    DEVICE, SCOPE, "blender.live_rig_create"), false);
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("blender.live_rig_create", "write", { profile: "project-blender-control", projectId: REQUEST })),
+    DEVICE, SCOPE, "blender.live_rig_create"), false);
+
+  let accepted: any = null;
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity, resolveProject,
+    listTargets: async () => catalog(allowed),
+    enqueue: async (_env, body) => {
+      accepted = body;
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => OPERATION,
+  });
+  const response = await handler(actionRequest("blender.live_rig_create", { name: "Rig", bones }));
+  assert.equal(response.status, 202);
+  assert.equal(accepted.capability, "blender.live_rig_create");
+  assert.equal(accepted.accessMode, "write");
+  assert.equal(accepted.projectId, PROJECT);
+  assert.equal(accepted.spaceId, SPACE);
+  assert.deepEqual(accepted.payload, {
+    name: "Rig", bones,
+    _ordax_project_scope: { project_id: PROJECT, repository_full_name: REPOSITORY },
+  });
+  assert.equal(accepted.idempotencyKey, "mcp-project-write-" + OPERATION);
+});
+
+test("Blender project MCP refuses model-selected slug and foreign Space", async () => {
+  let enqueued = 0;
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity, resolveProject,
+    listTargets: async () => catalog(grantGroup("blender.live_status", "read", { profile: "project-blender-control" })),
+    enqueue: async () => { enqueued++; throw new Error("must not enqueue"); },
+  });
+  const action = "blender.live_status";
+  assert.equal((await handler(actionRequest(action, {}, { project: "local-scene" }))).status, 400);
+  assert.equal((await handler(actionRequest(action, {}, { spaceId: REQUEST }))).status, 409);
+  assert.equal(enqueued, 0);
+});
