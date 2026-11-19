@@ -816,3 +816,19 @@ test("offline device is reported immediately without a fabricated queued receipt
   });
   assert.equal(accepted, 1);
 });
+
+test("saturated device reports busy immediately without creating a pending receipt", async () => {
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("device-native-terminal", "computer.terminal_exec", "write")),
+    enqueue: async () => ({ ok: false, error: "product_device_busy" }),
+  });
+  const response = await handler(
+    actionRequest("computer.terminal_exec", { argv: ["cmd.exe", "/c", "echo", "hi"] }),
+    "f".repeat(64),
+  );
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    ok: false, error: "product_device_busy", action_dispatched: false,
+  });
+});
