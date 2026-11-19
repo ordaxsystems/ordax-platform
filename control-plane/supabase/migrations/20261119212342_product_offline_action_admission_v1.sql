@@ -127,7 +127,7 @@ begin
     from public.ordax_device_presence p
    where p.device_id = p_device_id;
 
-  if not pg_catalog.coalesce(v_device_online, false) then
+  if not coalesce(v_device_online, false) then
     insert into private.ordax_product_action_audit(
       owner_user_id, space_id, project_id, device_id, grant_id,
       client_kind, client_id, capability, access_mode, phase, decision, reason
