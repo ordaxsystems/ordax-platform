@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   handleProductOwnerGrantAdmin,PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH,
+  PRODUCT_OWNER_CENTRAL_DEV_TARGET_PATH,
 } from "../cloudflare/src/product_owner_grant_admin.ts";
 import {
   openCentralSessionFromMcp,
@@ -373,4 +374,92 @@ test("MCP Owner-choice prompt remains non-dispatched and never leaks session cor
       "the client should render an Owner action-required reply, not an INVALID_ARGUMENT");
   }
   assert.equal(calls,2);
+});
+
+
+test("Owner DEV preferred target requires first-party JWT and strict explicit selection",async()=>{
+  await withIssuer(async()=>{
+    const url="https://mcp.ordax.com.br"+PRODUCT_OWNER_CENTRAL_DEV_TARGET_PATH;
+    const jwt=await token({client_id:null});
+    const delegated=await token();
+    const enabled={...env,CENTRAL_OWNER_SELECTION_ENABLED:"enabled"};
+    let reads=0,writes=0;
+    const deps={
+      getDevTarget:async(_env:unknown,input:{ownerUserId:string,clientId:string})=>{
+        reads++;
+        assert.deepEqual(input,{ownerUserId:owner,clientId:client});
+        return {ok:true,state:"preferred" as const,device_id:device,
+          private_metadata:"never disclose"};
+      },
+      setDevTarget:async(_env:unknown,input:{ownerUserId:string,clientId:string,deviceId:string|null})=>{
+        writes++;
+        assert.deepEqual(input,{ownerUserId:owner,clientId:client,deviceId:device});
+        return {ok:true,state:"preferred" as const,device_id:device,
+          attested:false,dispatch_authorized:false,internal_grant:"private"};
+      },
+    };
+    assert.equal((await handleProductOwnerGrantAdmin(req(url+"?client_id="+client,jwt),
+      env,deps)).status,404,"same existing Owner selection rollout gate");
+    assert.equal((await handleProductOwnerGrantAdmin(req(url+"?client_id="+client,jwt),
+      enabled,deps)).status,200);
+    assert.deepEqual(await (await handleProductOwnerGrantAdmin(
+      req(url+"?client_id="+client,jwt),enabled,deps)).json(),{
+        ok:true,state:"preferred",device_id:device,
+      },"SQL metadata is never returned");
+    assert.equal(reads,2);
+    const good=req(url,jwt,"PUT",{client_id:client,device_id:device});
+    const response=await handleProductOwnerGrantAdmin(good,enabled,deps);
+    assert.equal(response.status,200);
+    assert.deepEqual(await response.json(),{
+      ok:true,state:"preferred",device_id:device,
+      attested:false,dispatch_authorized:false,
+    });
+    assert.equal(writes,1);
+    for (const bad of [
+      {client_id:client,device_id:device,force:true},
+      {client_id:client},
+      {client_id:"wrong",device_id:device},
+      {client_id:client,device_id:"bad"},
+    ]) {
+      const denied=await handleProductOwnerGrantAdmin(req(url,jwt,"PUT",bad),enabled,deps);
+      assert.equal(denied.status,400);
+    }
+    assert.equal((await handleProductOwnerGrantAdmin(
+      req(url+"?client_id="+client+"&extra=1",jwt),enabled,deps)).status,400);
+    assert.equal((await handleProductOwnerGrantAdmin(
+      req(url,delegated,"PUT",{client_id:client,device_id:device}),enabled,deps)).status,403);
+    assert.equal((await handleProductOwnerGrantAdmin(
+      req(url,undefined,"PUT",{client_id:client,device_id:device}),enabled,deps)).status,401);
+    assert.equal(writes,1,"no invalid/delegated call reaches the SQL preference");
+  });
+});
+
+test("Owner can clear DEV target without creating or revoking an action grant",async()=>{
+  await withIssuer(async()=>{
+    const url="https://mcp.ordax.com.br"+PRODUCT_OWNER_CENTRAL_DEV_TARGET_PATH;
+    const jwt=await token({client_id:null});
+    const enabled={...env,CENTRAL_OWNER_SELECTION_ENABLED:"enabled"};
+    let called=0;
+    const response=await handleProductOwnerGrantAdmin(
+      req(url,jwt,"PUT",{client_id:client,device_id:null}),enabled,{
+        setDevTarget:async(_env,input)=>{
+          called++;
+          assert.equal(input.ownerUserId,owner);
+          assert.equal(input.clientId,client);
+          assert.equal(input.deviceId,null);
+          return {ok:true,state:"cleared",device_id:null,attested:false,dispatch_authorized:false};
+        },
+      });
+    assert.equal(response.status,200);
+    assert.equal(called,1);
+    assert.deepEqual(await response.json(),{
+      ok:true,state:"cleared",device_id:null,attested:false,dispatch_authorized:false,
+    });
+    const absent=await handleProductOwnerGrantAdmin(
+      req(url+"?client_id="+client,jwt),enabled,{
+        getDevTarget:async()=>({ok:true,state:"none",device_id:null}),
+      });
+    assert.equal(absent.status,200);
+    assert.deepEqual(await absent.json(),{ok:true,state:"none",device_id:null});
+  });
 });

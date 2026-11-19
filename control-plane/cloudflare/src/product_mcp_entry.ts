@@ -54,6 +54,7 @@ import {
   PRODUCT_OWNER_REMOTE_GRANT_GROUPS_PATH,
   PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH,
   PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH,
+  PRODUCT_OWNER_CENTRAL_DEV_TARGET_PATH,
 } from "./product_owner_grant_admin.ts";
 import {
   handleProductOwnerProjectScope,
@@ -102,6 +103,7 @@ export function isProductTrustedClientPath(pathname: string): boolean {
     || pathname === PRODUCT_OWNER_GITHUB_REPOSITORY_CANDIDATES_PATH
     || pathname === PRODUCT_OWNER_GITHUB_REPOSITORY_SELECTIONS_PATH
     || pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
+    || pathname === PRODUCT_OWNER_CENTRAL_DEV_TARGET_PATH
     || pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
     || pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
     || pathname === PRODUCT_OWNER_MCP_DEVICES_PATH
@@ -450,6 +452,7 @@ export function createCanonicalProductMcpGateway(
       return handleProductOwnerGithubAuthorization(request, env);
     }
     if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
+        || url.pathname === PRODUCT_OWNER_CENTRAL_DEV_TARGET_PATH
         || url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
         || url.pathname === PRODUCT_OWNER_REMOTE_AUTHORITY_PATH
         || url.pathname === PRODUCT_OWNER_MCP_DEVICES_PATH

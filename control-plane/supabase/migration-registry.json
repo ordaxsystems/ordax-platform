@@ -1305,6 +1305,18 @@
         "blob_sha": "4e4ea16b8d220109c44c9ea28e9a7af1cfb43006"
       },
       "ledger_name": "product_queued_revocation_terminal_v1"
+    },
+    {
+      "name": "20261119070000_owner_dev_persistent_target_v1",
+      "applied_version": "20261119041638",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261119070000_owner_dev_persistent_target_v1.sql",
+        "blob_sha": "a1410e9f59343e01c9ae47d2e041e46449c3999b"
+      },
+      "ledger_name": "owner_dev_persistent_target_v1"
     }
   ]
 }
