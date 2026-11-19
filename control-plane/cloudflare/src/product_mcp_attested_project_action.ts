@@ -441,6 +441,12 @@ export function createAttestedProjectActionHandler(
         if (result.error === "product_grant_not_resolved" || result.error === "product_owner_auth_ineligible") {
           return grantRequired(body.action);
         }
+        // PostgreSQL rejects new work with no live executor; never advertise
+        // a queued request that cannot currently be claimed. Replay receipts
+        // for previously accepted effects remain authoritative in the SQL RPC.
+        if (result.error === "product_device_offline") {
+          return json({ ok: false, error: "product_device_offline", action_dispatched: false }, 503);
+        }
         if (result.error === "idempotency_conflict") return json({ ok: false, error: "idempotency_conflict" }, 409);
         return json({ ok: false, error: "product_action_unavailable" }, 503);
       }
