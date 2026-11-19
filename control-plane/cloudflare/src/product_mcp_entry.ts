@@ -190,6 +190,12 @@ export const ATTESTED_PROJECT_NATIVE_TOOLS: ReadonlySet<string> = new Set([
   "terminal_exec", "process_start", "process_status", "process_list",
   "process_logs", "process_write_stdin", "process_stop",
 ]);
+const ATTESTED_PROJECT_BLENDER_TOOLS: ReadonlySet<string> = new Set([
+  "blender_status", "blender_scene_snapshot", "blender_object_inspect",
+  "blender_modeling_schema", "blender_start", "blender_transform",
+  "blender_create_primitive", "blender_rig_create", "blender_apply_material",
+  "blender_save",
+]);
 const ATTESTED_REPOSITORY_CATALOG_TOOLS: ReadonlySet<string> = new Set(["repository_catalog"]);
 const ATTESTED_PROJECT_CONTINUITY_TOOLS: ReadonlySet<string> = new Set([
   "project_briefing", "continuity_state", "continuity_update", "handoff_create", "handoff_get",
@@ -201,6 +207,7 @@ export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...PRODUCT_MCP_CORE_READ_TOOLS,
   ...ATTESTED_DEVICE_ACTION_TOOLS,
   ...ATTESTED_PROJECT_NATIVE_TOOLS,
+  ...ATTESTED_PROJECT_BLENDER_TOOLS,
   ...ATTESTED_SPECIAL_TOOLS,
 ]);
 type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction" | "recordUsage" | "usageFingerprintKey">;
@@ -539,7 +546,7 @@ export function createCanonicalProductMcpGateway(
         };
       } else if (toolName && allowedTools.has(toolName)
         && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName) || ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
-          || ATTESTED_SPECIAL_TOOLS.has(toolName))) {
+          || ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) || ATTESTED_SPECIAL_TOOLS.has(toolName))) {
         let trusted: AttestedMcpDevice | null = null;
         let pending = false;
         let trustFailure: string | null = null;
@@ -576,7 +583,7 @@ export function createCanonicalProductMcpGateway(
                   ...(trustFailure === "central_session_owner_selection_required" && ownerChallengeId
                     ? { challenge_id: ownerChallengeId, action_dispatched: false } : {}),
                 }, 409)
-              : ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
+              : (ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName) || ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName))
               ? createAttestedProjectActionHandler(env, trusted, wakeDependencies)
               : ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)
                 ? createAttestedProjectContinuityHandler(env, trusted, wakeDependencies)

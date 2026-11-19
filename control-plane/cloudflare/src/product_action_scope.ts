@@ -22,6 +22,23 @@ export const PROJECT_BROWSER_ACTIONS = new Set<string>([
   "browser.type",
 ]);
 
+/**
+ * Blender mutations are always tied to the same attested Project Catalog link
+ * as native terminal actions. This is one capability list, not a new MCP.
+ */
+export const PROJECT_BLENDER_ACTIONS = new Set<string>([
+  "blender.live_status",
+  "blender.live_scene_snapshot",
+  "blender.live_object_inspect",
+  "blender.live_modeling_schema",
+  "blender.live_start",
+  "blender.live_object_transform",
+  "blender.live_create_primitive",
+  "blender.live_rig_create",
+  "blender.live_material_apply",
+  "blender.live_save",
+]);
+
 export const PROJECT_CONTINUITY_ACTIONS = new Set<string>([
   "agent.project_briefing", "continuity.get", "continuity.update", "handoff.create", "handoff.get",
 ]);

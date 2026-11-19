@@ -4,6 +4,7 @@ import {
   OWNER_DEVICE_COMPUTER_GRANT_PROFILES,
   NATIVE_SURFACE_DEVICE_ACTIONS,
   PROJECT_BROWSER_ACTIONS,
+  PROJECT_BLENDER_ACTIONS,
   PROJECT_CONTINUITY_ACTIONS,
   REPOSITORY_CATALOG_DEVICE_ACTIONS,
 } from "./product_action_scope.ts";
@@ -23,6 +24,8 @@ const WRITE_ACTIONS = new Set<string>([
   "computer.terminal_exec", "terminal.exec", "process.start", "process.write_stdin", "process.stop",
   "computer.process_start", "computer.process_write_stdin", "computer.process_stop",
   "continuity.update", "handoff.create", "ordax.surface.open",
+  "blender.live_start", "blender.live_object_transform", "blender.live_create_primitive",
+  "blender.live_rig_create", "blender.live_material_apply", "blender.live_save",
 ]);
 
 export function productCapabilityAccessMode(capability: string): "read" | "write" {
@@ -65,6 +68,7 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
     "computer.process_write_stdin",
     "computer.process_stop",
   ]),
+  "project-blender-control": profile("project", PROJECT_BLENDER_ACTIONS),
   "project-native-terminal": profile("project", ["terminal.exec"]),
   "project-native-process": profile("project", [
     "process.start", "process.status", "process.list", "process.logs",

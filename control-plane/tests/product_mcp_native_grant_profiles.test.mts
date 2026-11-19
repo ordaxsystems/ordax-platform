@@ -59,3 +59,18 @@ test("OrdaX Native grants are not Windows Computer Control grants",()=>{
   }
   assert.equal(productCapabilityAccessMode("ordax.surface.open"),"write");
 });
+
+test("Blender Owner profile is project-scoped, typed, and isolated from Computer Control", () => {
+  const blender = ownerMcpGrantProfile("project-blender-control");
+  assert.equal(blender?.scope, "project");
+  const actions = new Map(blender?.capabilities.map(x => [x.capability, x.accessMode]));
+  assert.equal(actions.size, 10);
+  assert.equal(actions.get("blender.live_rig_create"), "write");
+  assert.equal(actions.get("blender.live_status"), "read");
+  assert.equal(actions.get("blender.live_save"), "write");
+  assert.equal(actions.has("blender.live_run_script"), false);
+  assert.equal(ownerMcpGrantProfile("full-computer-control")?.capabilities.some(
+    x => x.capability.startsWith("blender.")), false);
+  assert.equal(productCapabilityAccessMode("blender.live_scene_snapshot"), "read");
+  assert.equal(productCapabilityAccessMode("blender.live_rig_create"), "write");
+});

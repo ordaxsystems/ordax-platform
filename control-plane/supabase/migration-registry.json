@@ -1317,6 +1317,18 @@
         "blob_sha": "a1410e9f59343e01c9ae47d2e041e46449c3999b"
       },
       "ledger_name": "owner_dev_persistent_target_v1"
+    },
+    {
+      "name": "20261119205000_blender_project_binding_capability_ceiling_v1",
+      "applied_version": "20261119205641",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261119205000_blender_project_binding_capability_ceiling_v1.sql",
+        "blob_sha": "8b55ad31365564764af5bd4fda59f90ad1efbfef"
+      },
+      "ledger_name": "blender_project_binding_capability_ceiling_v1"
     }
   ]
 }

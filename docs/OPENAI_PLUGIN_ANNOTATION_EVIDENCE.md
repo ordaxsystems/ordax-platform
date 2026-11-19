@@ -105,6 +105,7 @@ This document is reviewer-facing evidence for the OpenAI plugin submission. The 
 | `blender_start` | false | false | false | Creates additive state or starts/adopts a local capability without deleting or overwriting existing user data by default. |
 | `blender_transform` | false | true | false | Can overwrite, patch, move, remove, save, or otherwise modify existing project/Blender state, so it is treated as potentially destructive. |
 | `blender_create_primitive` | false | false | false | Creates additive state or starts/adopts a local capability without deleting or overwriting existing user data by default. |
+| `blender_rig_create` | false | false | false | Creates a new armature with validated bones only in the Owner-authorized canonical Blender project; rejects duplicate names, arbitrary scripts and foreign project scope. |
 | `blender_apply_material` | false | true | false | Can overwrite, patch, move, remove, save, or otherwise modify existing project/Blender state, so it is treated as potentially destructive. |
 | `blender_save` | false | true | false | Can overwrite, patch, move, remove, save, or otherwise modify existing project/Blender state, so it is treated as potentially destructive. |
 
