@@ -299,6 +299,9 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_transfer_commit", "computer_transfer_abort",
     "computer_text_write", "computer_text_patch",
     "computer_directory_create", "computer_path_move", "computer_path_remove",
+    "blender_status", "blender_scene_snapshot", "blender_object_inspect",
+    "blender_modeling_schema", "blender_start", "blender_transform",
+    "blender_create_primitive", "blender_rig_create", "blender_apply_material", "blender_save",
   ]);
   const byName = new Map(json.result.tools.map((tool: any) => [tool.name, tool]));
   for (const name of ["repository_catalog", "handoff_get", "handoff_create",
