@@ -1377,6 +1377,18 @@
         "blob_sha": "9b587fcbdfc8ba42b4a943fb14e7ff19ad34e76b"
       },
       "ledger_name": "product_admission_active_lease_accounting_v1"
+    },
+    {
+      "name": "20261119215627_product_admission_reclaim_revoked_v1",
+      "applied_version": "20261119215835",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261119215627_product_admission_reclaim_revoked_v1.sql",
+        "blob_sha": "4800a0aea895b99f6820835e719fc51e348b3968"
+      },
+      "ledger_name": "product_admission_reclaim_revoked_v1"
     }
   ]
 }
