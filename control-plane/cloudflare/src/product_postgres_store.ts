@@ -423,6 +423,10 @@ const RPC_SPECS = {
     keys: ["p_owner_user_id", "p_client_kind", "p_client_id"],
     casts: ["uuid", "text", "text"],
   },
+  ordax_record_product_capacity_v1: {
+    keys: ["p_device_id", "p_max_concurrent_jobs"],
+    casts: ["uuid", "integer"],
+  },
   ordax_record_product_presence_v1: {
     keys: [
       "p_device_id",
