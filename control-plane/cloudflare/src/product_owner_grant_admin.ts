@@ -16,6 +16,8 @@ import {
   inspectOwnerCentralSessionTargets,
   listOwnerCentralSelections,
   selectOwnerCentralDevice,
+  getOwnerCentralDevTarget,
+  setOwnerCentralDevTarget,
 } from "./product_central_device_session_store.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
@@ -32,6 +34,7 @@ const ROOT = "/v3/owner/remote-authority";
 export const PRODUCT_OWNER_MCP_DEVICES_PATH = "/v3/owner/devices";
 export const PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH = "/v3/owner/central-session-targets";
 export const PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH = "/v3/owner/central-session-selections";
+export const PRODUCT_OWNER_CENTRAL_DEV_TARGET_PATH = "/v3/owner/central-dev-target";
 const GROUPS = "/v3/owner/remote-grant-groups";
 const WORKSPACE_RESOURCES = "/v3/owner/workspace-resources/";
 const WORKSPACE_APPROVALS = WORKSPACE_RESOURCES + "approvals";
@@ -105,6 +108,8 @@ const OWNER_CENTRAL_PUBLIC_ERRORS = new Set([
   "central_session_target_mismatch",
   "central_device_runtime_not_ready",
   "central_device_grant_revoked",
+  "owner_dev_target_invalid",
+  "owner_dev_target_not_development",
 ]);
 
 function ownerCentralError(raw: unknown, kind: "targets" | "selections"): Response | null {
@@ -216,6 +221,8 @@ export async function handleProductOwnerGrantAdmin(
     inspectCentralTargets?: typeof inspectOwnerCentralSessionTargets;
     listSelections?: typeof listOwnerCentralSelections;
     selectDevice?: typeof selectOwnerCentralDevice;
+    getDevTarget?: typeof getOwnerCentralDevTarget;
+    setDevTarget?: typeof setOwnerCentralDevTarget;
     signalWake?: typeof scheduleProductDeviceWake;
     scheduleWake?: (wake: Promise<void>) => void;
     replaceGrantGroup?: typeof replaceOwnerMcpGrantGroup;
@@ -227,6 +234,7 @@ export async function handleProductOwnerGrantAdmin(
   if (url.pathname !== ROOT && url.pathname !== PRODUCT_OWNER_MCP_DEVICES_PATH
       && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_TARGETS_PATH
       && url.pathname !== PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH
+      && url.pathname !== PRODUCT_OWNER_CENTRAL_DEV_TARGET_PATH
       && !url.pathname.startsWith(PRODUCT_OWNER_MCP_DEVICES_PATH + "/")
       && !url.pathname.startsWith(GROUPS) && !url.pathname.startsWith(WORKSPACE_RESOURCES))
     return json({ ok: false, error: "not_found" }, 404);
@@ -235,6 +243,56 @@ export async function handleProductOwnerGrantAdmin(
   if (ownerId instanceof Response) return ownerId;
 
   try {
+    if (url.pathname === PRODUCT_OWNER_CENTRAL_DEV_TARGET_PATH) {
+      // This setting is a DEV routing preference only. All operations still
+      // require current OAuth consent, grant and Runtime-attested session.
+      if (env.CENTRAL_OWNER_SELECTION_ENABLED !== "enabled")
+        return json({ ok: false, error: "not_found" }, 404);
+      if (request.method === "GET") {
+        if (!hasExactQueryParameters(url, ["client_id"]))
+          return json({ ok: false, error: "owner_dev_target_invalid" }, 400);
+        const clientId = (url.searchParams.get("client_id") ?? "").toLowerCase();
+        if (!CLIENT_ID_RE.test(clientId))
+          return json({ ok: false, error: "owner_dev_target_invalid" }, 400);
+        const result = await (deps.getDevTarget ?? getOwnerCentralDevTarget)(env, {
+          ownerUserId: ownerId, clientId,
+        });
+        if (result.ok === false) return ownerCentralError(result, "selections")
+          ?? json({ ok: false, error: "owner_dev_target_response_invalid" }, 502);
+        const state = result.state;
+        const deviceId = result.device_id;
+        if (result.ok !== true || !["none","preferred","inactive"].includes(state ?? "")
+            || (state === "none" ? deviceId !== null : !isCanonicalUuid(deviceId)))
+          return json({ ok: false, error: "owner_dev_target_response_invalid" }, 502);
+        return json({ ok: true, state, device_id: deviceId });
+      }
+      if (request.method !== "PUT")
+        return json({ ok: false, error: "method_not_allowed" }, 405);
+      if (url.search !== "") return json({ ok: false, error: "owner_dev_target_invalid" }, 400);
+      const mime = (request.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
+      if (mime !== "application/json")
+        return json({ ok: false, error: "content_type_invalid" }, 415);
+      const body = await readBoundedJsonObject(request, 1024);
+      if (!body || Object.keys(body).length !== 2
+          || Object.keys(body).some(key => !["client_id","device_id"].includes(key)))
+        return json({ ok: false, error: "owner_dev_target_invalid" }, 400);
+      const clientId = typeof body.client_id === "string" ? body.client_id.toLowerCase() : "";
+      const deviceId = body.device_id === null ? null
+        : typeof body.device_id === "string" ? body.device_id.toLowerCase() : "";
+      if (!CLIENT_ID_RE.test(clientId) || (deviceId !== null && !isCanonicalUuid(deviceId)))
+        return json({ ok: false, error: "owner_dev_target_invalid" }, 400);
+      const result = await (deps.setDevTarget ?? setOwnerCentralDevTarget)(env, {
+        ownerUserId: ownerId, clientId, deviceId,
+      });
+      if (result.ok === false) return ownerCentralError(result, "selections")
+        ?? json({ ok: false, error: "owner_dev_target_response_invalid" }, 502);
+      const state = deviceId === null ? "cleared" : "preferred";
+      if (result.ok !== true || result.state !== state || result.device_id !== deviceId
+          || result.attested !== false || result.dispatch_authorized !== false)
+        return json({ ok: false, error: "owner_dev_target_response_invalid" }, 502);
+      return json({ ok: true, state, device_id: deviceId,
+        attested: false, dispatch_authorized: false });
+    }
     if (url.pathname === PRODUCT_OWNER_CENTRAL_SESSION_SELECTIONS_PATH) {
       // Owner action is separately feature-gated from advisory target reads.
       // The signed Owner session never conveys an implicit action grant.
