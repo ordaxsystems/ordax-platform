@@ -1341,6 +1341,18 @@
         "blob_sha": "4c9b9589fe8aaafd06ba3d8fa8769027945362cc"
       },
       "ledger_name": "product_expire_never_started_leases_v1"
+    },
+    {
+      "name": "20261119212342_product_offline_action_admission_v1",
+      "applied_version": "20261119212736",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261119212342_product_offline_action_admission_v1.sql",
+        "blob_sha": "db0adfc24124f019c16d4cc8a193badb289cbea5"
+      },
+      "ledger_name": "product_offline_action_admission_v1"
     }
   ]
 }
