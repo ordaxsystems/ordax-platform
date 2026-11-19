@@ -33,6 +33,12 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
   const choose=async(user=owner,oauth=client,id=challengeWrong,device=desktop)=>(await db.query(
     "select public.ordax_owner_select_central_device_v1($1::uuid,$2::text,$3::uuid,$4::uuid) as result",
     [user,oauth,id,device])).rows[0].result as any;
+  const preference=async(user=owner,oauth=client)=>(await db.query(
+    "select public.ordax_owner_get_central_dev_target_v1($1::uuid,$2::text) as result",
+    [user,oauth])).rows[0].result as any;
+  const setPreference=async(device:string|null,user=owner,oauth=client)=>(await db.query(
+    "select public.ordax_owner_set_central_dev_target_v1($1::uuid,$2::text,$3::uuid) as result",
+    [user,oauth,device])).rows[0].result as any;
   const poll=async(device=desktop,token=tokenDesk)=>(await db.query(
     "select public.ordax_poll_central_device_session_v1($1::uuid,$2::text) as result",
     [device,token])).rows[0].result as any;
@@ -51,7 +57,7 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
       create table auth.users(id uuid primary key);
       create table auth.oauth_clients(id uuid primary key,deleted_at timestamptz);
       create table auth.oauth_consents(user_id uuid,client_id uuid,revoked_at timestamptz);
-      create table public.ordax_product_devices(device_id uuid primary key,owner_user_id uuid,state text);
+      create table public.ordax_product_devices(device_id uuid primary key,owner_user_id uuid,state text,channel text not null default 'development');
       create table public.ordax_device_presence(
         device_id uuid primary key,online boolean,last_seen_at timestamptz,
         agent_version text,capability_digest text);
@@ -108,12 +114,13 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     await db.exec(read("20261113151500_central_session_persistent_binding_v1.sql"));
     await db.exec(read("20261117065000_owner_central_selection_single_flight_v1.sql"));
     await db.exec(read("20261117132500_central_confirm_revocation_revalidation_v1.sql"));
+    await db.exec(read("20261119070000_owner_dev_persistent_target_v1.sql"));
 
     await db.query("insert into auth.users values($1)",[owner]);
     await db.query("insert into auth.oauth_clients values($1,null),($2,null)",[client,otherClient]);
     await db.query("insert into auth.oauth_consents values($1,$2,null)",[owner,client]);
     for(const device of [desktop,notebook]){
-      await db.query("insert into public.ordax_product_devices values($1,$2,'active')",[device,owner]);
+      await db.query("insert into public.ordax_product_devices(device_id,owner_user_id,state) values($1,$2,'active')",[device,owner]);
       await db.query("insert into public.ordax_device_presence values($1,$2,now(),'1.0.0',$3)",
         [device,device===desktop,"f".repeat(64)]);
     }
@@ -132,6 +139,42 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     assert.equal(waiting.device_id,undefined);
     assert.equal((await open()).challenge_id,waiting.challenge_id,"same session idempotent");
     assert.equal((await list()).pending_selections.length,1);
+    // A routing preference exists only after deliberate Owner action; it
+    // never grants execution or binds this or any other chat by itself.
+    assert.equal((await preference()).state,"none");
+    assert.equal((await setPreference(desktop,other)).ok,false,
+      "another Owner cannot select this computer");
+    assert.equal((await setPreference(desktop,owner,otherClient)).ok,false,
+      "the preference is restricted to the exact consented OAuth client");
+    await db.query("update public.ordax_product_devices set channel='stable' where device_id=$1",[desktop]);
+    assert.equal((await setPreference(desktop)).error,"owner_dev_target_not_development");
+    await db.query("update public.ordax_product_devices set channel='development' where device_id=$1",[desktop]);
+    const saved=await setPreference(desktop);
+    assert.equal(saved.state,"preferred");
+    assert.equal(saved.attested,false);
+    assert.equal(saved.dispatch_authorized,false);
+    assert.equal((await preference()).device_id,desktop);
+    assert.equal((await setPreference(desktop)).state,"preferred","repeated preference is idempotent");
+
+    const preferredHash="c".repeat(64);
+    const preferredOpening=await open(preferredHash);
+    assert.equal(preferredOpening.status,"pending","new DEV session uses Owner's saved destination");
+    assert.equal(preferredOpening.device_id,desktop);
+    assert.equal((await poll()).challenge_id,preferredOpening.challenge_id);
+    assert.equal((await confirm(notebook,tokenNote,preferredOpening.challenge_id)).ok,false,
+      "preferred target is NOT a Device credential");
+    const preferredConfirmed=await confirm(desktop,tokenDesk,preferredOpening.challenge_id);
+    assert.equal(preferredConfirmed.status,"bound","Runtime still attests each fresh conversation");
+    assert.equal((await open(preferredHash)).status,"bound");
+
+    // Revoked grants make an old routing preference inactive; no stale
+    // preference may override the canonical permission predicate.
+    await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",[grantDesk]);
+    assert.equal((await preference()).state,"inactive");
+    await db.query("update public.ordax_remote_capability_grants set state='active' where grant_id=$1",[grantDesk]);
+    assert.equal((await preference()).state,"preferred");
+    assert.equal((await setPreference(null)).state,"cleared");
+    assert.equal((await preference()).state,"none");
     // A second GPT conversation for the same OAuth client must not create an
     // unconfirmable Owner queue with two awaiting_owner choices. This is the
     // exact production failure seen when both Desktop identities have grants.
