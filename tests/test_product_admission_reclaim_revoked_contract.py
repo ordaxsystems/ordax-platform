@@ -4,7 +4,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "control-plane/supabase/migrations/20261119215627_product_admission_reclaim_revoked_v1.sql"
-CLAIM = ROOT / "control-plane/supabase/migrations/20261117150000_product_action_grant_revalidation_v1.sql"
+CLAIM = ROOT / "control-plane/supabase/migrations/20261117164000_product_queued_revocation_terminal_v1.sql"
 
 class ProductAdmissionReclaimRevokedTests(unittest.TestCase):
     @classmethod
