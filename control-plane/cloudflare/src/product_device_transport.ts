@@ -13,6 +13,7 @@ import {
   claimProductAction,
   progressProductAction,
   recordProductPresence,
+  recordProductCapacity,
   renewProductActionLease,
   readDeviceProjectBindingIntents,
   resolveOrchestratorReadAuthorization,
@@ -174,7 +175,8 @@ async function wireJob(job: ProductRemoteJob): Promise<Json> {
 // Reject old capability lists, unknown authority fields and schema ambiguity.
 export function canonicalDeviceHeartbeatDigest(body: Json): string | null {
   if (Object.keys(body).some(key => key !== "status" && key !== "agent_version"
-      && key !== "capabilities_digest" && key !== "runtime_kind")) return null;
+      && key !== "capabilities_digest" && key !== "runtime_kind"
+      && key !== "max_concurrent_jobs")) return null;
   const digest = typeof body.capabilities_digest === "string"
     ? body.capabilities_digest.trim().toLowerCase() : "";
   return HEX64.test(digest) ? digest : null;
@@ -187,6 +189,14 @@ async function heartbeat(request: Request, env: ProductPostgresEnv, deviceId: st
   const status = body.status;
   const agentVersion = typeof body.agent_version === "string" ? body.agent_version.trim() : "";
   const capabilityDigest = canonicalDeviceHeartbeatDigest(body);
+  // An absent field means an older four-worker Runtime. Never infer a larger
+  // capacity from hardware, account grants or number of connected chats.
+  const rawCapacity = body.max_concurrent_jobs;
+  if (rawCapacity !== undefined && (typeof rawCapacity !== "number"
+      || !Number.isInteger(rawCapacity) || rawCapacity < 1 || rawCapacity > 32)) {
+    return respond({ ok: false, error: "heartbeat_invalid" }, 400);
+  }
+  const maxConcurrentJobs = typeof rawCapacity === "number" ? rawCapacity : 4;
   // The active Windows desktop-agent omits runtime_kind and remains
   // "desktop-agent". Native OS Runtimes must declare their actual kind; this
   // metadata is never a capability grant or an attested action session.
@@ -207,6 +217,12 @@ async function heartbeat(request: Request, env: ProductPostgresEnv, deviceId: st
     capabilityDigest,
     force: status === "offline",
   });
+  const capacityRecorded = await recordProductCapacity(env, {
+    deviceId, maxConcurrentJobs,
+  });
+  if (!capacityRecorded && status !== "offline") {
+    return respond({ ok: false, error: "product_capacity_unavailable" }, 503);
+  }
   return respond({ ok: true, recorded, server_time: new Date().toISOString() });
 }
 
