@@ -1329,6 +1329,18 @@
         "blob_sha": "8b55ad31365564764af5bd4fda59f90ad1efbfef"
       },
       "ledger_name": "blender_project_binding_capability_ceiling_v1"
+    },
+    {
+      "name": "20261119210750_product_expire_never_started_leases_v1",
+      "applied_version": "20261119211124",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261119210750_product_expire_never_started_leases_v1.sql",
+        "blob_sha": "4c9b9589fe8aaafd06ba3d8fa8769027945362cc"
+      },
+      "ledger_name": "product_expire_never_started_leases_v1"
     }
   ]
 }
