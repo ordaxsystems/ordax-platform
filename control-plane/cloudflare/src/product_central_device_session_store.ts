@@ -65,6 +65,14 @@ const RPCS = {
     keys: ["p_owner_user_id", "p_client_id", "p_challenge_id", "p_device_id"],
     casts: ["uuid", "text", "uuid", "uuid"],
   },
+  ordax_owner_get_central_dev_target_v1: {
+    keys: ["p_owner_user_id", "p_client_id"],
+    casts: ["uuid", "text"],
+  },
+  ordax_owner_set_central_dev_target_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_device_id"],
+    casts: ["uuid", "text", "uuid"],
+  },
 } as const;
 
 type RpcName = keyof typeof RPCS;
@@ -209,5 +217,35 @@ export async function selectOwnerCentralDevice(
   return call(env, "ordax_owner_select_central_device_v1", {
     p_owner_user_id: input.ownerUserId, p_client_id: input.clientId,
     p_challenge_id: input.challengeId, p_device_id: input.deviceId,
+  });
+}
+
+
+/** Optional Owner/Development target preference: no grants or session attestation. */
+export async function getOwnerCentralDevTarget(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string },
+): Promise<Readonly<{ ok: boolean; state?: "none" | "preferred" | "inactive"; device_id?: string | null; error?: string }>> {
+  if (!isCanonicalUuid(input.ownerUserId) || !validClient(input.clientId)) {
+    throw new ProductPostgresError("owner_dev_target_invalid", 400);
+  }
+  return call(env, "ordax_owner_get_central_dev_target_v1", {
+    p_owner_user_id: input.ownerUserId, p_client_id: input.clientId,
+  });
+}
+
+/** Explicit signed Owner choice, or null to clear; SQL revalidates consent,
+ * device Development channel and its current non-discovery grant. */
+export async function setOwnerCentralDevTarget(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string; deviceId: string | null },
+): Promise<Readonly<{ ok: boolean; state?: "preferred" | "cleared"; device_id?: string | null; attested?: boolean; dispatch_authorized?: boolean; error?: string }>> {
+  if (!isCanonicalUuid(input.ownerUserId) || !validClient(input.clientId)
+      || (input.deviceId !== null && !isCanonicalUuid(input.deviceId))) {
+    throw new ProductPostgresError("owner_dev_target_invalid", 400);
+  }
+  return call(env, "ordax_owner_set_central_dev_target_v1", {
+    p_owner_user_id: input.ownerUserId, p_client_id: input.clientId,
+    p_device_id: input.deviceId,
   });
 }
