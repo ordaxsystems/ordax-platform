@@ -156,7 +156,7 @@ test("signed Owner choice is bound to the SAME canonical challenge; only exact d
     assert.equal((await preference()).device_id,desktop);
     assert.equal((await setPreference(desktop)).state,"preferred","repeated preference is idempotent");
 
-    const preferredHash="c".repeat(64);
+    const preferredHash="9".repeat(64);
     const preferredOpening=await open(preferredHash);
     assert.equal(preferredOpening.status,"pending","new DEV session uses Owner's saved destination");
     assert.equal(preferredOpening.device_id,desktop);
