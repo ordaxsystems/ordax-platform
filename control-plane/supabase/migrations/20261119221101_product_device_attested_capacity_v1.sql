@@ -22,7 +22,7 @@ as $capacity$
      )
      and p.max_concurrent_jobs between 1 and 32
      and p.remote_capacity_reported_at >
-       pg_catalog.clock_timestamp() - interval '6 minutes'
+       pg_catalog.statement_timestamp() - interval '6 minutes'
  ), private.ordax_product_remote_capacity_v1());
 $capacity$;
 revoke all on function private.ordax_product_remote_capacity_v1(uuid)
