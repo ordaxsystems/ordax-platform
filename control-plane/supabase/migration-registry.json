@@ -1389,6 +1389,18 @@
         "blob_sha": "4800a0aea895b99f6820835e719fc51e348b3968"
       },
       "ledger_name": "product_admission_reclaim_revoked_v1"
+    },
+    {
+      "name": "20261119221101_product_device_attested_capacity_v1",
+      "applied_version": "20261119221448",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261119221101_product_device_attested_capacity_v1.sql",
+        "blob_sha": "6d9eb0f8166772d191439d9bd461f8cc31c2878e"
+      },
+      "ledger_name": "product_device_attested_capacity_v1"
     }
   ]
 }
