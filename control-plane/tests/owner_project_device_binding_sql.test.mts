@@ -16,6 +16,10 @@ const blenderCeilingMigration = fs.readFileSync(
   new URL("../supabase/migrations/20261119205000_blender_project_binding_capability_ceiling_v1.sql", import.meta.url),
   "utf8",
 );
+const browserCeilingMigration = fs.readFileSync(
+  new URL("../supabase/migrations/20261120063000_browser_project_binding_capability_ceiling_v1.sql", import.meta.url),
+  "utf8",
+);
 
 const EXPECTED_PROJECT_CAPABILITIES = [
   "agent.project_briefing",
@@ -35,6 +39,8 @@ const EXPECTED_PROJECT_CAPABILITIES = [
   "browser.screenshot",
   "browser.snapshot",
   "browser.start",
+  "browser.tab_open",
+  "browser.tabs",
   "browser.status",
   "browser.stop",
   "browser.type",
@@ -60,7 +66,7 @@ test("Project binding capability ceiling exactly matches canonical project grant
   )].sort();
   assert.deepEqual(canonical, EXPECTED_PROJECT_CAPABILITIES);
 
-  const match = blenderCeilingMigration.match(
+  const match = browserCeilingMigration.match(
     /v_allowed_capabilities text\[\] := array\[([\s\S]*?)\]::text\[\];/,
   );
   assert.ok(match, "migration capability ceiling missing");
@@ -68,10 +74,10 @@ test("Project binding capability ceiling exactly matches canonical project grant
   assert.deepEqual(sqlCapabilities, canonical,
     "binding ceiling must not add or omit a canonical Project capability");
 
-  assert.doesNotMatch(blenderCeilingMigration, /insert\s+into\s+public\.ordax_remote_capability_grants/i,
+  assert.doesNotMatch(browserCeilingMigration, /insert\s+into\s+public\.ordax_remote_capability_grants/i,
     "binding must never mint Product grants");
-  assert.match(blenderCeilingMigration, /p_local_project_ref !~ '\^project-\[1-9\]\[0-9\]\*\$'/);
-  assert.doesNotMatch(blenderCeilingMigration, /local_project_path|filesystem_path|workspace_path/i);
+  assert.match(browserCeilingMigration, /p_local_project_ref !~ '\^project-\[1-9\]\[0-9\]\*\$'/);
+  assert.doesNotMatch(browserCeilingMigration, /local_project_path|filesystem_path|workspace_path/i);
 });
 
 test("Owner request plus enrolled Device confirmation creates exactly one canonical binding and no grant", async () => {
@@ -189,6 +195,7 @@ test("Owner request plus enrolled Device confirmation creates exactly one canoni
 
     await db.exec(migration);
     await db.exec(blenderCeilingMigration);
+    await db.exec(browserCeilingMigration);
 
     await db.query("insert into auth.users(id) values($1),($2)", [owner, other]);
     await db.query(
