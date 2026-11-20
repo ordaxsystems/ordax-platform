@@ -372,6 +372,10 @@ const RPC_SPECS = {
     keys: ["p_owner_user_id", "p_client_kind", "p_client_id", "p_request_id"],
     casts: ["uuid", "text", "text", "uuid"],
   },
+  ordax_list_product_mcp_recent_actions_v1: {
+    keys: ["p_owner_user_id", "p_client_id", "p_device_id", "p_pending_only", "p_limit"],
+    casts: ["uuid", "uuid", "uuid", "boolean", "integer"],
+  },
   ordax_replace_remote_grant_group_v1: {
     keys: [
       "p_owner_user_id", "p_space_id", "p_project_id", "p_device_id",
@@ -1168,6 +1172,24 @@ export async function getProductAction(
   return callRpc<JsonObject | null>(env, "ordax_get_product_action_v1", {
     ...client,
     p_request_id: input.requestId,
+  });
+}
+
+export async function listRecentProductMcpActions(
+  env: ProductPostgresEnv,
+  input: { ownerUserId: string; clientId: string; deviceId: string; pendingOnly: boolean; limit: number },
+): Promise<JsonObject> {
+  if (![input.ownerUserId, input.clientId, input.deviceId].every(isCanonicalUuid)
+      || typeof input.pendingOnly !== "boolean" || !Number.isInteger(input.limit)
+      || input.limit < 1 || input.limit > 20) {
+    throw new ProductPostgresError("product_action_history_invalid", 400);
+  }
+  return callRpc<JsonObject>(env, "ordax_list_product_mcp_recent_actions_v1", {
+    p_owner_user_id: input.ownerUserId,
+    p_client_id: input.clientId,
+    p_device_id: input.deviceId,
+    p_pending_only: input.pendingOnly,
+    p_limit: input.limit,
   });
 }
 

@@ -22,6 +22,7 @@ import { productAuthConfigured, productOwnerAccountSession, type ProductAuthEnv 
 import {
   checkCanonicalProductPostgresReadiness,
   productPostgresConfigured,
+  listRecentProductMcpActions,
   pruneProductMcpUsage,
   type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
@@ -209,6 +210,7 @@ const ATTESTED_SPECIAL_TOOLS: ReadonlySet<string> = new Set([
 ]);
 export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...PRODUCT_MCP_CORE_READ_TOOLS,
+  "ordax_action_list",
   ...ATTESTED_DEVICE_ACTION_TOOLS,
   ...ATTESTED_PROJECT_NATIVE_TOOLS,
   ...ATTESTED_PROJECT_BLENDER_TOOLS,
@@ -267,6 +269,7 @@ type OwnerWaitingResolution = Readonly<{
 
 type SessionRecoveryDependencies = Readonly<{
   resolve?: typeof resolveCentralSessionFromMcp;
+  listRecentActions?: typeof listRecentProductMcpActions;
   open?: typeof openCentralSessionFromMcp;
   wait?: (milliseconds: number) => Promise<void>;
   scheduleWake?: (wake: Promise<void>) => void;
@@ -536,6 +539,38 @@ export function createCanonicalProductMcpGateway(
         : sessionOwnerSelection
           ? { ...deniedHandlers, sessionOwnerSelection }
           : deniedHandlers;
+      if (toolName === "ordax_action_list" && allowedTools.has(toolName)) {
+        const historyRequest = request.clone();
+        handlers = {
+          ...handlers,
+          async listRecentActions(query) {
+            try {
+              const binding = await (recoveryDependencies.resolve ?? resolveCentralSessionFromMcp)(
+                historyRequest, env,
+              );
+              if (!binding.ok) {
+                const unavailable = ["central_session_unavailable", "product_postgres_unconfigured"]
+                  .includes(binding.error);
+                return respond({ ok: false, error: unavailable
+                  ? "product_action_history_unavailable" : "product_action_history_binding_required" },
+                unavailable ? 503 : 403);
+              }
+              const result = await (recoveryDependencies.listRecentActions ?? listRecentProductMcpActions)(
+                env, { ownerUserId: binding.ownerUserId, clientId: binding.clientId,
+                  deviceId: binding.deviceId, ...query },
+              );
+              if (result?.ok !== true) {
+                return result?.error === "product_owner_auth_ineligible"
+                  ? respond({ ok: false, error: "product_owner_auth_ineligible" }, 403)
+                  : respond({ ok: false, error: "product_action_history_invalid_response" }, 502);
+              }
+              return respond({ ok: true, device_id: binding.deviceId, actions: result.actions });
+            } catch {
+              return respond({ ok: false, error: "product_action_history_unavailable" }, 503);
+            }
+          },
+        };
+      }
       if (toolName && allowedTools.has(toolName)
         && ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)
         && routingHint?.explicitNonNullSpace) {

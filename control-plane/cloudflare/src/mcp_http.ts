@@ -16,6 +16,7 @@ export interface OrdaxMcpHandlers {
    * ChatGPT session marker; never supplied by the model as an action argument. */
   createAction: (request: Request, retryDigest?: string | null) => Promise<Response>;
   getAction: StatusHandler;
+  listRecentActions?: (input: { pendingOnly: boolean; limit: number }) => Promise<Response>;
   /** Deployment-only HMAC secret. Never returned from a tool or logged. */
   usageFingerprintKey?: string;
   /** Optional shadow-only accounting hook. It receives verified session
@@ -103,6 +104,10 @@ const TOOLS: ToolSpec[] = [
   { name: "ordax_profile", description: "Return the authenticated OrdaX account subject id for connector identity display. Compatibility tool: not an OS Profile, Profile Pack, Space or preferences." },
   { name: "ordax_targets", description: "List OAuth-scoped ORDAX devices, reported presence and Owner grants. client_device_routing is only a grant-catalog preflight and never overrides a durable ordax_session.device_binding. Each complete target has a nonauthoritative connection_diagnostic: online and granted does not prove action dispatch or Runtime attestation. A partially outdated profile retains its old permissions; new capabilities need explicit Owner reauthorization. Never select an execution target solely from discovery." },
   { name: "ordax_action_status", description: "Read the status/result of an existing ORDAX request_id. Keep the original ID and poll until terminal; never re-enqueue a potentially non-idempotent command just because status is queued or temporarily unavailable. Optional wait_for_completion_ms long-polls up to 20 seconds without re-executing.", properties: { request_id: STRING, wait_for_completion_ms: { ...WAIT, default: 0, description: "Optional verified status long-poll, 0-20000 milliseconds; default 0 for immediate read." } }, required: ["request_id"] },
+  { name: "ordax_action_list", description: "Find original action receipts from the last seven days for the current authenticated client and bound device, even when the Runtime is offline. Use ordax_action_status with the original request_id to verify the live state or recover the result. Never resubmit a command just because the receipt or outcome is uncertain.", properties: {
+    pending_only: { type: "boolean", default: false, description: "Return only actions last recorded as queued, leased or running." },
+    limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
+  } },
   { name: "app_intelligence_catalog", description: "Read the compact version-bound App Intelligence catalog from the connected ORDAX device. Use this only to discover which app semantics are available; it grants no execution authority.", action: "intelligence.app_catalog", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "app_intelligence_detail", description: "Read declarative instructions, intents, parameters and examples for one exact app_id from the connected ORDAX device. This never grants permission to execute the app.", action: "intelligence.app_detail", properties: { device_id: DEVICE, space_id: SPACE, app_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "app_id"] },
   { name: "repository_catalog", description: "List canonical Git repositories registered on an ORDAX device. Use repository.repository_full_name from this result to select a durable project for continuity tools.", action: "workspace.repository_catalog", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
@@ -212,6 +217,7 @@ const READ_ONLY_TOOLS = new Set([
   "ordax_profile",
   "ordax_targets",
   "ordax_action_status",
+  "ordax_action_list",
   "app_intelligence_catalog",
   "app_intelligence_detail",
   "repository_catalog",
@@ -348,6 +354,7 @@ const TOOL_TITLES: Record<string, string> = {
   ordax_profile: "Identify connected ORDAX account",
   ordax_targets: "List authorized ORDAX devices",
   ordax_action_status: "Check ORDAX action status",
+  ordax_action_list: "Recover recent ORDAX actions",
   app_intelligence_catalog: "List App Intelligence catalog",
   app_intelligence_detail: "Read App Intelligence detail",
   repository_catalog: "List device repositories",
@@ -733,6 +740,8 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
         status,
         result: action.result ?? null,
         error_code: typeof action.error_code === "string" ? action.error_code : null,
+        ...(action.error_code === "execution_outcome_unconfirmed"
+          ? { execution_outcome: "unconfirmed", retry_safe: false } : {}),
         runtime_kind: provenanceValid ? runtimeKind : null,
         runtime_version: provenanceValid ? runtimeVersion : null,
       },
@@ -1160,6 +1169,56 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
     const projected = response.ok ? sanitizeActionPayload(await bodyJson(response), requestId)
       : unverifiedActionStatus(requestId, response.status);
     return textToolResult(projected, projected.ok !== true);
+  }
+  if (name === "ordax_action_list") {
+    const pendingOnly = Object.hasOwn(args, "pending_only") ? args.pending_only : false;
+    const limit = Object.hasOwn(args, "limit") ? args.limit : 10;
+    if (Object.keys(args).some(key => key !== "pending_only" && key !== "limit")
+        || typeof pendingOnly !== "boolean" || typeof limit !== "number"
+        || !Number.isInteger(limit) || limit < 1 || limit > 20) {
+      return textToolResult({ ok: false, error: "product_action_history_invalid" }, true);
+    }
+    if (!handlers.listRecentActions) {
+      return textToolResult({ ok: false, error: "product_action_history_unavailable" }, true);
+    }
+    const response = await handlers.listRecentActions({ pendingOnly, limit });
+    const history = await bodyJson(response);
+    if (!response.ok || history.ok !== true) {
+      return textToolResult({
+        ok: false, error: publicErrorCode(history.error, "product_action_history_unavailable"),
+      }, true);
+    }
+    if (!Array.isArray(history.actions) || history.actions.length > limit
+        || !isCanonicalUuid(history.device_id)) {
+      return textToolResult({ ok: false, error: "product_action_history_invalid_response" }, true);
+    }
+    const actions = [];
+    for (const action of history.actions) {
+      if (!action || typeof action !== "object" || !isCanonicalUuid(action.request_id)
+          || action.device_id !== history.device_id
+          || !(action.project_id === null || isCanonicalUuid(action.project_id))
+          || !isProductActionStatus(action.status)
+          || (pendingOnly && !["queued", "leased", "running"].includes(action.status))
+          || typeof action.name !== "string" || !/^[a-z][a-z0-9._-]{1,119}$/.test(action.name)
+          || !isProductActionErrorCode(action.error_code)
+          || typeof action.created_at !== "string" || !Number.isFinite(Date.parse(action.created_at))) {
+        return textToolResult({ ok: false, error: "product_action_history_invalid_response" }, true);
+      }
+      actions.push({
+        request_id: action.request_id,
+        project_id: action.project_id,
+        name: action.name,
+        status: action.status,
+        error_code: action.error_code,
+        created_at: new Date(action.created_at).toISOString(),
+        ...(action.error_code === "execution_outcome_unconfirmed"
+          ? { execution_outcome: "unconfirmed", retry_safe: false } : {}),
+      });
+    }
+    return textToolResult({
+      ok: true, device_id: history.device_id, actions,
+      message: "Use ordax_action_status with the original request_id for a verified result. Do not resubmit an uncertain action.",
+    });
   }
 
   const spec = specFor(name);
