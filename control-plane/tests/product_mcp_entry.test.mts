@@ -289,6 +289,8 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_process_start", "computer_process_write_stdin", "computer_process_stop",
     "process_status", "process_list", "process_logs",
     "process_start", "process_write_stdin", "process_stop",
+    "browser_status", "browser_list", "browser_tabs", "browser_snapshot", "browser_screenshot",
+    "browser_start", "browser_tab_open", "browser_navigate", "browser_click", "browser_type", "browser_stop",
     "computer_windows", "computer_active_window", "computer_screenshot", "computer_screen_info",
     "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
     "computer_drag", "computer_clipboard_write", "computer_launch_app",
@@ -345,6 +347,9 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal((byName.get("computer_terminal_exec") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_process_start") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_process_status") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("browser_tabs") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("browser_tab_open") as any).annotations.readOnlyHint, false);
+  assert.equal((byName.get("browser_snapshot") as any).inputSchema.properties.tab_id.type, "string");
   assert.equal(calls.session, 1);
   assert.equal(calls.targets, 0);
 });
