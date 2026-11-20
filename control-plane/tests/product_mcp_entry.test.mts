@@ -387,13 +387,36 @@ test("MCP terminology keeps account subject, Space, device and Project independe
   assert.equal(profileCall.result.structuredContent.id, "server-subject");
 });
 
-test("unrelated browser and project tools remain unpublished", async () => {
+test("browser tab tools are listed with project-scoped inputs, not device-scoped shortcuts", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
-  for (const action of [
-    "browser_start", "project_text_write",
-    "workspace_directory_list",
-  ]) {
+  const response = await run(new Request(MCP_URL, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  }));
+  assert.equal(response.status, 200);
+  const payload = await response.json() as any;
+  const tools = new Map<string, any>(payload.result.tools.map((tool: any) => [tool.name, tool]));
+  for (const action of ["browser_start", "browser_tab_open", "browser_tabs", "browser_snapshot"]) {
+    const spec = tools.get(action);
+    assert.ok(spec, action);
+    assert.ok(spec.inputSchema.required.includes("project"), action);
+    assert.ok(spec.inputSchema.required.includes("device_id"), action);
+    assert.match(spec.inputSchema.properties.project.description, /GitHub owner\\/repository/i);
+  }
+  assert.equal(tools.get("browser_tab_open").inputSchema.required.includes("session_id"), true);
+  assert.ok(tools.get("browser_snapshot").inputSchema.properties.tab_id);
+  assert.ok(tools.get("browser_click").inputSchema.properties.tab_id);
+  assert.equal(tools.get("browser_tabs").annotations.readOnlyHint, true);
+  assert.equal(tools.get("browser_tab_open").annotations.readOnlyHint, false);
+  assert.equal(calls.targets, 0);
+  assert.equal(calls.getAction, 0);
+});
+
+test("unrelated unrestricted project tools remain unpublished", async () => {
+  const { handlers, calls } = fakeHandlers();
+  const run = createCanonicalProductMcpGateway(ENV, handlers);
+  for (const action of ["project_text_write", "workspace_directory_list"]) {
     const response = await run(request(action, { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
     assert.equal(response.status, 200);
     const json = await response.json();
