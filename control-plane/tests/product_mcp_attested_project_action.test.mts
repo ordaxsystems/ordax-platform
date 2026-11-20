@@ -83,6 +83,9 @@ test("browser tabs require exact project grant and validated tab selectors", asy
     catalog(grantGroup("browser.tab_open", "write", { profile: "full-computer-control" })),
     DEVICE, SCOPE, "browser.tab_open"), false);
   assert.equal(validAttestedProjectActionArguments("browser.start", { url: "https://chatgpt.com/" }), true);
+  assert.equal(validAttestedProjectActionArguments("browser.start", { url: "https://chatgpt.com/", resume_session_id: REQUEST }), true);
+  assert.equal(validAttestedProjectActionArguments("browser.start", { resume_session_id: "../../browser-profile" }), false);
+  assert.equal(validAttestedProjectActionArguments("browser.start", { resume_session_id: "bad" }), false);
   assert.equal(validAttestedProjectActionArguments("browser.start", { url: "file:///windows/system" }), false);
   assert.equal(validAttestedProjectActionArguments("browser.start", { url: "https://someone:password@example.com/" }), false);
   assert.equal(validAttestedProjectActionArguments("browser.navigate", { session_id: REQUEST, tab_id: "A".repeat(32), url: "https://example.com/" }), true);
