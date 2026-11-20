@@ -68,6 +68,15 @@ const REPOSITORY_PROJECT = { type: "string", pattern: "^[A-Za-z0-9-]+/[A-Za-z0-9
 const REPOSITORY = { type: "string", description: "Canonical GitHub owner/repository returned by repository_catalog." };
 const SPACE = { type: "string", description: "Optional canonical OrdaX Space UUID for scope disambiguation. Omission never bypasses account, device, project, grant or Runtime policy." };
 const WAIT = { type: "integer", minimum: 0, maximum: 20000, default: 8000, description: "How long the gateway waits for completion before returning a request_id." };
+// Interactive shells can already be awaited explicitly. By default, release
+// the MCP request immediately after the durable PostgreSQL receipt to avoid
+// holding upstream per-client request slots for eight seconds while other
+// conversations dispatch independent work. No new queue or polling authority.
+const SHELL_FAST_ACK_WAIT = { ...WAIT, default: 0, description:
+  "Default 0: return the committed request_id immediately without polling. "
+  + "Use ordax_action_status to retrieve the result, or explicitly set 1-20000 "
+  + "milliseconds to wait for completion in this tool call." };
+const FAST_ACK_ACTIONS = new Set(["computer.terminal_exec", "terminal.exec"]);
 const STRING_ARRAY = { type: "array", items: STRING, minItems: 1, maxItems: 256 };
 const ENV_OBJECT = { type: "object", maxProperties: 64, additionalProperties: { anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }] } };
 const PROCESS_ENV_OBJECT = { type: "object", maxProperties: 64, additionalProperties: { type: "string" } };
@@ -124,8 +133,8 @@ const TOOLS: ToolSpec[] = [
   { name: "git_status", description: "Read bounded Git status for a granted project.", action: "git.status", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "git_diff", description: "Read a bounded Git diff for a granted project.", action: "git.diff", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, paths: { type: "array", items: STRING, maxItems: 50 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "git_command", description: "Run an approved Git subcommand against a granted project. Repository hooks may execute, but credential/config inspection is blocked and authenticated remote URLs are redacted.", action: "git.command", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, args: { type: "array", items: STRING, minItems: 1, maxItems: 128 }, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "args"] },
-  { name: "computer_terminal_exec", description: "Headless device command path (60-second default) on the authorized computer. Independent commands may overlap under bounded Runtime concurrency; exclusivity exists only for real conflicting resources. Use computer_process_start plus status/logs for durable long-running work. Use argv for an explicit executable, e.g. PowerShell via [powershell.exe,-NoProfile,-Command,script]. On Windows command+shell=true uses COMSPEC/CMD, not PowerShell. Explicit longer timeouts remain possible; Owner terminal or full-computer-control grant required.", action: "computer.terminal_exec", properties: { device_id: DEVICE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800, default: 60 }, env: ENV_OBJECT, wait_for_completion_ms: WAIT }, required: ["device_id"] },
-  { name: "terminal_exec", description: "Headless project command path (60-second default). Independent commands may overlap under bounded Runtime concurrency and resource-scoped locks. For durable builds, servers and long-running tasks use process_start/status/logs. Explicit longer timeouts remain possible. Requires an explicit terminal.exec grant.", action: "terminal.exec", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800, default: 60 }, env: ENV_OBJECT, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
+  { name: "computer_terminal_exec", description: "Headless device command path (60-second default) on the authorized computer. Independent commands may overlap under bounded Runtime concurrency; exclusivity exists only for real conflicting resources. Use computer_process_start plus status/logs for durable long-running work. Use argv for an explicit executable, e.g. PowerShell via [powershell.exe,-NoProfile,-Command,script]. On Windows command+shell=true uses COMSPEC/CMD, not PowerShell. Explicit longer timeouts remain possible; Owner terminal or full-computer-control grant required.", action: "computer.terminal_exec", properties: { device_id: DEVICE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800, default: 60 }, env: ENV_OBJECT, wait_for_completion_ms: SHELL_FAST_ACK_WAIT }, required: ["device_id"] },
+  { name: "terminal_exec", description: "Headless project command path (60-second default). Independent commands may overlap under bounded Runtime concurrency and resource-scoped locks. For durable builds, servers and long-running tasks use process_start/status/logs. Explicit longer timeouts remain possible. Requires an explicit terminal.exec grant.", action: "terminal.exec", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, cwd: STRING, argv: STRING_ARRAY, command: STRING, shell: BOOLEAN, timeout_seconds: { type: "integer", minimum: 1, maximum: 1800, default: 60 }, env: ENV_OBJECT, wait_for_completion_ms: SHELL_FAST_ACK_WAIT }, required: ["device_id", "project"] },
   { name: "computer_process_status", description: "Inspect an ORDAX-owned device process.", action: "computer.process_status", properties: { device_id: DEVICE, process_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id"] },
   { name: "computer_process_list", description: "List supervised device processes.", action: "computer.process_list", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_process_logs", description: "Read bounded logs from an ORDAX-owned device process.", action: "computer.process_logs", properties: { device_id: DEVICE, process_id: STRING, max_bytes: { type: "integer", minimum: 1024, maximum: 262144 }, wait_for_completion_ms: WAIT }, required: ["device_id", "process_id"] },
@@ -1165,7 +1174,12 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
     return textToolResult({ ok: false, error: "wait_for_completion_invalid",
       action_dispatched: false }, true);
   }
-  const waitMs = typeof rawWait === "number" ? rawWait : 8000;
+  // Explicit waits preserve the prior one-call UX. Shells default to an
+  // immediate acknowledged receipt so the gateway does not monopolize
+  // upstream MCP request slots with status polling while other chats send
+  // independent commands. Read-only tools retain their eight-second default.
+  const waitMs = typeof rawWait === "number" ? rawWait
+    : FAST_ACK_ACTIONS.has(spec.action) ? 0 : 8000;
   const actionArgs: JsonObject = {};
   for (const [key, value] of Object.entries(args)) {
     if (!["device_id", "project", "space_id", "wait_for_completion_ms"].includes(key)) actionArgs[key] = value;
