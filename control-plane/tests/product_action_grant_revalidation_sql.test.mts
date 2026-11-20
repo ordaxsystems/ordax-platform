@@ -14,6 +14,10 @@ const queuedRevocation = fs.readFileSync(
   new URL("../supabase/migrations/20261117164000_product_queued_revocation_terminal_v1.sql", import.meta.url),
   "utf8",
 );
+const recentActions = fs.readFileSync(
+  new URL("../supabase/migrations/20261120084000_product_mcp_recent_actions_v1.sql", import.meta.url),
+  "utf8",
+);
 
 test("Product claim/start/renew recheck original grant, OAuth and owner; terminal receipts stay independent", async () => {
   const db = new PGlite();
@@ -106,6 +110,7 @@ test("Product claim/start/renew recheck original grant, OAuth and owner; termina
     `);
     await db.exec(migration);
     await db.exec(queuedRevocation);
+    await db.exec(recentActions);
     await db.query("insert into auth.users values($1)",[owner]);
     await db.query("insert into auth.oauth_clients values($1,null)",[client]);
     await db.query("insert into auth.oauth_consents values($1,$2,null)",[owner,client]);
@@ -120,9 +125,21 @@ test("Product claim/start/renew recheck original grant, OAuth and owner; termina
           now()+interval '5 minutes')`,
         [request,owner,device,grant,client,token,randomUUID()]);
     }
+    const list = async (clientId = client, deviceId = device, pending = false) =>
+      (await db.query("select public.ordax_list_product_mcp_recent_actions_v1($1,$2,$3,$4,10) as result",
+        [owner, clientId, deviceId, pending])).rows[0].result as any;
+    assert.deepEqual(new Set((await list(client, device, true)).actions.map((row: any) => row.request_id)),
+      new Set([requestId, secondId]));
+    assert.deepEqual((await list(randomUUID())).actions, []);
+    assert.deepEqual((await list(client, randomUUID())).actions, []);
+    assert.equal((await db.query(`select has_function_privilege('authenticated',
+      'public.ordax_list_product_mcp_recent_actions_v1(uuid,uuid,uuid,boolean,integer)','EXECUTE') as allowed`))
+      .rows[0].allowed, false);
     // A queued command cannot be delivered after its original grant is revoked.
     // The exact Owner/client status read retires only its own request.
     await db.query("update public.ordax_remote_capability_grants set state='revoked' where grant_id=$1",[grant]);
+    assert.deepEqual((await list()).actions, []);
+    assert.equal(await countAudits(), 0, "history is a read of recorded states");
     const retiredByRead = await status(requestId);
     assert.equal(retiredByRead.status,"cancelled");
     assert.equal(retiredByRead.error_code,"action_authority_revoked");

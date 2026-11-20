@@ -25,6 +25,53 @@ function fakeHandlers() {
   return { handlers, calls };
 }
 
+test("direct MCP recovers a missing receipt through the bound device without dispatch", async () => {
+  const owner = "11111111-1111-4111-8111-111111111111";
+  const client = "22222222-2222-4222-8222-222222222222";
+  const device = "33333333-3333-4333-8333-333333333333";
+  const receipt = "44444444-4444-4444-8444-444444444444";
+  const { handlers } = fakeHandlers();
+  let reads = 0;
+  let bound = true;
+  const gateway = createCanonicalProductMcpGateway(ENV, {
+    ...handlers,
+    getAction: async (_request, requestId) => {
+      assert.equal(requestId, receipt);
+      return Response.json({ ok: true, action: { request_id: receipt,
+        action: "computer.text_write", status: "failed", error_code: "execution_outcome_unconfirmed" } });
+    },
+  }, fetch, PRODUCT_MCP_DIRECT_TOOLS, {
+    resolve: async () => bound
+      ? { ok: true, ownerUserId: owner, clientId: client, deviceId: device, requestId: null, expiresAt: null }
+      : { ok: false, error: "central_session_unbound" },
+    open: async () => assert.fail("History must not open a new binding"),
+    listRecentActions: async (_env, input) => {
+      reads++;
+      assert.deepEqual(input, { ownerUserId: owner, clientId: client, deviceId: device,
+        pendingOnly: false, limit: 10 });
+      return { ok: true, actions: [{ request_id: receipt, device_id: device, project_id: null,
+        name: "computer.text_write", status: "failed", error_code: "execution_outcome_unconfirmed",
+        created_at: "2026-11-20T06:01:00Z", result: "private output", payload: "private input" }] };
+    },
+  });
+  const invoke = async (name: string, args?: Record<string, unknown>) =>
+    (await (await gateway(request(name, args))).json() as any).result.structuredContent;
+  assert.equal((await invoke("ordax_action_list", { device_id: owner })).error, "product_action_history_invalid");
+  assert.equal((await invoke("ordax_action_list", { limit: 21 })).error, "product_action_history_invalid");
+  assert.equal(reads, 0);
+  const history = await invoke("ordax_action_list");
+  assert.equal(history.ok, true, JSON.stringify(history));
+  assert.deepEqual(history.actions, [{ request_id: receipt, project_id: null,
+    name: "computer.text_write", status: "failed", error_code: "execution_outcome_unconfirmed",
+    created_at: "2026-11-20T06:01:00.000Z", execution_outcome: "unconfirmed", retry_safe: false }]);
+  const status = await invoke("ordax_action_status", { request_id: history.actions[0].request_id });
+  assert.equal(status.action.execution_outcome, "unconfirmed");
+  assert.equal(status.action.retry_safe, false);
+  bound = false;
+  assert.equal((await invoke("ordax_action_list")).error, "product_action_history_binding_required");
+  assert.equal(reads, 1);
+});
+
 test("published entry cannot accidentally import legacy D1 Worker or configure D1 binding", async () => {
   const source = await readFile(new URL("../cloudflare/src/product_mcp_entry.ts", import.meta.url), "utf8");
   const config = await readFile(new URL("../cloudflare/wrangler.product-mcp-canary.toml", import.meta.url), "utf8");
@@ -281,7 +328,7 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   const json = await response.json();
   assert.equal(response.status, 200);
   assert.deepEqual(json.result.tools.map((t: any) => t.name), [
-    "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
+    "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status", "ordax_action_list",
     "repository_catalog", "handoff_get", "handoff_create",
     "project_briefing", "continuity_state", "continuity_update",
     "computer_terminal_exec", "terminal_exec",
