@@ -3,7 +3,7 @@ import test from "node:test";
 import {createHash} from "node:crypto";
 import {
   createForgeMcpGateway,FORGE_MCP_HOSTNAME,FORGE_INSTANCE_REGISTER_PATH,
-  FORGE_INSTANCE_REPORT_PATH,validForgeCatalog,
+  FORGE_INSTANCE_CLAIM_PATH,FORGE_INSTANCE_REPORT_PATH,validForgeCatalog,
 } from "../cloudflare/src/forge_mcp_gateway.ts";
 
 const OWNER="11111111-1111-4111-8111-111111111111";
@@ -271,4 +271,62 @@ test("Forge MCP unauthenticated requests advertise the shared Supabase OAuth res
   const response=await gateway(request({jsonrpc:"2.0",id:1,method:"initialize",params:{}}));
   assert.equal(response.status,401);
   assert.match(response.headers.get("www-authenticate")??"",/oauth-protected-resource/);
+});
+
+
+test("Forge native claim caps Supabase RPC polling to six empty checks per 20-second wait",async()=>{
+  let clock=0;
+  const sleeps:number[]=[];
+  const operations:string[]=[];
+  const gateway=createForgeMcpGateway({...env,
+    FORGE_SUPABASE_PUBLISHABLE_KEY:"sb_publishable_test"},{
+    authenticateOwner:(()=>ownerIdentity(FORGE_NATIVE_CLIENT)) as any,
+    now:()=>clock,
+    sleep:async(ms:number)=>{sleeps.push(ms);clock+=ms;},
+    fetchImpl:(async(_url:any,init:any)=>{
+      operations.push(JSON.parse(String(init.body)).p_operation);
+      return Response.json({ok:true,job:null});
+    }) as any,
+  });
+  const response=await gateway(request({
+    instance_id:INSTANCE,
+    agent_instance_id:"99999999-9999-4999-8999-999999999999",
+    boot_id:"forge-test",
+    wait_ms:20000,
+  },FORGE_INSTANCE_CLAIM_PATH));
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{ok:true,job:null});
+  assert.deepEqual(operations,Array(6).fill("native_claim"));
+  assert.deepEqual(sleeps,[500,1000,2000,4000,8000,4500]);
+  assert.equal(clock,20000);
+});
+
+test("Forge native claim stays immediate for work and never retries on failure",async()=>{
+  for(const expected of [0,3,-1]){
+    let clock=0,claims=0;
+    const job={request_id:REQUEST};
+    const gateway=createForgeMcpGateway(env,{
+      authenticateOwner:(()=>ownerIdentity(FORGE_NATIVE_CLIENT)) as any,
+      now:()=>clock,
+      sleep:async(ms:number)=>{clock+=ms;},
+      claim:async()=>{
+        claims++;
+        if(expected===-1)return {ok:false,error:"forge_native_claim_denied"};
+        return {ok:true,job:expected>0&&claims===expected?job:null};
+      },
+    });
+    const response=await gateway(request({
+      instance_id:INSTANCE,
+      agent_instance_id:"99999999-9999-4999-8999-999999999999",
+      boot_id:"forge-test",wait_ms:expected===0?0:20000,
+    },FORGE_INSTANCE_CLAIM_PATH));
+    assert.equal(response.status,expected===-1?403:200);
+    assert.equal(claims,expected>0?expected:1);
+    if(expected===3){
+      assert.deepEqual((await response.json() as any).job,job);
+      assert.equal(clock,1500);
+    }
+    if(expected===0)assert.equal(clock,0);
+    if(expected===-1)assert.equal(clock,0);
+  }
 });

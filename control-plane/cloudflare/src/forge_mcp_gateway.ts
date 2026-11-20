@@ -342,14 +342,23 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
           return json({ok:false,error:"forge_claim_invalid"},400);
         }
         const deadline=now()+Number(body.wait_ms);
-        let result=await store.claim({ownerUserId:identity.ownerUserId,
+        const claimInput={ownerUserId:identity.ownerUserId,
           instanceId:String(body.instance_id).toLowerCase(),
-          agentInstanceId:String(body.agent_instance_id).toLowerCase(),bootId:body.boot_id});
+          agentInstanceId:String(body.agent_instance_id).toLowerCase(),bootId:body.boot_id};
+        // Keep the initial claim immediate. Repeated empty results must not
+        // burn Supabase RPC and Worker CPU while the Forge queue is idle.
+        // For a 20s wait: at most six SQL-backed claims, versus up to 41.
+        let result=await store.claim(claimInput);
+        let emptyRetries=0;
         while(result.ok===true&&result.job===null&&now()<deadline){
-          await sleep(Math.min(500,Math.max(1,deadline-now())));
-          result=await store.claim({ownerUserId:identity.ownerUserId,
-            instanceId:String(body.instance_id).toLowerCase(),
-            agentInstanceId:String(body.agent_instance_id).toLowerCase(),bootId:body.boot_id});
+          const remainingMs=deadline-now();
+          const delayMs=Math.min(remainingMs,500*2**Math.min(emptyRetries,4));
+          await sleep(Math.max(1,delayMs));
+          // Never issue a redundant claim at the request deadline. The next
+          // native claim remains immediate, so no work is lost.
+          if(now()>=deadline)break;
+          result=await store.claim(claimInput);
+          emptyRetries++;
         }
         return json(result,result.ok===true?200:403);
       }
