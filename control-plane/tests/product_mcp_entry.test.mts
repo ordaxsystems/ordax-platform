@@ -407,7 +407,7 @@ test("browser tab tools are listed with project-scoped inputs, not device-scoped
     assert.ok(spec, action);
     assert.ok(spec.inputSchema.required.includes("project"), action);
     assert.ok(spec.inputSchema.required.includes("device_id"), action);
-    assert.match(spec.inputSchema.properties.project.description, /GitHub owner\\/repository/i);
+    assert.ok(String(spec.inputSchema.properties.project.description).includes("GitHub owner/repository"));
   }
   assert.equal(tools.get("browser_tab_open").inputSchema.required.includes("session_id"), true);
   assert.ok(tools.get("browser_snapshot").inputSchema.properties.tab_id);
