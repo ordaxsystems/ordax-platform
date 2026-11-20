@@ -82,7 +82,7 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
             marker = f'action: "{action}"'
             line = next(line for line in self.mcp.splitlines() if marker in line)
             self.assertIn("projectRequired: true", line, action)
-            expected_binding = "project: REPOSITORY_PROJECT" if action in {"terminal.exec", "process.start"} else "project: PROJECT"
+            expected_binding = "project: REPOSITORY_PROJECT" if action in {"terminal.exec", "process.start", "browser.click"} else "project: PROJECT"
             self.assertIn(expected_binding, line, action)
 
     def test_scope_binding_forbids_synthetic_projects(self) -> None:

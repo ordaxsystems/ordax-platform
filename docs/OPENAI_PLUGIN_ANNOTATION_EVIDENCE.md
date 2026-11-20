@@ -56,9 +56,11 @@ This document is reviewer-facing evidence for the OpenAI plugin submission. The 
 | `process_stop` | false | true | false | Stops only a process whose ORDAX ownership is revalidated; it does not target arbitrary system processes. |
 | `browser_status` | true | false | false | Reads metadata for an ORDAX-owned browser session without changing browser or project state. |
 | `browser_list` | true | false | false | Lists ORDAX-owned browser sessions for the granted project without changing them. |
+| `browser_tabs` | true | false | false | Lists bounded tab identities and metadata for one ORDAX-owned browser session under a project grant. |
 | `browser_snapshot` | true | false | true | Reads bounded page text and interactive element metadata from the current browser page; the page may be an open-world web destination. |
 | `browser_screenshot` | true | false | true | Captures pixels from the current ORDAX-managed browser page through CDP without requiring that page to be foreground. |
-| `browser_start` | false | false | true | Starts an isolated ORDAX-owned Chromium session and may load an open-world URL; protected consumer AI pages remain blocked from automation. |
+| `browser_start` | false | false | true | Starts an isolated ORDAX-owned Chromium session in its own profile; may load arbitrary http(s) pages while retaining ownership and grant checks. |
+| `browser_tab_open` | false | false | true | Opens another tab in the same authorized Chromium profile and may navigate to an open-world URL without switching the primary tab. |
 | `browser_navigate` | false | false | true | Changes only the managed browser navigation state but may contact an open-world web destination. |
 | `browser_click` | false | true | true | A page click can submit forms or trigger external side effects, so it requires an explicit action grant and is conservatively destructive/open-world. |
 | `browser_type` | false | true | true | Typing into a web page can change or submit external state, so it is conservatively destructive/open-world. |

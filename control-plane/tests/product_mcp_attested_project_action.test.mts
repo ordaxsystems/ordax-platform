@@ -73,6 +73,50 @@ test("terminal and supervisor schemas are explicit, strict and bounded", () => {
   assert.equal(validAttestedProjectActionArguments("continuity.update", { summary: "not exposed" }), false);
 });
 
+test("browser tabs require exact project grant and validated tab selectors", async () => {
+  const grant = grantGroup("browser.tab_open", "write", { profile: "project-browser-automation" });
+  assert.equal(catalogAllowsAttestedProjectAction(catalog(grant), DEVICE, SCOPE, "browser.tab_open"), true);
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("browser.tab_open", "read", { profile: "project-browser-automation" })),
+    DEVICE, SCOPE, "browser.tab_open"), false);
+  assert.equal(catalogAllowsAttestedProjectAction(
+    catalog(grantGroup("browser.tab_open", "write", { profile: "full-computer-control" })),
+    DEVICE, SCOPE, "browser.tab_open"), false);
+  assert.equal(validAttestedProjectActionArguments("browser.start", { url: "https://chatgpt.com/" }), true);
+  assert.equal(validAttestedProjectActionArguments("browser.start", { url: "file:///windows/system" }), false);
+  assert.equal(validAttestedProjectActionArguments("browser.start", { url: "https://someone:password@example.com/" }), false);
+  assert.equal(validAttestedProjectActionArguments("browser.navigate", { session_id: REQUEST, tab_id: "A".repeat(32), url: "https://example.com/" }), true);
+  assert.equal(validAttestedProjectActionArguments("browser.navigate", { session_id: REQUEST, tab_id: "bad!", url: "https://example.com/" }), false);
+  assert.equal(validAttestedProjectActionArguments("browser.snapshot", { session_id: REQUEST, tab_id: "A".repeat(32) }), true);
+  assert.equal(validAttestedProjectActionArguments("browser.type", { session_id: REQUEST, node_id: "n1", text: "hello" }), true);
+  assert.equal(validAttestedProjectActionArguments("browser.type", { session_id: REQUEST, node_id: "n1", text: "x".repeat(10001) }), false);
+  assert.equal(validAttestedProjectActionArguments("browser.tab_open", { session_id: REQUEST, url: "javascript:alert(1)" }), false);
+
+  let received: any = null;
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity, resolveProject,
+    listTargets: async () => catalog(grant),
+    enqueue: async (_env, input) => {
+      received = input;
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => OPERATION,
+  });
+  const result = await handler(actionRequest("browser.tab_open", {
+    session_id: REQUEST, url: "https://example.com/",
+  }));
+  assert.equal(result.status, 202);
+  assert.equal(received.capability, "browser.tab_open");
+  assert.equal(received.accessMode, "write");
+  assert.equal(received.projectId, PROJECT);
+  assert.equal(received.payload._ordax_project_scope.repository_full_name, REPOSITORY);
+
+  const denied = await handler(actionRequest("browser.type", {
+    session_id: REQUEST, node_id: "n1", text: "no inherited write grant",
+  }));
+  assert.equal(denied.status, 403);
+});
+
 test("terminal enqueue uses exactly the bound Space/project, canonical hidden scope and write grant", async () => {
   let received: any = null;
   const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {

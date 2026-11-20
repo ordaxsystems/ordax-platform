@@ -289,6 +289,8 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_process_start", "computer_process_write_stdin", "computer_process_stop",
     "process_status", "process_list", "process_logs",
     "process_start", "process_write_stdin", "process_stop",
+    "browser_status", "browser_list", "browser_tabs", "browser_snapshot", "browser_screenshot",
+    "browser_start", "browser_tab_open", "browser_navigate", "browser_click", "browser_type", "browser_stop",
     "computer_windows", "computer_active_window", "computer_screenshot", "computer_screen_info",
     "computer_clipboard_read", "computer_focus_window", "computer_click", "computer_mouse_move",
     "computer_drag", "computer_clipboard_write", "computer_launch_app",
@@ -345,6 +347,9 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal((byName.get("computer_terminal_exec") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_process_start") as any).annotations.destructiveHint, true);
   assert.equal((byName.get("computer_process_status") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("browser_tabs") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("browser_tab_open") as any).annotations.readOnlyHint, false);
+  assert.equal((byName.get("browser_snapshot") as any).inputSchema.properties.tab_id.type, "string");
   assert.equal(calls.session, 1);
   assert.equal(calls.targets, 0);
 });
@@ -387,13 +392,36 @@ test("MCP terminology keeps account subject, Space, device and Project independe
   assert.equal(profileCall.result.structuredContent.id, "server-subject");
 });
 
-test("unrelated browser and project tools remain unpublished", async () => {
+test("browser tab tools are listed with project-scoped inputs, not device-scoped shortcuts", async () => {
   const { handlers, calls } = fakeHandlers();
   const run = createCanonicalProductMcpGateway(ENV, handlers);
-  for (const action of [
-    "browser_start", "project_text_write",
-    "workspace_directory_list",
-  ]) {
+  const response = await run(new Request(MCP_URL, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  }));
+  assert.equal(response.status, 200);
+  const payload = await response.json() as any;
+  const tools = new Map<string, any>(payload.result.tools.map((tool: any) => [tool.name, tool]));
+  for (const action of ["browser_start", "browser_tab_open", "browser_tabs", "browser_snapshot"]) {
+    const spec = tools.get(action);
+    assert.ok(spec, action);
+    assert.ok(spec.inputSchema.required.includes("project"), action);
+    assert.ok(spec.inputSchema.required.includes("device_id"), action);
+    assert.ok(String(spec.inputSchema.properties.project.description).includes("GitHub owner/repository"));
+  }
+  assert.equal(tools.get("browser_tab_open").inputSchema.required.includes("session_id"), true);
+  assert.ok(tools.get("browser_snapshot").inputSchema.properties.tab_id);
+  assert.ok(tools.get("browser_click").inputSchema.properties.tab_id);
+  assert.equal(tools.get("browser_tabs").annotations.readOnlyHint, true);
+  assert.equal(tools.get("browser_tab_open").annotations.readOnlyHint, false);
+  assert.equal(calls.targets, 0);
+  assert.equal(calls.getAction, 0);
+});
+
+test("unrelated unrestricted project tools remain unpublished", async () => {
+  const { handlers, calls } = fakeHandlers();
+  const run = createCanonicalProductMcpGateway(ENV, handlers);
+  for (const action of ["project_text_write", "workspace_directory_list"]) {
     const response = await run(request(action, { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
     assert.equal(response.status, 200);
     const json = await response.json();

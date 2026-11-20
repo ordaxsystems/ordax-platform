@@ -17,6 +17,8 @@ export const PROJECT_BROWSER_ACTIONS = new Set<string>([
   "browser.screenshot",
   "browser.snapshot",
   "browser.start",
+  "browser.tab_open",
+  "browser.tabs",
   "browser.status",
   "browser.stop",
   "browser.type",

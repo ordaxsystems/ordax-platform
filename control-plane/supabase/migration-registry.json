@@ -1401,6 +1401,18 @@
         "blob_sha": "6d9eb0f8166772d191439d9bd461f8cc31c2878e"
       },
       "ledger_name": "product_device_attested_capacity_v1"
+    },
+    {
+      "name": "20261120063000_browser_project_binding_capability_ceiling_v1",
+      "applied_version": "20261120061123",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261120063000_browser_project_binding_capability_ceiling_v1.sql",
+        "blob_sha": "917d3e016b58107159e5c2a2cf8d4d6a65a28fa4"
+      },
+      "ledger_name": "browser_project_binding_capability_ceiling_v1"
     }
   ]
 }
