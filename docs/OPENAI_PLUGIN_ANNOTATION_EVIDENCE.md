@@ -10,6 +10,7 @@ This document is reviewer-facing evidence for the OpenAI plugin submission. The 
 | `ordax_profile` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
 | `ordax_targets` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
 | `ordax_action_status` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
+| `ordax_action_list` | true | false | false | Reads bounded receipt metadata for the authenticated client and bound device under current grants. |
 | `app_intelligence_catalog` | true | false | false | Reads the bounded version-bound App Intelligence catalog already packaged on the authenticated ORDAX device; it does not modify device, app, project, or external state. |
 | `app_intelligence_detail` | true | false | false | Reads the declarative manifest for one exact app id from the packaged App Intelligence registry; the manifest carries no execution authority and does not modify external state. |
 | `repository_catalog` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
