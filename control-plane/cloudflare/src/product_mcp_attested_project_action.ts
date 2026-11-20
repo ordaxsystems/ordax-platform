@@ -238,8 +238,9 @@ function validBrowserArgs(action: string, value: unknown): value is Json {
   const wait = value.wait_seconds === undefined || finiteNumber(value.wait_seconds, 1, 60);
   if (action === "browser.list") return Object.keys(value).length === 0;
   if (action === "browser.start")
-    return keysOnly(value, ["url", "headless", "wait_seconds"])
+    return keysOnly(value, ["url", "headless", "resume_session_id", "wait_seconds"])
       && validBrowserUrl(value.url, true) && wait
+      && (value.resume_session_id === undefined || isCanonicalUuid(value.resume_session_id))
       && (value.headless === undefined || typeof value.headless === "boolean");
   if (!boundedString(id, 128)) return false;
   if (action === "browser.status" || action === "browser.tabs" || action === "browser.stop")
