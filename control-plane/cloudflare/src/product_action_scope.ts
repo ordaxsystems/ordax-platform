@@ -25,8 +25,8 @@ export const PROJECT_BROWSER_ACTIONS = new Set<string>([
 ]);
 
 /**
- * Blender mutations are always tied to the same attested Project Catalog link
- * as native terminal actions. This is one capability list, not a new MCP.
+ * Project Blender actions use the attested Project Catalog link. Device Blender
+ * uses separate capability identities and grants, with the same typed operations.
  */
 export const PROJECT_BLENDER_ACTIONS = new Set<string>([
   "blender.live_status",
@@ -40,6 +40,15 @@ export const PROJECT_BLENDER_ACTIONS = new Set<string>([
   "blender.live_material_apply",
   "blender.live_save",
 ]);
+
+// Separate capability identities prevent a project grant from becoming a device grant.
+export const DEVICE_BLENDER_ACTIONS = new Set<string>(
+  [...PROJECT_BLENDER_ACTIONS].map(action => action.replace("blender.live_", "computer.blender_")),
+);
+export function deviceBlenderAction(projectAction: string): string | null {
+  return PROJECT_BLENDER_ACTIONS.has(projectAction)
+    ? projectAction.replace("blender.live_", "computer.blender_") : null;
+}
 
 export const PROJECT_CONTINUITY_ACTIONS = new Set<string>([
   "agent.project_briefing", "continuity.get", "continuity.update", "handoff.create", "handoff.get",
@@ -102,6 +111,7 @@ export const COMPUTER_DEVICE_ACTIONS = new Set<string>([
 export const DEVICE_SCOPED_ACTIONS = new Set<string>([
   "forge.app_read",
   ...COMPUTER_DEVICE_ACTIONS,
+  ...DEVICE_BLENDER_ACTIONS,
   ...APP_INTELLIGENCE_DEVICE_ACTIONS,
   ...NATIVE_SURFACE_DEVICE_ACTIONS,
   ...REPOSITORY_CATALOG_DEVICE_ACTIONS,

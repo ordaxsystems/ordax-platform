@@ -749,6 +749,7 @@ test("advertised MCP projection includes device terminal and supervised processe
   assert.equal(names.has("blender_run_script"), false);
   const rig = payload.result.tools.find((tool: { name: string }) => tool.name === "blender_rig_create");
   assert.equal(rig?.inputSchema.properties.project.pattern, "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$");
+  assert.equal(rig?.inputSchema.required.includes("project"), false);
 });
 
 test("MCP initialize identifies the official OrdaX Platform and never an obsolete Studio or Control Plane service", async () => {
