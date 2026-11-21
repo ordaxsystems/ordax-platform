@@ -278,3 +278,27 @@ test("artifact preview schema advertises bounded image batches without changing 
   assert.equal(tool.inputSchema.properties.project_artifact_paths.maxItems, 100);
   assert.equal(tool.inputSchema.required.includes("project"), true);
 });
+
+// An explicitly requested screenshot is already authorized by its device
+// screenshot grant. Reuse the native image projection, without extra grants.
+test("opt-in computer screenshot emits one native image and keeps full-resolution metadata", async () => {
+  const receipt = await imageStatusReceipt({
+    ...previewData, scope: "device", mode: "desktop", width: 1920, height: 1080,
+    source_size_bytes: 748321, thumbnail_size: [960, 540],
+  }, "computer.screenshot") as any;
+  assert.equal(receipt.content.length, 2);
+  assert.equal(receipt.content[1].type, "image");
+  assert.equal(receipt.content[1].mimeType, "image/jpeg");
+  assert.equal(receipt.structuredContent.action.name, "computer.screenshot");
+  assert.equal(receipt.structuredContent.action.result.data.source_size_bytes, 748321);
+  assert.equal(receipt.structuredContent.action.result.data.base64, undefined);
+  assert.equal(receipt.content[0].text.includes(previewBase64), false);
+});
+
+test("screenshot without preview remains metadata-only and cannot manufacture an image block", async () => {
+  const receipt = await imageStatusReceipt({
+    scope: "device", mode: "desktop", width: 1920, height: 1080, size_bytes: 748321,
+  }, "computer.screenshot") as any;
+  assert.equal(receipt.content.length, 1);
+  assert.equal(receipt.structuredContent.action.result.data.width, 1920);
+});

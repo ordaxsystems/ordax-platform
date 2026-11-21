@@ -167,7 +167,7 @@ const TOOLS: ToolSpec[] = [
   { name: "browser_stop", description: "Stop an ORDAX-owned Chromium session.", action: "browser.stop", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, session_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "session_id"] },
   { name: "computer_windows", description: "List visible windows on the interactive Windows desktop.", action: "computer.windows", properties: { device_id: DEVICE, space_id: SPACE, max_items: { type: "integer", minimum: 1, maximum: 500 }, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_active_window", description: "Inspect the current foreground Windows desktop window.", action: "computer.active_window", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
-  { name: "computer_screenshot", description: "Capture the full Windows desktop or active window for visual inspection.", action: "computer.screenshot", properties: { device_id: DEVICE, space_id: SPACE, mode: { type: "string", enum: ["desktop", "active_window"] }, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "computer_screenshot", description: "Capture the full Windows desktop or active window; set include_preview=true to return one bounded native JPEG visual preview from the same capture. Without it, only metadata is returned.", action: "computer.screenshot", properties: { device_id: DEVICE, space_id: SPACE, mode: { type: "string", enum: ["desktop", "active_window"] }, include_preview: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_screen_info", description: "Inspect monitor geometry, virtual desktop bounds and cursor position.", action: "computer.screen_info", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_clipboard_read", description: "Read bounded Unicode text from the interactive Windows clipboard.", action: "computer.clipboard_read", properties: { device_id: DEVICE, space_id: SPACE, max_bytes: { type: "integer", minimum: 1, maximum: 1048576 }, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_focus_window", description: "Foreground-only Windows operation: bring one visible window to the foreground. This intentionally changes user focus and should be called only with explicit user consent.", action: "computer.focus_window", properties: { device_id: DEVICE, space_id: SPACE, handle: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "handle"] },
@@ -753,8 +753,8 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
 }
 
 /**
- * Promote an already-authorized, completed artifact.preview image into the
- * MCP image content block. Keep the exact queue receipt and metadata; never
+ * Promote an already-authorized completed artifact.preview or explicit
+ * computer.screenshot image into one native MCP image content block. Keep the exact queue receipt and metadata; never
  * echo a second copy of the encoded pixels in text or structuredContent.
  *
  * This is presentation only, not an authorization or device-action fallback.
@@ -767,7 +767,8 @@ function nativeArtifactImageReceipt(payload: unknown): { metadata: JsonObject; m
   const action = receipt.action;
   if (!action || typeof action !== "object" || Array.isArray(action)) return null;
   const completed = action as JsonObject;
-  if (completed.name !== "artifact.preview" || completed.status !== "succeeded") return null;
+  if ((completed.name !== "artifact.preview" && completed.name !== "computer.screenshot")
+    || completed.status !== "succeeded") return null;
   const result = completed.result;
   if (!result || typeof result !== "object" || Array.isArray(result)) return null;
   const outcome = result as JsonObject;

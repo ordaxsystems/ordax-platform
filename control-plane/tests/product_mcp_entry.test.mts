@@ -371,6 +371,7 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.deepEqual((byName.get("ordax_surface_open") as any).inputSchema.required, ["device_id", "appId"]);
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_screenshot") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("computer_screenshot") as any).inputSchema.properties.include_preview.type, "boolean");
   assert.equal((byName.get("computer_clipboard_read") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_text_read") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_click") as any).annotations.readOnlyHint, false);
