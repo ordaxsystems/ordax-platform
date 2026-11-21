@@ -105,6 +105,57 @@ test("Forge native marker never converts an unbound session into a device author
   });
 });
 
+test("Forge Native verifies the signed OAuth token only once per open/resolve request",async()=>{
+  await withIssuer(async()=>{
+    const jwt=await token({client_id:FORGE_CLIENT});
+    const verifyOriginal=crypto.subtle.verify.bind(crypto.subtle);
+    const verifyDescriptor=Object.getOwnPropertyDescriptor(crypto.subtle,"verify");
+    let verifies=0;
+    Object.defineProperty(crypto.subtle,"verify",{
+      configurable:true,
+      value:async(...args:Parameters<SubtleCrypto["verify"]>)=>{
+        verifies++;
+        return verifyOriginal(...args);
+      },
+    });
+    try {
+      const opened=await openCentralSessionFromMcp(nativeRequest(jwt),enabled,{
+        open:async()=>({ok:true,status:"awaiting_owner"}),
+      });
+      assert.equal(opened.status,202);
+      assert.equal(verifies,1,"native open must not re-verify the token after marker validation");
+
+      const resolved=await resolveCentralSessionFromMcp(nativeRequest(jwt),enabled,{
+        resolve:async()=>({ok:true,device_id:DEVICE}),
+      });
+      assert.equal(resolved.ok,true);
+      assert.equal(verifies,2,"native resolve must verify once, not twice");
+
+      assert.equal(await centralSessionMarker(nativeRequest(jwt),enabled),
+        "forge-native-v1:"+NONCE);
+      assert.equal(verifies,3,"standalone marker still independently verifies OAuth");
+    } finally {
+      if(verifyDescriptor) Object.defineProperty(crypto.subtle,"verify",verifyDescriptor);
+      else Reflect.deleteProperty(crypto.subtle,"verify");
+    }
+  });
+});
+
+test("native correlation keeps signed-client denial even with request-local proof reuse",async()=>{
+  await withIssuer(async()=>{
+    const clientMismatch=await token({client_id:OTHER_CLIENT});
+    let opens=0,resolves=0;
+    assert.equal((await openCentralSessionFromMcp(nativeRequest(clientMismatch),enabled,{
+      open:async()=>{opens++;return {ok:true,status:"bound"};},
+    })).status,409);
+    assert.deepEqual(await resolveCentralSessionFromMcp(nativeRequest(clientMismatch),enabled,{
+      resolve:async()=>{resolves++;return {ok:true,device_id:DEVICE};},
+    }),{ok:false,error:"central_session_marker_required"});
+    assert.equal(opens,0);
+    assert.equal(resolves,0);
+  });
+});
+
 test("ChatGPT correlation retains existing behavior without native rollout",async()=>{
   const jwt=await token();
   const req=new Request("https://mcp.ordax.com.br/mcp",{

@@ -1,4 +1,4 @@
-import { authenticateProductMcpClientRequest, type ProductAuthEnv } from "./product_auth.ts";
+import { authenticateProductMcpClientRequest, type ProductAuthEnv, type VerifiedProductMcpClient } from "./product_auth.ts";
 import { scheduleProductDeviceWake } from "./product_device_wake.ts";
 import { validChatGptSessionMarker } from "./product_central_admission.ts";
 import {
@@ -44,13 +44,20 @@ async function sha256(value: string): Promise<string> {
  * or create an alternate device executor. Explicit rollout and the pinned
  * Forge OAuth client ID are required before even opening a challenge.
  */
-export async function centralSessionMarker(
-  request: Request, env?: Env,
-): Promise<string | null> {
+type NativeClientProof = Extract<VerifiedProductMcpClient, { ok: true }>;
+type CentralMarkerContext = Readonly<{
+  marker: string | null;
+  nativeClientProof: NativeClientProof | null;
+}>;
+
+/** A verified native identity is reusable only in this request's open/resolve
+ * call. Nothing survives the request or substitutes for the fresh SQL check. */
+async function centralSessionContext(request: Request, env?: Env): Promise<CentralMarkerContext> {
+  const denied = { marker: null, nativeClientProof: null } as const;
   const body = await readBoundedJsonObject(request.clone(), MAX_MCP_REQUEST_BYTES);
-  if (!validMcpToolCallEnvelope(body)) return null;
+  if (!validMcpToolCallEnvelope(body)) return denied;
   const meta = body.params._meta;
-  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return denied;
   const native = (meta as Json)["ordax/native-session"];
   const chatgpt = (meta as Json)["openai/session"];
   // No ambiguous identity namespaces or shadow fallback.
@@ -59,17 +66,26 @@ export async function centralSessionMarker(
       || typeof env.FORGE_NATIVE_OAUTH_CLIENT_ID !== "string"
       || !isCanonicalUuid(env.FORGE_NATIVE_OAUTH_CLIENT_ID)
       || typeof native !== "string"
-      || !/^[A-Za-z0-9_-]{43}$/.test(native)) return null;
+      || !/^[A-Za-z0-9_-]{43}$/.test(native)) return denied;
     const identity = await authenticateProductMcpClientRequest(request.clone(), env);
     if (!identity.ok
       || identity.clientId !== env.FORGE_NATIVE_OAUTH_CLIENT_ID.toLowerCase())
-      return null;
+      return denied;
     // Domain-separate the SQL hash from ChatGPT conversation correlations.
     // The nonce is generated only by the native Forge Core and never shown in
     // a tool result, App renderer, device selection or URL.
-    return "forge-native-v1:" + native;
+    return { marker: "forge-native-v1:" + native, nativeClientProof: identity };
   }
-  return validChatGptSessionMarker(chatgpt) ? chatgpt : null;
+  return {
+    marker: validChatGptSessionMarker(chatgpt) ? chatgpt : null,
+    nativeClientProof: null,
+  };
+}
+
+export async function centralSessionMarker(
+  request: Request, env?: Env,
+): Promise<string | null> {
+  return (await centralSessionContext(request, env)).marker;
 }
 
 export async function openCentralSessionFromMcp(
@@ -81,15 +97,17 @@ export async function openCentralSessionFromMcp(
     scheduleWake?: (wake: Promise<void>) => void;
   } = {},
 ): Promise<Response> {
-  const marker = await centralSessionMarker(request, env);
-  if (!marker) return json({ ok: false, error: "central_session_marker_required" }, 409);
-  const identity = await authenticateProductMcpClientRequest(request, env);
+  const context = await centralSessionContext(request, env);
+  if (!context.marker) return json({ ok: false, error: "central_session_marker_required" }, 409);
+  // Forge Native already checked this exact signed OAuth client while
+  // validating its nonce; do not verify the same JWT twice in one request.
+  const identity = context.nativeClientProof ?? await authenticateProductMcpClientRequest(request, env);
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
   try {
     const result = await (deps.open ?? openCentralDeviceSession)(env, {
       ownerUserId: identity.ownerUserId,
       clientId: identity.clientId,
-      sessionSha256: await sha256(marker),
+      sessionSha256: await sha256(context.marker),
     });
     if (result.ok !== true) {
       const code = typeof result.error === "string" ? result.error : "central_session_unavailable";
@@ -124,15 +142,15 @@ export async function resolveCentralSessionFromMcp(
   env: Env,
   deps: { resolve?: typeof resolveCentralDeviceSession } = {},
 ) {
-  const marker = await centralSessionMarker(request, env);
-  if (!marker) return { ok: false as const, error: "central_session_marker_required" };
-  const identity = await authenticateProductMcpClientRequest(request, env);
+  const context = await centralSessionContext(request, env);
+  if (!context.marker) return { ok: false as const, error: "central_session_marker_required" };
+  const identity = context.nativeClientProof ?? await authenticateProductMcpClientRequest(request, env);
   if (!identity.ok) return { ok: false as const, error: identity.error };
   try {
     const result = await (deps.resolve ?? resolveCentralDeviceSession)(env, {
       ownerUserId: identity.ownerUserId,
       clientId: identity.clientId,
-      sessionSha256: await sha256(marker),
+      sessionSha256: await sha256(context.marker),
     });
     if (result.ok !== true || !isCanonicalUuid(result.device_id)) {
       return { ok: false as const, error: result.error ?? "central_session_unbound" };
