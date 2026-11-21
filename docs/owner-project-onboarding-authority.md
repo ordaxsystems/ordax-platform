@@ -2,6 +2,12 @@
 
 Status: **Project onboarding, server-authoritative GitHub repository selection and two-party Project↔Device binding are implemented in the Platform backend. The OrdaX Desktop and standalone Windows agent Project Catalog adapters are implemented and tested; Account release, GitHub App configuration, real Owner onboarding and Product grants remain independently gated.**
 
+## GitHub App configuration verification — 21/11/2026
+
+The owner registered `OrdaX Projects` for the `ordaxsystems` organization. Verified directly in Cloudflare Worker `ordax-mcp` settings: `PRODUCT_GITHUB_APP_CLIENT_ID`, `PRODUCT_GITHUB_APP_CLIENT_SECRET`, `PRODUCT_GITHUB_APP_PKCE_SECRET`, and `PRODUCT_GITHUB_APP_INSTALL_URL` are all present as `secret_text`. The Client Secret was rotated from its earlier `plain_text` binding; no secret value was disclosed or copied into repository files. Latest inspected Worker deployment `ad1c4a10-60ea-4790-b348-2e8a2b1c404a` receives 100% of traffic.
+
+**Scope of proof:** secure binding presence/type is confirmed, but correct OAuth exchange, GitHub App organization installation, authorized user consent, repository selection and Project/device binding are **not** verified. `OWNER_PROJECT_DEVICE_BINDING_ENABLED` remains absent; do not enable it as a substitute for the real Owner release gate. The preflight below is historical evidence before credential setup, not the current configuration state.
+
 ## Production preflight — 21/11/2026 (read-only evidence)
 
 - Supabase canonical project `jhfphsjptrpmtnzkpwud`: **1 active Space; 0 active Projects; 0 active repository connections** for `ordaxsystems/ordax-runtime`; for the authorized Windows `DESKTOP-4UFL03B`, **0 active Project/device bindings, 0 active execute Space/device rows, and 0 active project-scoped grants**. These are observed counts, not permission to insert bypass records.
