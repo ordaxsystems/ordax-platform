@@ -191,10 +191,19 @@ test("unregistered repository/Space/device binding fails before grant listing or
   for (const [action, args] of [
     ["process.list", {}],
     ["terminal.exec", { argv: ["python", "--version"] }],
+    ["blender.live_status", {}],
+    ["blender.live_rig_create", {
+      name: "Rig", bones: [{ name: "Root", head: [0, 0, 0], tail: [0, 0, 1] }],
+    }],
   ] as const) {
     const response = await handler(actionRequest(action, args));
     assert.equal(response.status, 403);
-    assert.deepEqual(await response.json(), { ok: false, error: "product_project_scope_not_found" });
+    assert.deepEqual(await response.json(), {
+      ok: false, error: "product_project_scope_not_found",
+      setup_required: "space_project_repository_device_binding",
+      owner_action: "register_project_and_device_in_ordax_owner",
+      action_dispatched: false,
+    });
   }
 });
 

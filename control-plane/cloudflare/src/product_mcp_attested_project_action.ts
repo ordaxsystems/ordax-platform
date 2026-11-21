@@ -445,7 +445,16 @@ export function createAttestedProjectActionHandler(
       return json({ ok: false, error: "product_project_scope_unavailable" }, 503);
     }
     const scope = parseScope(resolvedRaw);
-    if (!scope) return json({ ok: false, error: scopeError(resolvedRaw) }, 403);
+    if (!scope) {
+      const error = scopeError(resolvedRaw);
+      // A missing canonical Project binding is not a grant or an executable
+      // action. Give the Owner one precise onboarding path, without trying
+      // alternate repository/device scopes or queuing a Blender command.
+      return json(error === "product_project_scope_not_found"
+        ? { ok: false, error, setup_required: "space_project_repository_device_binding",
+            owner_action: "register_project_and_device_in_ordax_owner", action_dispatched: false }
+        : { ok: false, error }, 403);
+    }
     if (scope.repositoryFullName.toLowerCase() !== repository.toLowerCase()) {
       return json({ ok: false, error: "product_project_scope_mismatch" }, 409);
     }
