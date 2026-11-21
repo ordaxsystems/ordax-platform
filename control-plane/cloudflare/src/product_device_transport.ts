@@ -11,7 +11,7 @@ import {
   confirmDeviceProjectBinding,
   claimProductActionAuthenticated,
   progressProductAction,
-  recordProductHeartbeat,
+  recordProductHeartbeatAuthenticated,
   renewProductActionLease,
   readDeviceProjectBindingIntents,
   resolveOrchestratorReadAuthorization,
@@ -213,36 +213,40 @@ export function canonicalDeviceHeartbeatDigest(body: Json): string | null {
     ? body.capabilities_digest.trim().toLowerCase() : "";
   return HEX64.test(digest) ? digest : null;
 }
-async function heartbeat(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
-  // Canonical agents send only a bounded digest and provenance fields.
-  // Old capability arrays and oversized payloads are rejected.
+async function heartbeatAuthenticated(request: Request, env: ProductPostgresEnv): Promise<Response> {
+  const credentials = deviceRequestCredentials(request);
+  if (!credentials) return respond({ ok: false, error: "device_auth_required" }, 401);
+  // Authenticate malformed requests before returning 400, preserving the
+  // original auth-first contract while avoiding two SQL calls for valid data.
+  const invalid = async () => {
+    const auth = await authenticateDeviceRequest(request, env);
+    return auth.ok ? respond({ ok: false, error: "heartbeat_invalid" }, 400) : auth.response;
+  };
   const body = await readBoundedJsonObject(request, 1024);
-  if (!body) return respond({ ok: false, error: "heartbeat_invalid" }, 400);
+  if (!body) return invalid();
   const status = body.status;
   const agentVersion = typeof body.agent_version === "string" ? body.agent_version.trim() : "";
   const capabilityDigest = canonicalDeviceHeartbeatDigest(body);
-  // An absent field means an older four-worker Runtime. Never infer a larger
-  // capacity from hardware, account grants or number of connected chats.
   const rawCapacity = body.max_concurrent_jobs;
   if (rawCapacity !== undefined && (typeof rawCapacity !== "number"
-      || !Number.isInteger(rawCapacity) || rawCapacity < 1 || rawCapacity > 32)) {
-    return respond({ ok: false, error: "heartbeat_invalid" }, 400);
-  }
+      || !Number.isInteger(rawCapacity) || rawCapacity < 1 || rawCapacity > 32))
+    return invalid();
   const maxConcurrentJobs = typeof rawCapacity === "number" ? rawCapacity : 4;
-  // The active Windows desktop-agent omits runtime_kind and remains
-  // "desktop-agent". Native OS Runtimes must declare their actual kind; this
-  // metadata is never a capability grant or an attested action session.
+  // Preserve the desktop-agent default and require an attested digest for
+  // explicit runtime_kind. Neither value is a grant.
   const runtimeKind = body.runtime_kind === undefined ? "desktop-agent" : body.runtime_kind;
   if ((status !== "online" && status !== "busy" && status !== "offline")
       || agentVersion.length < 1 || agentVersion.length > 80
       || capabilityDigest === null
       || typeof runtimeKind !== "string"
       || !RUNTIME_KINDS.has(runtimeKind as RuntimeKind)
-      || (body.runtime_kind !== undefined && !Object.prototype.hasOwnProperty.call(body, "capabilities_digest"))) {
-    return respond({ ok: false, error: "heartbeat_invalid" }, 400);
-  }
-  const heartbeatResult = await recordProductHeartbeat(env, {
-    deviceId,
+      || (body.runtime_kind !== undefined
+          && !Object.prototype.hasOwnProperty.call(body, "capabilities_digest")))
+    return invalid();
+
+  const heartbeatResult = await recordProductHeartbeatAuthenticated(env, {
+    deviceId: credentials.deviceId,
+    tokenSha256: await sha256Hex(credentials.rawToken),
     online: status !== "offline",
     runtimeKind: runtimeKind as RuntimeKind,
     agentVersion,
@@ -250,9 +254,10 @@ async function heartbeat(request: Request, env: ProductPostgresEnv, deviceId: st
     force: status === "offline",
     maxConcurrentJobs,
   });
-  if (heartbeatResult.ok !== true || typeof heartbeatResult.recorded !== "boolean") {
+  if (heartbeatResult.ok === false && heartbeatResult.error === "invalid_device_token")
+    return respond({ ok: false, error: "invalid_device_token" }, 401);
+  if (heartbeatResult.ok !== true || typeof heartbeatResult.recorded !== "boolean")
     return respond({ ok: false, error: "product_capacity_unavailable" }, 503);
-  }
   return respond({ ok: true, recorded: heartbeatResult.recorded,
     server_time: new Date().toISOString() });
 }
@@ -664,9 +669,16 @@ export async function handleProductDeviceTransport(
   }
   if (request.method !== "POST") return respond({ ok: false, error: "method_not_allowed" }, 405);
 
-  // The hot claim path composes the existing device authenticator and lease
-  // authority inside one PostgreSQL RPC. All other routes retain the normal
-  // auth-first path; unknown routes still never query SQL.
+  // High-frequency heartbeat and claim endpoints each authenticate inside
+  // a single SQL RPC. Unknown routes still never access PostgreSQL.
+  if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/heartbeat") {
+    try { return await heartbeatAuthenticated(request, env); }
+    catch (error) {
+      if (error instanceof ProductPostgresError)
+        return respond({ ok: false, error: error.code }, error.status);
+      return unexpectedProductDeviceTransportFailure(error, "execution", "heartbeat");
+    }
+  }
   if(path===PRODUCT_DEVICE_TRANSPORT_PREFIX+"/claim"){
     try{return await claimAuthenticated(request,env);}
     catch(error){
@@ -681,9 +693,6 @@ export async function handleProductDeviceTransport(
   // preserve the auth-first contract and must not expose feature flags.
   let execute: (deviceId: string) => Promise<Response>;
   switch (path) {
-    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/heartbeat":
-      execute = deviceId => heartbeat(request, env, deviceId);
-      break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/start":
       execute = deviceId => start(request, env, deviceId);
       break;
