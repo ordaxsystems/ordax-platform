@@ -155,7 +155,9 @@ test("terminal report and Runtime provenance commit in one PostgreSQL transactio
   assert.match(store, /callRpc<JsonObject>\(env, "ordax_report_product_action_atomic_v1"/);
   assert.match(source, /runtimeKind: provenance\?\.runtimeKind \?\? null/);
   assert.match(source, /agentVersion: provenance\?\.agentVersion \?\? null/);
-  assert.doesNotMatch(source, /await bindProductActionRuntimeProvenance\(/);
+  const terminalReportOnly = source.split("async function report(")[1]?.split("\n\nfunction exactKeys")[0];
+  assert.ok(terminalReportOnly, "terminal report handler must remain present");
+  assert.doesNotMatch(terminalReportOnly, /await bindProductActionRuntimeProvenance\(/);
 });
 
 test("device heartbeat persists one canonical digest, never a capability array", () => {
