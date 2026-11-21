@@ -133,7 +133,7 @@ test("device transport source has no D1, operator bearer, websocket queue, pairi
     "WebSocket", "pairing_secret", "/v3/artifacts/", "R2Bucket",
   ]) assert.equal(source.includes(forbidden), false, forbidden);
   for (const required of [
-    "authenticateProductDevice", "recordProductPresence", "claimProductAction",
+    "authenticateProductDevice", "recordProductHeartbeat", "claimProductAction",
     "startProductAction", "renewProductActionLease", "progressProductAction",
     "reportProductAction", "result_canonical_b64",
   ]) assert.equal(source.includes(required), true, required);
@@ -158,6 +158,23 @@ test("terminal report and Runtime provenance commit in one PostgreSQL transactio
   const terminalReportOnly = source.split("async function report(")[1]?.split("\n\nfunction exactKeys")[0];
   assert.ok(terminalReportOnly, "terminal report handler must remain present");
   assert.doesNotMatch(terminalReportOnly, /await bindProductActionRuntimeProvenance\(/);
+});
+
+test("Device heartbeat performs one atomic post-auth SQL RPC", () => {
+  const source = fs.readFileSync(SRC, "utf8");
+  const store = fs.readFileSync(path.resolve(HERE,
+    "../cloudflare/src/product_postgres_store.ts"), "utf8");
+  const migration = fs.readFileSync(path.resolve(HERE,
+    "../supabase/migrations/20261121002500_product_atomic_heartbeat_v1.sql"), "utf8");
+  const heartbeatSource = source.split("async function heartbeat(")[1]?.split("\n\n/**")[0];
+  assert.ok(heartbeatSource);
+  assert.match(heartbeatSource, /await recordProductHeartbeat\(env/);
+  assert.doesNotMatch(heartbeatSource, /await recordProductPresence\(|await recordProductCapacity\(/);
+  assert.match(store, /callRpc<\{ok: boolean; recorded\?: boolean; error\?: string\}>\(/);
+  assert.match(migration, /public\.ordax_record_product_presence_v1\(/);
+  assert.match(migration, /public\.ordax_record_product_capacity_v1\(/);
+  assert.match(migration, /exception when sqlstate 'P4102'/);
+  assert.match(migration, /to ordax_edge_executor;/);
 });
 
 test("device heartbeat persists one canonical digest, never a capability array", () => {
