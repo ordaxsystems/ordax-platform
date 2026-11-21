@@ -2,6 +2,15 @@
 
 Status: **Project onboarding, server-authoritative GitHub repository selection and two-party Project↔Device binding are implemented in the Platform backend. The OrdaX Desktop and standalone Windows agent Project Catalog adapters are implemented and tested; Account release, GitHub App configuration, real Owner onboarding and Product grants remain independently gated.**
 
+## Owner Project/OAuth retry and credential authority — 21/11/2026
+
+- User reconfirmed approval to enable **only** Project creation and GitHub OAuth, not Project/device binding, grants, or Device console rollout. The approved release gate remained `owner_project_rollout=enable` and `owner_device_console_rollout=unchanged`.
+- Latest reviewed `ordax-os/main` was `4cb6969e7f6935e5e283e456001e96a3e46bc3c3` (all GitHub checks green after correcting the unrelated Forge documentation EOF whitespace); destination contract, 5+11 Python tests, Owner/usage/release Node suites and 5/5 negative production checks passed.
+- Canonical workflow [#44940791475](https://github.com/ordaxsystems/ordax-os/actions/runs/44940791475) **failed** after a successful source deployment: `Apply explicit Owner Project setup rollout` was denied again with missing `edge_functions_secrets_write`. Published `ordax-account-gateway` **v26 ACTIVE**, **13/13** deployed source files matched the approved SHA. No Owner release receipt, no confirmed Project/OAuth enablement.
+- **Definitive GitHub Actions metadata check:** repository secret `ordaxsystems/ordax-os / SUPABASE_ACCESS_TOKEN` `updated_at=2026-11-21T18:33:00Z`, **earlier** than both failed rollout attempts at approximately 19:08Z and 19:25Z. Therefore a claimed replacement was not visible to this exact repository secret. Check repository secret name/scope, GitHub account and whether the user saved to a different repository or to Supabase rather than GitHub. Do not read or copy token values into conversations or docs.
+- PostgreSQL after latest attempt: **0 active Projects, 0 active repository connections, 0 Project/device bindings, 0 active Project grants**. Do not force flags by SQL or create Project/device/grant rows. The separate Platform binding gate remains disabled.
+- **Do not repeat deployment** with this unchanged token. Correct the existing `SUPABASE_ACCESS_TOKEN` **Repository secret** at `ordaxsystems/ordax-os/settings/secrets/actions`, using a new project-scoped Supabase PAT for `jhfphsjptrpmtnzkpwud` with `edge_functions_secrets_write` explicitly granted. Require a GitHub `updated_at` **newer than the failed run** before any new workflow dispatch, then reconfirm green checks and exact current main SHA. The prior workflow re-deployed code but could not update configuration.
+
 ## Owner Project/OAuth release checkpoint — 21/11/2026
 
 - **Approved production scope:** only Project creation and GitHub App OAuth setup, via the canonical `ordax-os` Account Gateway workflow, `owner_project_rollout=enable`, `owner_device_console_rollout=unchanged`. Never auto-create Projects, bind devices or issue Project grants.
