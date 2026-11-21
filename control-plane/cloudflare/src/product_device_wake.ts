@@ -14,7 +14,9 @@ const MAX_DEVICE_WATCHERS = 4;
 const MAX_COMPLETION_WAITERS = 128;
 const MAX_RECENT_COMPLETIONS = 256;
 const COMPLETION_RETENTION_MS = 60_000;
-const MAX_COMPLETION_WAIT_MS = 5_000;
+// A single longer advisory wait reduces repeated status SQL for slow actions;
+// caller deadlines still cap it and every eventual result is PostgreSQL-verified.
+const MAX_COMPLETION_WAIT_MS = 10_000;
 
 export class ProductDeviceWake {
   private readonly ctx: DurableObjectState;

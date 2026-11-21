@@ -275,3 +275,18 @@ autorizada pelo PostgreSQL antes de aguardar o sinal. Esta economia
 **não é uma redução global medida de Hyperdrive**: depende da distribuição
 de latência das ações e de sinais realmente recebidos. A meta de 70%
 continua condicionada a uma comparação de carga equivalente.
+
+### ProductDeviceWake — espera de conclusão de até 10 segundos (21/11/2026)
+
+O mesmo Durable Object canônico agora aceita uma única espera de conclusão de
+até 10 s (antes 5 s), limitada pelo prazo restante do próprio chamador.
+Em ações que permanecem pendentes por 20 s, isso pode reduzir a quantidade
+de ciclos DO timeout → leitura PostgreSQL de aproximadamente quatro para
+aproximadamente dois, sem alterar o período total da chamada ou a prontidão
+de um sinal real de conclusão (que encerra a espera imediatamente).
+Status direto de um ID arbitrário continua SQL-first; todo timeout, falha,
+aviso antigo ou aviso novo depende de uma leitura SQL autenticada para
+publicar o estado real. Nenhuma fila, credencial, grant ou resultado passa
+a ser armazenado no DO. A economia global só pode ser afirmada com medição
+comparável de tráfego/consultas; prolongar uma espera também pode afetar
+custos de duração do Durable Object, a serem acompanhados em Analytics.

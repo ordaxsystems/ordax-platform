@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   ProductDeviceWake,
   notifyProductDeviceWake,
+  waitProductActionCompletion,
   scheduleProductDeviceWake,
   subscribeProductDeviceWake,
 } from "../cloudflare/src/product_device_wake.ts";
@@ -154,4 +155,43 @@ test("lost completion hints time out for canonical recovery, never produce a rec
     "https://ordax-device-wake.internal/completion-wait?request_id=" + DEVICE + "&timeout_ms=10"));
   assert.equal(response.status, 408);
   assert.equal(await response.text(), "");
+});
+
+test("completion hints wait up to 10s, never beyond the caller deadline or DO contract", async () => {
+  const requests: string[] = [];
+  const env = { PRODUCT_DEVICE_WAKE_ENABLED: "enabled", DEVICE_WAKE: {
+    idFromName: (name: string) => { assert.equal(name, DEVICE); return "internal-id"; },
+    get: (id: string) => {
+      assert.equal(id, "internal-id");
+      return { fetch: async (url: string, options: RequestInit) => {
+        assert.equal(options.method, "GET");
+        requests.push(url);
+        return new Response(null, { status: 408 });
+      } };
+    },
+  } } as any;
+  for (const [budget, expected] of [[20_000, 10_000], [8000, 8000], [250, 250]] as const) {
+    assert.equal(await waitProductActionCompletion(env, DEVICE, DEVICE, budget), "timeout");
+    const last = new URL(requests.at(-1)!);
+    assert.equal(last.pathname, "/completion-wait");
+    assert.equal(last.searchParams.get("request_id"), DEVICE);
+    assert.equal(Number(last.searchParams.get("timeout_ms")), expected);
+  }
+  assert.equal(await waitProductActionCompletion(env, DEVICE, DEVICE, 0), "unavailable");
+  assert.equal(requests.length, 3, "zero wait must not call DO");
+});
+
+test("DO accepts a 10-second advisory waiter and rejects any larger duration", async () => {
+  const object = new ProductDeviceWake({} as any);
+  const root = "https://ordax-device-wake.internal";
+  const waiting = object.fetch(new Request(root + "/completion-wait?request_id="
+    + DEVICE + "&timeout_ms=10000"));
+  const posted = await object.fetch(new Request(root + "/completion?request_id="
+    + DEVICE, { method: "POST" }));
+  assert.equal(posted.status, 204);
+  assert.equal((await waiting).status, 204,
+    "longer wait must still resolve immediately on the actual completion signal");
+  const rejected = await object.fetch(new Request(root + "/completion-wait?request_id="
+    + DEVICE + "&timeout_ms=10001"));
+  assert.equal(rejected.status, 400);
 });
