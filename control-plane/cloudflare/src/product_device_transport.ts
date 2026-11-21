@@ -283,12 +283,17 @@ async function start(request: Request, env: ProductPostgresEnv, deviceId: string
   if (!ctx || (body && hasRuntimeProvenance(body) && !provenance)) {
     return respond({ ok: false, error: "start_invalid" }, 400);
   }
-  if (provenance) {
-    const bound = await bindProductActionRuntimeProvenance(env, { deviceId, ...ctx, ...provenance });
-    if (!bound) return respond({ ok: false, error: "runtime_provenance_conflict" }, 409);
-  }
-  const ok = await startProductAction(env, { deviceId, ...ctx });
-  return respond({ ok, ...(ok ? {} : { error: "lease_not_active" }) }, ok ? 200 : 409);
+  const started = await startProductAction(env, {
+    deviceId, ...ctx,
+    runtimeKind: provenance?.runtimeKind ?? null,
+    agentVersion: provenance?.agentVersion ?? null,
+  });
+  if (started.ok === true) return respond({ ok: true });
+  return respond({
+    ok: false,
+    error: started.error === "runtime_provenance_conflict"
+      ? "runtime_provenance_conflict" : "lease_not_active",
+  }, 409);
 }
 
 async function lease(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
