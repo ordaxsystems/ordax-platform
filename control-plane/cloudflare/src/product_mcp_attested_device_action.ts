@@ -28,7 +28,9 @@ import {
   PROCESS_COMPUTER_CONTROL_MODE,
   OWNER_DEVICE_COMPUTER_GRANT_PROFILES,
   NATIVE_SURFACE_DEVICE_ACTIONS,
+  DEVICE_BLENDER_ACTIONS,
 } from "./product_action_scope.ts";
+import { validAttestedBlenderActionArguments } from "./product_mcp_attested_project_action.ts";
 import { productCapabilityAccessMode } from "./product_owner_grant_profiles.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
@@ -81,6 +83,7 @@ const ATTESTED_DEVICE_PROCESS_ACTIONS = new Set(["computer.process_start", "comp
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   "forge.app_read",
   ...NATIVE_SURFACE_DEVICE_ACTIONS,
+  ...DEVICE_BLENDER_ACTIONS,
   ...OBSERVE_ACTIONS,
   ...INTERACTIVE_ACTIONS,
   ...ATTESTED_FILESYSTEM_READ_ACTIONS,
@@ -110,6 +113,7 @@ function validAttestedDevice(value: AttestedMcpDevice | null): value is Attested
 }
 
 function requiredProfile(action: string): string | null {
+  if (DEVICE_BLENDER_ACTIONS.has(action)) return "device-blender-control";
   if (action === "forge.app_read") return "forge-app-read";
   if (action === "ordax.surface.status") return "ordax-surface-read";
   if (action === "ordax.surface.open") return "ordax-surface-control";
@@ -169,6 +173,9 @@ function validButton(value: unknown): boolean {
 /** Strict argument allowlist for the published attested device tranche. */
 export function validAttestedDeviceActionArguments(action: string, value: unknown): value is Json {
   if (!ATTESTED_MCP_DEVICE_ACTIONS.has(action) || !isRecord(value)) return false;
+  if (DEVICE_BLENDER_ACTIONS.has(action)) {
+    return validAttestedBlenderActionArguments(action.replace("computer.blender_", "blender.live_"), value);
+  }
   const keys = Object.keys(value);
   if (action === "forge.app_read" || action === "ordax.surface.status") return keys.length === 0;
   if (action === "ordax.surface.open") return keysOnly(value, ["appId"])
@@ -461,7 +468,8 @@ export function catalogAllowsAttestedDeviceAction(
     if (expires !== undefined && expires !== null
       && (typeof expires !== "string" || !Number.isFinite(Date.parse(expires)))) return false;
     if (typeof expires === "string" && Date.parse(expires) <= Date.now()) continue;
-    if (action === "forge.app_read" && rawGroup.profile_key !== profile) continue;
+    if ((action === "forge.app_read" || DEVICE_BLENDER_ACTIONS.has(action))
+      && rawGroup.profile_key !== profile) continue;
     // OrdaX Native authority cannot be inherited from Windows full-computer-control.
     if (NATIVE_SURFACE_DEVICE_ACTIONS.has(action)
       && !(rawGroup.profile_key === profile

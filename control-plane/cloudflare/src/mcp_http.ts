@@ -1,4 +1,4 @@
-import { OWNER_DEVICE_COMPUTER_GRANT_PROFILES } from "./product_action_scope.ts";
+import { OWNER_DEVICE_COMPUTER_GRANT_PROFILES, DEVICE_BLENDER_ACTIONS, deviceBlenderAction } from "./product_action_scope.ts";
 import { OWNER_MCP_GRANT_PROFILES } from "./product_owner_grant_profiles.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
@@ -57,6 +57,7 @@ interface ToolSpec {
   description: string;
   action?: string;
   projectRequired?: boolean;
+  projectOptional?: boolean;
   properties?: Record<string, JsonObject>;
   required?: string[];
 }
@@ -201,16 +202,16 @@ const TOOLS: ToolSpec[] = [
   { name: "computer_path_remove", description: "Remove an allowed computer path. Recursive directory removal requires recursive=true.", action: "computer.path_remove", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, recursive: BOOLEAN, expected_sha256: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "artifacts_list", description: "List bounded artifact metadata for a granted project.", action: "artifacts.list", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, max_items: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "artifact_preview", description: "Read a bounded preview of a granted project artifact.", action: "artifact.preview", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, artifact_name: STRING, project_artifact_path: STRING, thumbnail: BOOLEAN, max_bytes: { type: "integer", minimum: 1, maximum: 262144 }, max_width: { type: "integer", minimum: 1, maximum: 4096 }, max_height: { type: "integer", minimum: 1, maximum: 4096 }, quality: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "blender_status", description: "Read sanitized live Blender status for a project.", action: "blender.live_status", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "blender_scene_snapshot", description: "Inspect a bounded snapshot of the live Blender scene.", action: "blender.live_scene_snapshot", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, max_objects: { type: "integer", minimum: 1, maximum: 10000 }, object_names: { type: "array", items: STRING, maxItems: 256 }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "blender_object_inspect", description: "Inspect one live Blender object by name or ORDAX object id.", action: "blender.live_object_inspect", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, object_name: STRING, ordax_object_id: STRING, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "blender_modeling_schema", description: "Read the validated live Blender modeling contracts and guards.", action: "blender.live_modeling_schema", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "blender_start", description: "Adopt or start the project's visible Blender session without opening duplicate windows.", action: "blender.live_start", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_seconds: NUMBER, timeout_seconds: NUMBER, pid: { type: "integer", minimum: 1 }, adopt_blank: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "blender_transform", description: "Apply a validated transform to one live Blender object.", action: "blender.live_object_transform", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, object_name: STRING, ordax_object_id: STRING, location: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, rotation_euler: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, scale: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, dimensions: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "blender_create_primitive", description: "Create a bounded validated primitive in the live Blender scene.", action: "blender.live_create_primitive", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, name: STRING, primitive: STRING, location: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, size: NUMBER, radius: NUMBER, depth: NUMBER, segments: { type: "integer" }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "name", "primitive"] },
-  { name: "blender_rig_create", description: "Create a validated armature with 1-64 ordered parented bones in a linked Blender project.", action: "blender.live_rig_create", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, name: STRING, bones: { type: "array", minItems: 1, maxItems: 64, items: { type: "object", properties: { name: STRING, head: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, tail: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, parent: STRING }, required: ["name", "head", "tail"], additionalProperties: false } }, location: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "name", "bones"] },
-  { name: "blender_apply_material", description: "Apply a validated material to one live Blender object.", action: "blender.live_material_apply", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, object_name: STRING, ordax_object_id: STRING, material_name: STRING, base_color: { type: "array", items: NUMBER, minItems: 3, maxItems: 4 }, roughness: NUMBER, metallic: NUMBER, transmission: NUMBER, alpha: NUMBER, ior: NUMBER, surface_render_method: STRING, transparency_overlap: BOOLEAN, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "material_name"] },
-  { name: "blender_save", description: "Save the granted live Blender project.", action: "blender.live_save", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, target_path: STRING, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
+  { name: "blender_status", description: "Read sanitized live Blender status for the device or a linked project.", action: "blender.live_status", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "blender_scene_snapshot", description: "Inspect a bounded snapshot of the live Blender scene.", action: "blender.live_scene_snapshot", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, max_objects: { type: "integer", minimum: 1, maximum: 10000 }, object_names: { type: "array", items: STRING, maxItems: 256 }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "blender_object_inspect", description: "Inspect one live Blender object by name or ORDAX object id.", action: "blender.live_object_inspect", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, object_name: STRING, ordax_object_id: STRING, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "blender_modeling_schema", description: "Read the validated live Blender modeling contracts and guards.", action: "blender.live_modeling_schema", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "blender_start", description: "Adopt or start the device or project's visible Blender session without opening duplicate windows.", action: "blender.live_start", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_seconds: NUMBER, timeout_seconds: NUMBER, pid: { type: "integer", minimum: 1 }, adopt_blank: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "blender_transform", description: "Apply a validated transform to one live Blender object.", action: "blender.live_object_transform", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, object_name: STRING, ordax_object_id: STRING, location: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, rotation_euler: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, scale: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, dimensions: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "blender_create_primitive", description: "Create a bounded validated primitive in the live Blender scene.", action: "blender.live_create_primitive", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, name: STRING, primitive: STRING, location: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, size: NUMBER, radius: NUMBER, depth: NUMBER, segments: { type: "integer" }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "name", "primitive"] },
+  { name: "blender_rig_create", description: "Create a validated armature with 1-64 ordered parented bones in a managed Blender session.", action: "blender.live_rig_create", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, name: STRING, bones: { type: "array", minItems: 1, maxItems: 64, items: { type: "object", properties: { name: STRING, head: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, tail: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, parent: STRING }, required: ["name", "head", "tail"], additionalProperties: false } }, location: { type: "array", items: NUMBER, minItems: 3, maxItems: 3 }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "name", "bones"] },
+  { name: "blender_apply_material", description: "Apply a validated material to one live Blender object.", action: "blender.live_material_apply", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, object_name: STRING, ordax_object_id: STRING, material_name: STRING, base_color: { type: "array", items: NUMBER, minItems: 3, maxItems: 4 }, roughness: NUMBER, metallic: NUMBER, transmission: NUMBER, alpha: NUMBER, ior: NUMBER, surface_render_method: STRING, transparency_overlap: BOOLEAN, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "material_name"] },
+  { name: "blender_save", description: "Save the managed live Blender scene. Without a project, save inside the local device Blender workspace.", action: "blender.live_save", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, target_path: STRING, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id"] },
 ];
 
 const READ_ONLY_TOOLS = new Set([
@@ -858,7 +859,8 @@ const OWNER_GRANT_HINT_BY_ACTION = new Map<string, OwnerGrantHint>([
     "browser.stop",
     "browser.type",
   ].map((action) => [action, { profile: "project-browser-automation", surface: BROWSER_GRANT_SURFACE }] as const),
-  ["terminal.exec"].map((action) =>
+  ...[...DEVICE_BLENDER_ACTIONS].map((action) => [action, { profile: "device-blender-control", surface: COMPUTER_GRANT_SURFACE }] as const),
+  ...["terminal.exec"].map((action) =>
     [action, { profile: "project-native-terminal", surface: PROJECT_GRANT_SURFACE }] as const),
   ["process.start", "process.status", "process.list", "process.logs",
     "process.write_stdin", "process.stop"].map((action) =>
@@ -1255,7 +1257,17 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   const spec = specFor(name);
   if (!spec?.action) return textToolResult({ ok: false, error: "tool_not_found", tool: name }, true);
   const deviceId = typeof args.device_id === "string" ? args.device_id : "";
-  const project = spec.projectRequired && typeof args.project === "string" ? args.project : null;
+  const explicitProject = Object.hasOwn(args, "project");
+  // Only omission selects device mode. Explicit invalid/null/empty input is
+  // never silently downgraded to broader device authority.
+  if (spec.projectOptional && explicitProject
+      && (typeof args.project !== "string" || !/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(args.project))) {
+    return textToolResult({ ok: false, error: "project_invalid", action_dispatched: false }, true);
+  }
+  const project = (spec.projectRequired || spec.projectOptional) && typeof args.project === "string" ? args.project : null;
+  const selectedCapability = spec.projectOptional && !explicitProject
+    ? deviceBlenderAction(spec.action) : spec.action;
+  if (!selectedCapability) return textToolResult({ ok: false, error: "tool_not_found" }, true);
   // A supplied but invalid Space must never be silently converted into
   // an unscoped action. The canonical Product authority still decides whether
   // the exact UUID is granted; the MCP boundary only validates the input.
@@ -1286,7 +1298,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   const createRequest = cloneWithAuth(source, new URL("/v3/product/actions", source.url).toString(), "POST", {
     device_id: deviceId,
     space_id: spaceId,
-    action: spec.action,
+    action: selectedCapability,
     project,
     arguments: actionArgs,
   });
@@ -1358,7 +1370,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
         action_dispatched: false, attested: false,
       }, false);
     }
-    if (spec.projectRequired && createdPayload.error === "product_project_scope_not_found") {
+    if ((spec.projectRequired || (spec.projectOptional && explicitProject)) && createdPayload.error === "product_project_scope_not_found") {
       // A missing Owner-managed Space/project/repository/device association
       // precedes grant evaluation. Never suggest a Windows global grant,
       // fabricate a project ID, or surface private repository metadata.
@@ -1370,7 +1382,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       }, true);
     }
     if (createdPayload.error === "product_grant_not_resolved") {
-      const hint = authorizationHintForAction(spec.action);
+      const hint = authorizationHintForAction(selectedCapability);
       return textToolResult({ ok: false, error: "product_grant_not_resolved", ...hint }, true);
     }
     if (createdPayload.error === "product_attested_device_mismatch") {

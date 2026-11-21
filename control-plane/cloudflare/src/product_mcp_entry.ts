@@ -234,6 +234,7 @@ function resourceMetadata(origin: string, issuer: string) {
 type McpRoutingHint = Readonly<{
   toolName: string;
   explicitNonNullSpace: boolean;
+  explicitProject: boolean;
 }>;
 
 async function mcpRoutingHint(request: Request): Promise<McpRoutingHint | null> {
@@ -249,6 +250,7 @@ async function mcpRoutingHint(request: Request): Promise<McpRoutingHint | null> 
   const args = body.params.arguments;
   return {
     toolName: name,
+    explicitProject: !!args && typeof args === "object" && Object.hasOwn(args, "project"),
     // Device-scoped commands never inherit a model-supplied Space. Detect
     // that denial without creating an Owner challenge for an impossible call.
     // Project-scoped commands still resolve their Space via the canonical RPC.
@@ -573,7 +575,8 @@ export function createCanonicalProductMcpGateway(
         };
       }
       if (toolName && allowedTools.has(toolName)
-        && ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)
+        && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)
+          || (ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) && !routingHint?.explicitProject))
         && routingHint?.explicitNonNullSpace) {
         // The canonical device handler accepts space_id=null only. Reject
         // the explicit foreign/invalid Space at the authenticated JSON-RPC
@@ -625,7 +628,7 @@ export function createCanonicalProductMcpGateway(
                   ...(trustFailure === "central_session_owner_selection_required" && ownerChallengeId
                     ? { challenge_id: ownerChallengeId, action_dispatched: false } : {}),
                 }, 409)
-              : (ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName) || ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName)
+              : (ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName) || (ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) && routingHint?.explicitProject)
                 || ATTESTED_PROJECT_BROWSER_TOOLS.has(toolName))
               ? createAttestedProjectActionHandler(env, trusted, wakeDependencies)
               : ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)

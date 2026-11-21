@@ -832,3 +832,33 @@ test("saturated device reports busy immediately without creating a pending recei
     ok: false, error: "product_device_busy", action_dispatched: false,
   });
 });
+
+test("local Blender uses a separate device grant, typed arguments and null project/Space", async () => {
+  const action = "computer.blender_rig_create";
+  const args = { name: "Rig", bones: [{ name: "Root", head: [0,0,0], tail: [0,0,1] }] };
+  assert.equal(validAttestedDeviceActionArguments(action, args), true);
+  assert.equal(validAttestedDeviceActionArguments(action, { ...args, project: "repo" }), false);
+  assert.equal(validAttestedDeviceActionArguments("computer.blender_run_script", {}), false);
+  const allowed = catalog(grantGroup("device-blender-control", action, "write"));
+  for (const profile of ["full-computer-control", "project-blender-control"]) {
+    assert.equal(catalogAllowsAttestedDeviceAction(catalog(grantGroup(profile, action, "write")), DEVICE, action), false);
+  }
+  assert.equal(catalogAllowsAttestedDeviceAction(catalog(grantGroup("device-blender-control", action, "read")), DEVICE, action), false);
+  let calls = 0;
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => allowed,
+    enqueue: async (_env, input) => {
+      calls++;
+      assert.equal(input.capability, action);
+      assert.equal(input.projectId, null);
+      assert.equal(input.spaceId, null);
+      assert.equal(input.accessMode, "write");
+      assert.deepEqual(input.payload, args);
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+  });
+  assert.equal((await handler(actionRequest(action, { ...args, project: "fake" }))).status, 400);
+  assert.equal((await handler(actionRequest(action, args))).status, 202);
+  assert.equal(calls, 1);
+});

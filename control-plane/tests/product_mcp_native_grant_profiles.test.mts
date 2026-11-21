@@ -74,3 +74,16 @@ test("Blender Owner profile is project-scoped, typed, and isolated from Computer
   assert.equal(productCapabilityAccessMode("blender.live_scene_snapshot"), "read");
   assert.equal(productCapabilityAccessMode("blender.live_rig_create"), "write");
 });
+
+test("Blender on a device has independent typed read/write authority", () => {
+  const local = ownerMcpGrantProfile("device-blender-control");
+  const project = ownerMcpGrantProfile("project-blender-control");
+  assert.equal(local?.scope, "device");
+  assert.equal(local?.capabilities.length, 10);
+  for (const item of project!.capabilities) {
+    const deviceAction = item.capability.replace("blender.live_", "computer.blender_");
+    assert.deepEqual(local?.capabilities.find(x => x.capability === deviceAction),
+      { capability: deviceAction, accessMode: item.accessMode });
+    assert.equal(ownerMcpGrantProfile("full-computer-control")?.capabilities.some(x => x.capability === deviceAction), false);
+  }
+});
