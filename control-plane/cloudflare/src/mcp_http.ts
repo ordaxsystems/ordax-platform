@@ -200,7 +200,7 @@ const TOOLS: ToolSpec[] = [
   { name: "computer_path_move", description: "Move or rename an allowed computer path.", action: "computer.path_move", properties: { device_id: DEVICE, space_id: SPACE, source: STRING, destination: STRING, overwrite: BOOLEAN, expected_sha256: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "source", "destination"] },
   { name: "computer_path_remove", description: "Remove an allowed computer path. Recursive directory removal requires recursive=true.", action: "computer.path_remove", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, recursive: BOOLEAN, expected_sha256: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "artifacts_list", description: "List bounded artifact metadata for a granted project.", action: "artifacts.list", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, max_items: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "artifact_preview", description: "Read a bounded preview of a granted project artifact.", action: "artifact.preview", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, artifact_name: STRING, project_artifact_path: STRING, thumbnail: BOOLEAN, max_bytes: { type: "integer", minimum: 1, maximum: 262144 }, max_width: { type: "integer", minimum: 1, maximum: 4096 }, max_height: { type: "integer", minimum: 1, maximum: 4096 }, quality: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
+  { name: "artifact_preview", description: "Preview one granted project artifact or up to 100 project images as a labeled, SHA-256 deduplicated JPEG contact sheet. Paths in project_artifact_paths must be relative to Artifacts and cannot be combined with artifact_name/project_artifact_path. Successful image previews are returned as native MCP image content, with an authorized receipt and original-item metadata.", action: "artifact.preview", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, artifact_name: STRING, project_artifact_path: STRING, project_artifact_paths: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1, maxItems: 100 }, thumbnail: BOOLEAN, max_bytes: { type: "integer", minimum: 1, maximum: 262144 }, max_width: { type: "integer", minimum: 1, maximum: 4096 }, max_height: { type: "integer", minimum: 1, maximum: 4096 }, quality: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "blender_status", description: "Read sanitized live Blender status for a project.", action: "blender.live_status", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "blender_scene_snapshot", description: "Inspect a bounded snapshot of the live Blender scene.", action: "blender.live_scene_snapshot", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, max_objects: { type: "integer", minimum: 1, maximum: 10000 }, object_names: { type: "array", items: STRING, maxItems: 256 }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "blender_object_inspect", description: "Inspect one live Blender object by name or ORDAX object id.", action: "blender.live_object_inspect", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, object_name: STRING, ordax_object_id: STRING, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
@@ -752,10 +752,62 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
   return invalid;
 }
 
+/**
+ * Promote an already-authorized, completed artifact.preview image into the
+ * MCP image content block. Keep the exact queue receipt and metadata; never
+ * echo a second copy of the encoded pixels in text or structuredContent.
+ *
+ * This is presentation only, not an authorization or device-action fallback.
+ * Invalid/non-image receipts retain their existing textual representation.
+ */
+function nativeArtifactImageReceipt(payload: unknown): { metadata: JsonObject; mimeType: string; base64: string } | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const receipt = payload as JsonObject;
+  if (receipt.ok !== true || receipt.pending !== false) return null;
+  const action = receipt.action;
+  if (!action || typeof action !== "object" || Array.isArray(action)) return null;
+  const completed = action as JsonObject;
+  if (completed.name !== "artifact.preview" || completed.status !== "succeeded") return null;
+  const result = completed.result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+  const outcome = result as JsonObject;
+  if (outcome.ok !== true || !outcome.data || typeof outcome.data !== "object"
+    || Array.isArray(outcome.data)) return null;
+  const image = outcome.data as JsonObject;
+  const mimeType = image.mime_type;
+  const base64 = image.base64;
+  const size = image.size_bytes;
+  // Bound the representation before running any regex or creating an MCP
+  // image block. The Runtime's batch/single-preview inline limit is 256 KiB.
+  if ((mimeType !== "image/jpeg" && mimeType !== "image/png" && mimeType !== "image/webp")
+    || typeof base64 !== "string" || typeof size !== "number"
+    || !Number.isSafeInteger(size) || size < 1 || size > 262144
+    || base64.length !== Math.ceil(size / 3) * 4
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)
+    || (size % 3 === 0 && base64.endsWith("="))
+    || (size % 3 === 1 && !base64.endsWith("=="))
+    || (size % 3 === 2 && (base64.endsWith("==") || !base64.endsWith("=")))) return null;
+  const { base64: _pixels, ...safeData } = image;
+  return {
+    mimeType, base64,
+    metadata: { ...receipt, action: { ...completed, result: { ...outcome, data: safeData } } },
+  };
+}
+
 function textToolResult(payload: unknown, isError = false): JsonObject {
-  const text = JSON.stringify(payload, null, 2);
-  const structured = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : { value: payload };
-  return { content: [{ type: "text", text }], structuredContent: structured, isError };
+  const image = !isError ? nativeArtifactImageReceipt(payload) : null;
+  const projected = image ? image.metadata : payload;
+  const text = JSON.stringify(projected, null, 2);
+  const structured = projected && typeof projected === "object" && !Array.isArray(projected)
+    ? projected : { value: projected };
+  return {
+    content: [
+      { type: "text", text },
+      ...(image ? [{ type: "image", data: image.base64, mimeType: image.mimeType }] : []),
+    ],
+    structuredContent: structured,
+    isError,
+  };
 }
 
 function cloneWithAuth(source: Request, url: string, method: string, body?: unknown): Request {
