@@ -291,18 +291,13 @@ const RPC_SPECS = {
     keys: ["p_device_id", "p_agent_instance_id", "p_boot_id", "p_lease_seconds"],
     casts: ["uuid", "uuid", "text", "integer"],
   },
-  ordax_start_product_action_v1: {
+  ordax_start_product_action_atomic_v1: {
     keys: [
-      "p_device_id",
-      "p_request_id",
-      "p_effect_id",
-      "p_attempt_id",
-      "p_lease_id",
-      "p_execution_epoch",
-      "p_agent_instance_id",
-      "p_boot_id",
+      "p_device_id", "p_request_id", "p_effect_id", "p_attempt_id",
+      "p_lease_id", "p_execution_epoch", "p_agent_instance_id", "p_boot_id",
+      "p_runtime_kind", "p_agent_version",
     ],
-    casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text"],
+    casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "text", "text"],
   },
   ordax_renew_product_action_lease_v1: {
     keys: [
@@ -362,21 +357,6 @@ const RPC_SPECS = {
     ],
     casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text",
       "uuid", "text", "jsonb", "text", "text", "text", "text"],
-  },
-  ordax_bind_product_action_runtime_provenance_v1: {
-    keys: [
-      "p_device_id",
-      "p_request_id",
-      "p_effect_id",
-      "p_attempt_id",
-      "p_lease_id",
-      "p_execution_epoch",
-      "p_agent_instance_id",
-      "p_boot_id",
-      "p_runtime_kind",
-      "p_agent_version",
-    ],
-    casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "text", "text"],
   },
   ordax_get_product_action_v1: {
     keys: ["p_owner_user_id", "p_client_kind", "p_client_id", "p_request_id"],
@@ -931,9 +911,11 @@ export async function startProductAction(
     executionEpoch: number;
     agentInstanceId: string;
     bootId: string;
+    runtimeKind: "ordax-os" | "desktop-agent" | "mobile-client" | "other" | null;
+    agentVersion: string | null;
   },
-): Promise<boolean> {
-  return callRpc<boolean>(env, "ordax_start_product_action_v1", {
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_start_product_action_atomic_v1", {
     p_device_id: input.deviceId,
     p_request_id: input.requestId,
     p_effect_id: input.effectId,
@@ -942,6 +924,8 @@ export async function startProductAction(
     p_execution_epoch: input.executionEpoch,
     p_agent_instance_id: input.agentInstanceId,
     p_boot_id: input.bootId,
+    p_runtime_kind: input.runtimeKind,
+    p_agent_version: input.agentVersion,
   });
 }
 
@@ -1143,35 +1127,6 @@ export async function reportProductAction(
     p_result: input.result,
     p_result_sha256: input.resultSha256,
     p_error_code: input.errorCode,
-    p_runtime_kind: input.runtimeKind,
-    p_agent_version: input.agentVersion,
-  });
-}
-
-export async function bindProductActionRuntimeProvenance(
-  env: ProductPostgresEnv,
-  input: {
-    deviceId: string;
-    requestId: string;
-    effectId: string;
-    attemptId: string;
-    leaseId: string;
-    executionEpoch: number;
-    agentInstanceId: string;
-    bootId: string;
-    runtimeKind: "ordax-os" | "desktop-agent" | "mobile-client" | "other";
-    agentVersion: string;
-  },
-): Promise<boolean> {
-  return callRpc<boolean>(env, "ordax_bind_product_action_runtime_provenance_v1", {
-    p_device_id: input.deviceId,
-    p_request_id: input.requestId,
-    p_effect_id: input.effectId,
-    p_attempt_id: input.attemptId,
-    p_lease_id: input.leaseId,
-    p_execution_epoch: input.executionEpoch,
-    p_agent_instance_id: input.agentInstanceId,
-    p_boot_id: input.bootId,
     p_runtime_kind: input.runtimeKind,
     p_agent_version: input.agentVersion,
   });
