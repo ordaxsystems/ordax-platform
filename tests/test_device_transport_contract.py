@@ -26,7 +26,7 @@ class DeviceTransportContractTests(unittest.TestCase):
             'Object.prototype.hasOwnProperty.call(body, "capabilities_digest")',
             "runtimeKind: runtimeKind as RuntimeKind",
             "const capabilityDigest = canonicalDeviceHeartbeatDigest(body)",
-            "recordProductPresence(env,",
+            "recordProductHeartbeat(env,",
         ):
             self.assertIn(required, block)
         self.assertNotIn("createProductGrant", block)
