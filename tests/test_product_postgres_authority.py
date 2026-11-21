@@ -150,7 +150,7 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
         for rpc in (
             "ordax_enqueue_product_action_v1",
             "ordax_claim_product_action_v1",
-            "ordax_start_product_action_v1",
+            "ordax_start_product_action_atomic_v1",
             "ordax_renew_product_action_lease_v1",
             "ordax_progress_product_action_v1",
             "ordax_report_product_action_v1",
@@ -158,6 +158,9 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
             "ordax_record_product_presence_v1",
         ):
             self.assertIn(rpc, self.adapter)
+
+        self.assertNotIn("ordax_start_product_action_v1: {", self.adapter)
+        self.assertNotIn("ordax_bind_product_action_runtime_provenance_v1: {", self.adapter)
 
     def test_service_role_has_no_direct_remote_authority(self) -> None:
         lowered = self.remote_role_hardening.lower()
