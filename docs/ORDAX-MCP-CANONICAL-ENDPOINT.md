@@ -313,3 +313,34 @@ Hyperdrive. A pré-checagem de perfil do catálogo anterior ao enqueue
 permanece obrigatória: ela não pode ser removida enquanto o PostgreSQL
 não aplicar as mesmas regras de `profile_key` para ações, inclusive
 replays, projetos, dispositivos e revogação.
+
+### `ordax_targets`: materialização e catálogo em um único SQL (21/11/2026)
+
+O endpoint mantém o token OAuth assinado e sua identidade exata de Owner e
+cliente, mas troca a sequência anterior de **duas conexões e duas consultas
+Hyperdrive** (descoberta seguida de catálogo) por **uma conexão e uma
+consulta SQL**. Essa consulta composta invoca exclusivamente as duas funções
+PostgreSQL existentes, nesta ordem:
+
+1. `public.ordax_ensure_product_mcp_target_discovery_v1(owner, client)`
+   verifica em todas as chamadas consentimento OAuth não revogado, cliente
+   público ativo, elegibilidade do Owner e reconciliação idempotente apenas
+   do grant `product.target.read/read`.
+2. Apenas se a primeira etapa retornar `ok=true`,
+   `public.ordax_list_product_targets_v1(owner, 'product-mcp', client)`
+   lê o catálogo atual autorizado. `WITH ... AS MATERIALIZED` garante
+   uma única avaliação da descoberta; `CASE` impede enumeração após
+   recusa. O identificador do cliente vem do token assinado, nunca de
+   argumentos do modelo, headers alternativos ou outro chat.
+
+Ambas as funções SQL continuam sendo as autoridades originais; não foram
+criadas migrações, funções SECURITY DEFINER paralelas, caches de grants,
+serviços adicionais ou tabelas. Cada leitura volta ao PostgreSQL, inclusive
+após expiração ou revogação. Os testes de contrato verificam uma conexão,
+uma chamada SQL, retorno fail-closed e projeção sem dados secretos.
+A consulta foi testada no banco real com identidade inexistente, que foi
+rejeitada antes de enumerar dispositivos.
+
+**Economia determinística por leitura válida de catálogo:** 2 consultas
+Hyperdrive → 1 (redução de 50% nesse fluxo específico), sem afirmar que o
+consumo geral da conta caiu 50% ou atingiu a meta global de 70%.

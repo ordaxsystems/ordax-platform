@@ -115,3 +115,66 @@ test("invalid OAuth identity and malformed database response fail closed before 
   );
   assert.equal(created, 1);
 });
+
+test("combined target discovery performs one SQL statement, one connection, and exact signed-client binding", async () => {
+  const { discoverAndListProductMcpTargets, DISCOVER_TARGETS_SQL } = await import(
+    "../cloudflare/src/product_mcp_discovery_store.ts");
+  const calls: Array<{ sql: string; params: string[] }> = [];
+  let connected = 0, closed = 0;
+  const result = await discoverAndListProductMcpTargets(ENV, OWNER_ID, CLIENT_ID, {
+    createClient: url => {
+      assert.equal(url, CONNECTION_SECRET);
+      return {
+        async connect() { connected++; },
+        async query(sql, params) {
+          calls.push({ sql, params });
+          return { rows: [{ result: { ok: true, phase: "catalog", targets: [] } }] };
+        },
+        async end() { closed++; },
+      };
+    },
+  });
+  assert.deepEqual(result, { ok: true, phase: "catalog", targets: [] });
+  assert.deepEqual(calls, [{ sql: DISCOVER_TARGETS_SQL, params: [OWNER_ID, CLIENT_ID] }]);
+  assert.equal(connected, 1);
+  assert.equal(closed, 1);
+  assert.match(calls[0].sql, /with discovery as materialized/i);
+  assert.match(calls[0].sql, /ordax_ensure_product_mcp_target_discovery_v1/);
+  assert.match(calls[0].sql, /when discovery\.result->>'ok' = 'true'/);
+  assert.match(calls[0].sql, /ordax_list_product_targets_v1/);
+  assert.match(calls[0].sql, /'product-mcp'::text, \$2::text/);
+});
+
+test("one-trip discovery refuses invalid client and malformed or untrusted PostgreSQL envelopes", async () => {
+  const { discoverAndListProductMcpTargets } = await import(
+    "../cloudflare/src/product_mcp_discovery_store.ts");
+  let queried = 0;
+  const fixture = (result: unknown) => ({
+    createClient: () => ({
+      async connect() {},
+      async query() { queried++; return { rows: [{ result }] }; },
+      async end() {},
+    }),
+  });
+  await assert.rejects(
+    discoverAndListProductMcpTargets(ENV, OWNER_ID, "not-uuid", fixture(null)),
+    (e: unknown) => e instanceof ProductPostgresError
+      && e.code === "product_mcp_client_identity_invalid",
+  );
+  assert.equal(queried, 0);
+  for (const result of [null, {}, {ok:true}, {ok:true,phase:"discovery"},
+    {ok:true,phase:"catalog",targets:[]}, {ok:false,phase:"invalid"},
+    {ok:"yes",phase:"catalog"}]) {
+    if ((result as any)?.phase === "catalog" && (result as any)?.ok === true) continue;
+    await assert.rejects(
+      discoverAndListProductMcpTargets(ENV, OWNER_ID, CLIENT_ID, fixture(result)),
+      (e: unknown) => e instanceof ProductPostgresError
+        && e.code === "product_postgres_invalid_response",
+    );
+  }
+  const denied = await discoverAndListProductMcpTargets(ENV, OWNER_ID, CLIENT_ID,
+    fixture({ok:false,phase:"discovery",error:"product_mcp_oauth_consent_required"}));
+  assert.deepEqual(denied, {
+    ok:false,phase:"discovery",error:"product_mcp_oauth_consent_required",
+  });
+});
