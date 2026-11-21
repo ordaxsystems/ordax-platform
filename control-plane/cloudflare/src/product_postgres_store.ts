@@ -295,13 +295,13 @@ const RPC_SPECS = {
     keys: ["p_device_id", "p_token_sha256", "p_agent_instance_id", "p_boot_id", "p_lease_seconds"],
     casts: ["uuid", "text", "uuid", "text", "integer"],
   },
-  ordax_start_product_action_atomic_v1: {
+  ordax_authenticated_start_product_action_v1: {
     keys: [
-      "p_device_id", "p_request_id", "p_effect_id", "p_attempt_id",
-      "p_lease_id", "p_execution_epoch", "p_agent_instance_id", "p_boot_id",
-      "p_runtime_kind", "p_agent_version",
+      "p_device_id", "p_token_sha256", "p_request_id", "p_effect_id",
+      "p_attempt_id", "p_lease_id", "p_execution_epoch", "p_agent_instance_id",
+      "p_boot_id", "p_runtime_kind", "p_agent_version",
     ],
-    casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "text", "text"],
+    casts: ["uuid", "text", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "text", "text"],
   },
   ordax_renew_product_action_lease_v1: {
     keys: [
@@ -931,10 +931,11 @@ export async function claimProductActionAuthenticated(
   });
 }
 
-export async function startProductAction(
+export async function startProductActionAuthenticated(
   env: ProductPostgresEnv,
   input: {
     deviceId: string;
+    tokenSha256: string;
     requestId: string;
     effectId: string;
     attemptId: string;
@@ -946,8 +947,9 @@ export async function startProductAction(
     agentVersion: string | null;
   },
 ): Promise<JsonObject> {
-  return callRpc<JsonObject>(env, "ordax_start_product_action_atomic_v1", {
+  return callRpc<JsonObject>(env, "ordax_authenticated_start_product_action_v1", {
     p_device_id: input.deviceId,
+    p_token_sha256: input.tokenSha256,
     p_request_id: input.requestId,
     p_effect_id: input.effectId,
     p_attempt_id: input.attemptId,
