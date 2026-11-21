@@ -9,7 +9,6 @@ import {
   authenticateProductDevice,
   commitProjectWorkspaceResource,
   confirmDeviceProjectBinding,
-  bindProductActionRuntimeProvenance,
   claimProductAction,
   progressProductAction,
   recordProductPresence,
@@ -473,14 +472,12 @@ async function report(request: Request, env: ProductPostgresEnv, deviceId: strin
   }
   const committed = await reportProductAction(env, {
     deviceId, ...ctx, reportId, status, result, resultSha256, errorCode,
+    runtimeKind: provenance?.runtimeKind ?? null,
+    agentVersion: provenance?.agentVersion ?? null,
   });
   if (committed.ok !== true) {
     const conflict = committed.error === "terminal_report_conflict" || committed.error === "lease_not_active";
     return respond(committed, conflict ? 409 : 400);
-  }
-  if (provenance) {
-    const bound = await bindProductActionRuntimeProvenance(env, { deviceId, ...ctx, ...provenance });
-    if (!bound) return respond({ ok: false, error: "runtime_provenance_conflict" }, 409);
   }
   return respond(committed);
 }
