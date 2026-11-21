@@ -9,7 +9,7 @@ import {
   authenticateProductDevice,
   commitProjectWorkspaceResource,
   confirmDeviceProjectBinding,
-  claimProductAction,
+  claimProductActionAuthenticated,
   progressProductAction,
   recordProductHeartbeat,
   renewProductActionLease,
@@ -112,16 +112,23 @@ export function unexpectedProductDeviceTransportFailure(
   return respond({ ok: false, error: "product_transport_internal_failure" }, 500);
 }
 
+function deviceRequestCredentials(request: Request): {deviceId:string;rawToken:string} | null {
+  const deviceId = (request.headers.get("x-ordax-device-id") ?? "").trim().toLowerCase();
+  const rawToken = request.headers.get("x-ordax-device-token") ?? "";
+  if (!isCanonicalUuid(deviceId) || rawToken.length < 32 || rawToken.length > 512
+      || /[\r\n]/.test(rawToken)) return null;
+  return {deviceId,rawToken};
+}
+
 async function authenticateDeviceRequest(
   request: Request,
   env: ProductPostgresEnv,
 ): Promise<{ ok: true; deviceId: string } | { ok: false; response: Response }> {
-  const deviceId = (request.headers.get("x-ordax-device-id") ?? "").trim().toLowerCase();
-  const rawToken = request.headers.get("x-ordax-device-token") ?? "";
-  if (!isCanonicalUuid(deviceId) || rawToken.length < 32 || rawToken.length > 512
-      || /[\r\n]/.test(rawToken)) {
+  const credentials = deviceRequestCredentials(request);
+  if (!credentials) {
     return { ok: false, response: respond({ ok: false, error: "device_auth_required" }, 401) };
   }
+  const {deviceId,rawToken}=credentials;
   try {
     const accepted = await authenticateProductDevice(env, {
       deviceId,
@@ -281,26 +288,36 @@ export function canonicalDeviceActionProgress(
   return { stage, message: message as string | null, percent: percent as number | null };
 }
 
-async function claim(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
-  const body = await readBoundedJsonObject(request, 16 * 1024);
-  if (!body) return respond({ ok: false, error: "claim_invalid" }, 400);
-  const identity = runtimeIdentity(body);
-  const provenance = runtimeProvenance(body);
-  if (!identity || (hasRuntimeProvenance(body) && !provenance)) {
-    return respond({ ok: false, error: "claim_invalid" }, 400);
+async function claimAuthenticated(request: Request, env: ProductPostgresEnv): Promise<Response> {
+  const credentials=deviceRequestCredentials(request);
+  if(!credentials)return respond({ok:false,error:"device_auth_required"},401);
+  const body = await readBoundedJsonObject(request,16*1024);
+  const identity = body ? runtimeIdentity(body) : null;
+  const provenance = body ? runtimeProvenance(body) : null;
+  const leaseSeconds = body ? canonicalDeviceLeaseSeconds(body.lease_seconds) : null;
+  if (!body || !identity || (hasRuntimeProvenance(body) && !provenance)
+      || leaseSeconds===null) {
+    // The previous route authenticated before parsing the request. Preserve
+    // 401-over-400 precedence without reintroducing a second query on any
+    // valid claim. No lease is attempted for malformed payloads.
+    const auth=await authenticateDeviceRequest(request,env);
+    if(!auth.ok)return auth.response;
+    return respond({ok:false,error:"claim_invalid"},400);
   }
-  const leaseSeconds = canonicalDeviceLeaseSeconds(body.lease_seconds);
-  if (leaseSeconds === null) {
-    return respond({ ok: false, error: "claim_invalid" }, 400);
-  }
-  const claimed = await claimProductAction(env, {
-    deviceId,
-    agentInstanceId: identity.agentInstanceId,
-    bootId: identity.bootId,
+  // PostgreSQL checks the enrolled credential and performs canonical grant,
+  // capacity, expiry and lease admission in one SQL statement. No Worker
+  // token cache or bypass of the original claim authority is introduced.
+  const claimed=await claimProductActionAuthenticated(env,{
+    deviceId:credentials.deviceId,
+    tokenSha256:await sha256Hex(credentials.rawToken),
+    agentInstanceId:identity.agentInstanceId,
+    bootId:identity.bootId,
     leaseSeconds,
   });
-  if (!claimed.ok) return respond({ ok: false, error: claimed.error ?? "claim_failed" }, 409);
-  return respond({ ok: true, job: claimed.job ? await wireJob(claimed.job) : null });
+  if (!claimed.ok && claimed.error==="invalid_device_token")
+    return respond({ok:false,error:"invalid_device_token"},401);
+  if (!claimed.ok)return respond({ok:false,error:claimed.error??"claim_failed"},409);
+  return respond({ok:true,job:claimed.job?await wireJob(claimed.job):null});
 }
 
 async function start(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
@@ -647,6 +664,18 @@ export async function handleProductDeviceTransport(
   }
   if (request.method !== "POST") return respond({ ok: false, error: "method_not_allowed" }, 405);
 
+  // The hot claim path composes the existing device authenticator and lease
+  // authority inside one PostgreSQL RPC. All other routes retain the normal
+  // auth-first path; unknown routes still never query SQL.
+  if(path===PRODUCT_DEVICE_TRANSPORT_PREFIX+"/claim"){
+    try{return await claimAuthenticated(request,env);}
+    catch(error){
+      if(error instanceof ProductPostgresError)
+        return respond({ok:false,error:error.code},error.status);
+      return unexpectedProductDeviceTransportFailure(error,"execution","claim");
+    }
+  }
+
   // Reject unknown routes BEFORE authenticating through SQL: no operation
   // exists to authorize. Known routes (including disabled staged features)
   // preserve the auth-first contract and must not expose feature flags.
@@ -654,9 +683,6 @@ export async function handleProductDeviceTransport(
   switch (path) {
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/heartbeat":
       execute = deviceId => heartbeat(request, env, deviceId);
-      break;
-    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/claim":
-      execute = deviceId => claim(request, env, deviceId);
       break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/start":
       execute = deviceId => start(request, env, deviceId);
