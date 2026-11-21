@@ -201,3 +201,23 @@ negativa de enqueue, falta de contexto waitUntil e entrega concorrente.
 A economia real depende da frequência de replays terminais e não deve
 ser declarada como uma porcentagem de Hyperdrive antes de medir a
 composição de carga.
+
+### Forge MCP: leitura direta de recibo autorizado — 21/11/2026
+
+A ferramenta `forge_action_status` não executa `mcp_resolve` antes do
+`mcp_get`. A resolução da instância era descartada nesse caminho: o recibo
+`public.ordax_get_forge_action_v1` já verifica
+`private.ordax_forge_oauth_client_authorized_v1(owner, client)` e procura
+exclusivamente o `request_id` pertencente ao mesmo owner/client. No transporte
+HTTPS, `public.ordax_forge_http_rpc_v1` também valida a identidade OAuth e
+encaminha `mcp_get` à autoridade PostgreSQL, sem reaproveitar uma autorização
+anterior ou armazenar tokens/grants no Worker.
+
+Consultas válidas de status passam de **dois RPCs Supabase a um**; entradas
+inválidas ou métodos desconhecidos não precisam resolver a instância.
+`tools/list`, `forge_connection_status` e a execução de ferramentas continuam
+resolvendo a instância dinamicamente. Não há nova tabela, serviço, cache,
+grant nem modificação no app Forge. Provas locais: 21/21 testes do gateway,
+incluindo erro de autorização, transporte HTTPS e controle de chamadas.
+A economia medida é **por consulta de status**; o Forge HTTPS não deve ser
+somado indevidamente às consultas Hyperdrive do Worker Product.

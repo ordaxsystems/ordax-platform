@@ -436,8 +436,8 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
       });
     }
 
-    const resolution=await resolveFor(identity,store);
     if(message.method==="tools/list"){
+      const resolution=await resolveFor(identity,store);
       const tools=[CONNECTION_TOOL,ACTION_STATUS_TOOL,
         ...(resolution.ok&&validForgeCatalog(resolution.catalog)?resolution.catalog:[])];
       return rpcResult(id,{tools});
@@ -449,6 +449,17 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
     const args=message.params.arguments??{};
     if(!isRecord(args))return rpcError(id,-32602,"Invalid tool arguments");
 
+    if(name===ACTION_STATUS_TOOL.name){
+      if(Object.keys(args).length!==1||!isCanonicalUuid(args.request_id))
+        return rpcError(id,-32602,"Invalid request_id");
+      const receipt=await store.getAction({ownerUserId:identity.ownerUserId,
+        clientId:identity.clientId,requestId:String(args.request_id).toLowerCase()});
+      return rpcResult(id,toolResult(receipt,receipt.ok!==true));
+    }
+
+    // Status lookup is independently OAuth/grant scoped by the SQL authority.
+    // Only catalog, connection, and tool dispatch need instance resolution.
+    const resolution=await resolveFor(identity,store);
     if(name===CONNECTION_TOOL.name){
       return rpcResult(id,toolResult({
         ok:resolution.ok,
@@ -459,14 +470,6 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
         }:{error:resolution.error,candidate_count:resolution.candidate_count??0}),
       },!resolution.ok));
     }
-    if(name===ACTION_STATUS_TOOL.name){
-      if(Object.keys(args).length!==1||!isCanonicalUuid(args.request_id))
-        return rpcError(id,-32602,"Invalid request_id");
-      const receipt=await store.getAction({ownerUserId:identity.ownerUserId,
-        clientId:identity.clientId,requestId:String(args.request_id).toLowerCase()});
-      return rpcResult(id,toolResult(receipt,receipt.ok!==true));
-    }
-
     if(!resolution.ok||!isCanonicalUuid(resolution.instance_id)){
       return rpcResult(id,toolResult({ok:false,error:resolution.error??"forge_instance_unavailable"},true));
     }
