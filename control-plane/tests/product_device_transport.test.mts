@@ -12,6 +12,7 @@ import {
   deviceProjectBindingIntentsResponse,
   deviceProjectBindingConfirmationResponse,
   handleProductDeviceTransport,
+  unexpectedProductDeviceTransportFailure,
 } from "../cloudflare/src/product_device_transport.ts";
 import { createCanonicalProductMcpGateway } from "../cloudflare/src/product_mcp_entry.ts";
 
@@ -124,6 +125,60 @@ test("canonical MCP gateway mounts device transport without exposing another MCP
   ));
   assert.equal(response.status, 401);
   assert.deepEqual(await response.json(), { ok: false, error: "device_auth_required" });
+});
+
+test("unknown runtime failures are HTTP 500, not disguised database HTTP 503", async () => {
+  const calls: string[] = [];
+  const saved=console.error;
+  console.error=(...args:unknown[])=>{calls.push(args.map(String).join(" "));};
+  try {
+    const result=unexpectedProductDeviceTransportFailure(
+      new ReferenceError("secret_token=do_not_log"),"execution","start",
+    );
+    assert.equal(result.status,500);
+    assert.deepEqual(await result.json(),{
+      ok:false,error:"product_transport_internal_failure",
+    });
+    assert.equal(result.headers.get("cache-control"),"no-store");
+    assert.deepEqual(JSON.parse(calls[0]),{
+      event:"product_device_transport_internal_failure",
+      phase:"execution",operation:"start",kind:"reference_error",
+    });
+    assert.doesNotMatch(calls.join(" "),/do_not_log|secret_token|stack|message/);
+    const auth=unexpectedProductDeviceTransportFailure(
+      new TypeError("client authentication details"),"authentication","../../secret",
+    );
+    assert.equal(auth.status,500);
+    assert.deepEqual(JSON.parse(calls[1]),{
+      event:"product_device_transport_internal_failure",
+      phase:"authentication",operation:"unknown",kind:"type_error",
+    });
+    assert.doesNotMatch(calls.join(" "),/client authentication details/);
+  } finally {
+    console.error=saved;
+  }
+});
+
+test("all awaited bare Product transport calls resolve to a local binding or named import", () => {
+  const source=fs.readFileSync(SRC,"utf8");
+  const unresolved=(input:string)=>{
+    const imports=[...input.matchAll(/import\s*{([^}]+)}\s*from\s*["'][^"']+["']/gs)]
+      .flatMap(m=>m[1].split(",").map(x=>x.trim().replace(/^type\s+/,"")
+        .split(/\s+as\s+/).at(-1))).filter(Boolean);
+    const declarations=[...input.matchAll(/\b(?:async\s+)?function\s+([A-Za-z_$]\w*)\s*\(/g)]
+      .map(m=>m[1]);
+    const localVariables=[...input.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$]\w*)\s*(?:=|:)/g)]
+      .map(m=>m[1]);
+    const known=new Set([...imports,...declarations,...localVariables,"fetch"]);
+    return [...new Set([...input.matchAll(/\bawait\s+([A-Za-z_$]\w*)\s*\(/g)]
+      .map(m=>m[1]).filter(name=>!known.has(name)))].sort();
+  };
+  assert.deepEqual(unresolved(source),[],
+    "a missing function import must fail CI before the Worker can deploy");
+  const broken=source.replace("  startProductAction,\n","");
+  assert.notEqual(broken,source,"mutation example must remove an actual imported symbol");
+  assert.deepEqual(unresolved(broken),["startProductAction"],
+    "regression test must detect the same undeclared import pattern as PR #427");
 });
 
 test("device transport source has no D1, operator bearer, websocket queue, pairing or remote artifact authority", () => {
