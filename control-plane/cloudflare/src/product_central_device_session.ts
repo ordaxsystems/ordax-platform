@@ -12,7 +12,11 @@ import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { MAX_MCP_REQUEST_BYTES, validMcpToolCallEnvelope } from "./mcp_http.ts";
 
-type Env = ProductAuthEnv & ProductPostgresEnv;
+type Env = ProductAuthEnv & ProductPostgresEnv & {
+  // Rollout must be explicitly approved. Missing config fails closed.
+  FORGE_NATIVE_DELEGATION_ENABLED?: string;
+  FORGE_NATIVE_OAUTH_CLIENT_ID?: string;
+};
 type Json = Record<string, unknown>;
 
 export const PRODUCT_DEVICE_CENTRAL_SESSION_PATH = "/v3/product/device/central-session";
@@ -31,19 +35,41 @@ async function sha256(value: string): Promise<string> {
 }
 
 /**
- * Read the ChatGPT correlation marker from a tools/call request. This value is
- * NEVER authority by itself. It becomes useful only after an exact Product
- * OAuth client opens a challenge and the exact Product device confirms it.
+ * A correlation marker NEVER grants authority. Product OAuth + a fresh
+ * PostgreSQL challenge + Runtime confirmation + per-action grants are always
+ * required. The existing ChatGPT marker retains its original behavior.
+ *
+ * Forge Native uses the SAME canonical session/queue/receipt pipeline, but a
+ * distinct, app-owned correlation namespace; it must not forge openai/session
+ * or create an alternate device executor. Explicit rollout and the pinned
+ * Forge OAuth client ID are required before even opening a challenge.
  */
-export async function centralSessionMarker(request: Request): Promise<string | null> {
-  // The session marker is correlation data, but parsing it still occurs before
-  // JSON-RPC dispatch. Enforce the exact same stream bound as the MCP handler.
+export async function centralSessionMarker(
+  request: Request, env?: Env,
+): Promise<string | null> {
   const body = await readBoundedJsonObject(request.clone(), MAX_MCP_REQUEST_BYTES);
   if (!validMcpToolCallEnvelope(body)) return null;
   const meta = body.params._meta;
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
-  const marker = (meta as Json)["openai/session"];
-  return validChatGptSessionMarker(marker) ? marker : null;
+  const native = (meta as Json)["ordax/native-session"];
+  const chatgpt = (meta as Json)["openai/session"];
+  // No ambiguous identity namespaces or shadow fallback.
+  if (native !== undefined) {
+    if (chatgpt !== undefined || env?.FORGE_NATIVE_DELEGATION_ENABLED !== "enabled"
+      || typeof env.FORGE_NATIVE_OAUTH_CLIENT_ID !== "string"
+      || !isCanonicalUuid(env.FORGE_NATIVE_OAUTH_CLIENT_ID)
+      || typeof native !== "string"
+      || !/^[A-Za-z0-9_-]{43}$/.test(native)) return null;
+    const identity = await authenticateProductMcpClientRequest(request.clone(), env);
+    if (!identity.ok
+      || identity.clientId !== env.FORGE_NATIVE_OAUTH_CLIENT_ID.toLowerCase())
+      return null;
+    // Domain-separate the SQL hash from ChatGPT conversation correlations.
+    // The nonce is generated only by the native Forge Core and never shown in
+    // a tool result, App renderer, device selection or URL.
+    return "forge-native-v1:" + native;
+  }
+  return validChatGptSessionMarker(chatgpt) ? chatgpt : null;
 }
 
 export async function openCentralSessionFromMcp(
@@ -55,7 +81,7 @@ export async function openCentralSessionFromMcp(
     scheduleWake?: (wake: Promise<void>) => void;
   } = {},
 ): Promise<Response> {
-  const marker = await centralSessionMarker(request);
+  const marker = await centralSessionMarker(request, env);
   if (!marker) return json({ ok: false, error: "central_session_marker_required" }, 409);
   const identity = await authenticateProductMcpClientRequest(request, env);
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
@@ -98,7 +124,7 @@ export async function resolveCentralSessionFromMcp(
   env: Env,
   deps: { resolve?: typeof resolveCentralDeviceSession } = {},
 ) {
-  const marker = await centralSessionMarker(request);
+  const marker = await centralSessionMarker(request, env);
   if (!marker) return { ok: false as const, error: "central_session_marker_required" };
   const identity = await authenticateProductMcpClientRequest(request, env);
   if (!identity.ok) return { ok: false as const, error: identity.error };
