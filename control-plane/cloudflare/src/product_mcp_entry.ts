@@ -297,8 +297,9 @@ const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
   "central_session_revoked",
   "central_session_target_mismatch",
 ]);
-const SESSION_CONFIRMATION_ATTEMPTS = 16;
-const SESSION_CONFIRMATION_INTERVAL_MS = 2000;
+// Preserve 32s of Runtime attestation. Early 2s checks remain responsive;
+// later 4s checks cut the maximum idle recovery SQL reads from 16 to 10.
+const SESSION_CONFIRMATION_DELAYS_MS = [2000, 2000, 2000, 2000, 4000, 4000, 4000, 4000, 4000, 4000] as const;
 function waitForSessionConfirmation(milliseconds: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
@@ -348,8 +349,8 @@ export async function resolveOrBootstrapAttestedSession(
     if (result.ok || result.error !== "central_session_unbound") return result;
   }
   const wait = deps.wait ?? waitForSessionConfirmation;
-  for (let attempt = 0; attempt < SESSION_CONFIRMATION_ATTEMPTS; attempt += 1) {
-    await wait(SESSION_CONFIRMATION_INTERVAL_MS);
+  for (const delayMs of SESSION_CONFIRMATION_DELAYS_MS) {
+    await wait(delayMs);
     result = await resolve(request.clone(), env);
     if (result.ok || result.error !== "central_session_unbound") return result;
   }
@@ -495,36 +496,14 @@ export function createCanonicalProductMcpGateway(
       let sessionDeviceBinding: OrdaxMcpHandlers["sessionDeviceBinding"];
       let sessionOwnerSelection: OrdaxMcpHandlers["sessionOwnerSelection"];
       if (toolName === "ordax_session") {
-        try {
-          const opened = await (recoveryDependencies.open ?? openCentralSessionFromMcp)(
-            request.clone(), env, wakeDependencies,
-          );
-          if (opened.ok) {
-            const raw = await opened.json() as Record<string, unknown>;
-            const challengeId = raw?.challenge_id;
-            const expiresAt = raw?.expires_at;
-            if (raw?.ok === true && raw.status === "awaiting_owner"
-                && isCanonicalUuid(challengeId) && typeof expiresAt === "string"
-                && Number.isFinite(Date.parse(expiresAt))
-                && Date.parse(expiresAt) > Date.now()) {
-              // The Owner challenge is a short-lived correlation code, not
-              // device routing authority. Only a separately signed Owner
-              // decision and enrolled Runtime confirmation can bind it.
-              sessionOwnerSelection = Object.freeze({
-                state: "awaiting_owner", challenge_id: challengeId.toLowerCase(),
-                expires_at: expiresAt, selection_location: "ordax_owner",
-                owner_confirmation_required: true, action_dispatched: false,
-              });
-            }
-          }
-        } catch { /* missing/malformed opening result never becomes authority */ }
-        // Project only the SAME durable binding authority that action routing
-        // resolves. A target-list candidate never becomes session authority.
-        try {
-          const resolved = await (recoveryDependencies.resolve ?? resolveCentralSessionFromMcp)(
-            request.clone(), env,
-          );
-          if (resolved.ok) {
+        // An already-attested binding needs one fresh SQL read, not an extra
+        // challenge/open RPC. The resolver revalidates OAuth and grants.
+        const resolveBinding = async (): Promise<boolean> => {
+          try {
+            const resolved = await (recoveryDependencies.resolve ?? resolveCentralSessionFromMcp)(
+              request.clone(), env,
+            );
+            if (!resolved.ok) return false;
             sessionDeviceBinding = Object.freeze({
               state: "bound",
               device_id: resolved.deviceId,
@@ -533,8 +512,38 @@ export function createCanonicalProductMcpGateway(
               dispatch_target_resolved: true,
               capability_authorization: "checked_per_action",
             });
+            return true;
+          } catch {
+            return false;
           }
-        } catch { /* authenticated identity still remains observable fail-closed */ }
+        };
+        if (!(await resolveBinding())) {
+          let openedBound = false;
+          try {
+            const opened = await (recoveryDependencies.open ?? openCentralSessionFromMcp)(
+              request.clone(), env, wakeDependencies,
+            );
+            if (opened.ok) {
+              const raw = await opened.json() as Record<string, unknown>;
+              openedBound = raw?.ok === true && raw.status === "bound";
+              const challengeId = raw?.challenge_id;
+              const expiresAt = raw?.expires_at;
+              if (raw?.ok === true && raw.status === "awaiting_owner"
+                  && isCanonicalUuid(challengeId) && typeof expiresAt === "string"
+                  && Number.isFinite(Date.parse(expiresAt))
+                  && Date.parse(expiresAt) > Date.now()) {
+                // Owner choice is only a correlation, never authority.
+                sessionOwnerSelection = Object.freeze({
+                  state: "awaiting_owner", challenge_id: challengeId.toLowerCase(),
+                  expires_at: expiresAt, selection_location: "ordax_owner",
+                  owner_confirmation_required: true, action_dispatched: false,
+                });
+              }
+            }
+          } catch { /* missing/malformed opening result never becomes authority */ }
+          // A bound opening is only a hint; recheck the PostgreSQL authority.
+          if (openedBound) await resolveBinding();
+        }
       }
 
       let handlers: OrdaxMcpHandlers = sessionDeviceBinding

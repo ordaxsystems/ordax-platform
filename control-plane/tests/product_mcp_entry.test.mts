@@ -641,8 +641,8 @@ test("session projects only the canonical Device-attested conversation binding",
     dispatch_target_resolved: true,
     capability_authorization: "checked_per_action",
   });
-  assert.equal(opened, 1);
-  assert.equal(resolved, 1);
+  assert.equal(opened, 0, "already-bound sessions never re-open a Device challenge");
+  assert.equal(resolved, 1, "one fresh SQL read revalidates OAuth and grants");
 });
 
 test("ordax_session exposes only pending Owner challenge correlation, never an auto-selected device", async () => {
@@ -792,16 +792,16 @@ test("native twenty-second heartbeat confirmation succeeds without a manual sess
   const confirmed = await resolveOrBootstrapAttestedSession(request("computer_text_read"), ENV, {
     resolve: async () => {
       checks++;
-      return checks < 13 ? { ok: false, error: "central_session_unbound" }
+      return waitedMs < 24000 ? { ok: false, error: "central_session_unbound" }
         : { ok: true, ownerUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             clientId: "product-client-123", deviceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" };
     },
     open: async () => { opens++; return Response.json({ ok: true, status: "pending" }, { status: 202 }); },
-    wait: async (milliseconds) => { assert.equal(milliseconds, 2000); waitedMs += milliseconds; },
+    wait: async (milliseconds) => { assert.ok([2000, 4000].includes(milliseconds)); waitedMs += milliseconds; },
   });
   assert.equal(confirmed.ok, true);
   assert.equal(waitedMs, 24000, "covers the actual 20s heartbeat plus confirmation latency");
-  assert.equal(checks, 13);
+  assert.equal(checks, 9, "8 recovery SQL resolves rather than 12 at 24 seconds");
   assert.equal(opens, 1, "never duplicates the device challenge");
 });
 
@@ -831,7 +831,48 @@ test("bound-open race still requires canonical SQL confirmation, never trusts a 
   });
   assert.equal(denied.ok, false);
   assert.equal(denied.error, "central_session_pending");
-  assert.equal(failures, 18, "opening a bound ticket is never sufficient to authorize a device");
+  assert.equal(failures, 12, "opening a bound ticket is never sufficient to authorize a device");
+});
+
+test("session recovery conserves SQL reads across a full 32-second pending window", async () => {
+  let checks = 0, elapsed = 0;
+  const intervals: number[] = [];
+  const result = await resolveOrBootstrapAttestedSession(request("computer_windows"), ENV, {
+    resolve: async () => {
+      checks++;
+      return { ok: false as const, error: "central_session_unbound" };
+    },
+    open: async () => Response.json({ ok: true, status: "pending" }, { status: 202 }),
+    wait: async (milliseconds) => { elapsed += milliseconds; intervals.push(milliseconds); },
+  });
+  assert.deepEqual(result, { ok: false, error: "central_session_pending" });
+  assert.equal(elapsed, 32000, "preserves the original attestation window");
+  assert.deepEqual(intervals, [2000, 2000, 2000, 2000, 4000, 4000, 4000, 4000, 4000, 4000]);
+  assert.equal(checks, 11, "10 recovery SQL reads instead of 16, plus initial read");
+});
+
+test("session introspection requires SQL confirmation even when an open reports bound", async () => {
+  const { handlers } = fakeHandlers();
+  let checks = 0, opens = 0;
+  const gateway = createCanonicalProductMcpGateway(
+    ENV, handlers, fetch, PRODUCT_MCP_DIRECT_TOOLS, {
+      resolve: async () => {
+        checks++;
+        return { ok: false as const, error: "central_session_unbound" };
+      },
+      open: async () => {
+        opens++;
+        return Response.json({ ok: true, status: "bound",
+          device_id: "33333333-3333-4333-8333-333333333333" });
+      },
+    },
+  );
+  const response = await gateway(request("ordax_session"));
+  const status = (await response.json() as any).result.structuredContent;
+  assert.equal(status.authenticated, true);
+  assert.equal("device_binding" in status, false, "opening hint grants nothing");
+  assert.equal(checks, 2, "same SQL authority rechecks post-open race");
+  assert.equal(opens, 1);
 });
 
 test("attested recovery never retries revoked, missing-marker or rejected challenges", async () => {
@@ -1044,8 +1085,8 @@ test("pending device challenge does not enqueue any action or expand grants", as
   assert.equal(body.result.isError, true);
   assert.equal(body.result.structuredContent.error, "central_session_pending");
   assert.equal(opens, 1);
-  assert.equal(checks, 17);
-  assert.equal(waits, 16);
+  assert.equal(checks, 11, "one initial and ten bounded recovery reads");
+  assert.equal(waits, 10);
   assert.equal(calls.targets, 0);
   assert.equal(calls.getAction, 0);
 });

@@ -142,3 +142,41 @@ A verificação funcional do cliente deve sempre distinguir:
 6. ação concluída com resultado verificável.
 
 Não inferir o passo seguinte apenas porque o anterior está verde.
+
+## Eficiência SQL da sessão MCP — 21/11/2026
+
+No gateway canônico, a ferramenta ordax_session agora consulta primeiro a
+autoridade PostgreSQL (resolve). Para vínculo já atestado, elimina-se o
+segundo RPC de abertura: **2 → 1 consulta**, sem cache e com validação
+atual de OAuth, grants e vínculo. Somente sessões não vinculadas recebem
+o desafio open existente; se open anunciar bound, resolve ainda precisa
+confirmar a autoridade. Nenhuma resposta de abertura concede execução.
+
+A recuperação de sessão ainda pendente preserva **32 segundos** de espera:
+quatro intervalos de 2s seguidos de seis intervalos de 4s, em vez dos
+16 intervalos de 2s anteriores. O máximo de resoluções de recuperação cai
+de **16 para 10** (ou **17 para 11** com o primeiro read). Nos 8 segundos
+iniciais a cadência anterior permanece; depois pode chegar a 4s. Sem
+alterações em ProductDeviceWake, no Runtime, nas permissões ou no SQL.
+
+Prova direcionada do código de 21/11: **54/54 testes aprovados**
+(product_mcp_entry.test.mts e owner_central_device_selection_route.test.mts);
+incluem espera de 32s, disputa entre confirmação e abertura de sessão,
+e rejeição de autoridade sem atestação. Não foi executada carga artificial
+em produção.
+
+Telemetria passiva Cloudflare Analytics SQL de 21/11/2026, configuração
+Hyperdrive 4b601ec5815f43259bd8040053825d2a, usando contagem estimada
+sum(sampleInterval) no dataset events.hyperdriveEvents: 17h–18h UTC,
+9.403 consultas; 18h–19h, 5.404; 19h–20h, 7.655; 20h–21h, 15.703.
+No dataset events.workersInvocations, ordax-mcp teve 9.601 requisições
+estimadas e 27 falhas estimadas das 19h às 21h UTC. Essa amostragem não
+atribui todas as consultas a um Worker, não separa a carga por tipo de
+operação, nem equivale a comparar cargas iguais antes/depois.
+
+**Meta global de redução ≥70% ainda não comprovada.** Coletar a mesma
+composição de carga para consulta por ação, claims vazios, heartbeats,
+resoluções, erros e latência p50/p95/p99 após publicação autorizada.
+Não misturar essas contagens com Forge/PostgREST. Alteração de fonte na
+main não representa deploy; somente o workflow canônico com gates e
+autorização pode publicar a revisão, sem repetir releases existentes.
