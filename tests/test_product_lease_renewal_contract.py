@@ -65,7 +65,7 @@ class ProductLeaseRenewalContractTests(unittest.TestCase):
         self.assertIn("r.lease_expires_at is not null", self.recovery)
 
     def test_device_transport_uses_single_postgres_renewal_rpc(self):
-        self.assertIn("renewProductActionLease(env, { deviceId, ...ctx, leaseSeconds })", self.transport)
+        self.assertIn("renewProductActionLeaseAuthenticated(env, {", self.transport)
         self.assertIn('if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/lease")', self.transport)
         self.assertIn("agentInstanceId", self.transport)
         self.assertIn("executionEpoch", self.transport)

@@ -189,7 +189,7 @@ test("device transport source has no D1, operator bearer, websocket queue, pairi
   ]) assert.equal(source.includes(forbidden), false, forbidden);
   for (const required of [
     "authenticateProductDevice", "recordProductHeartbeatAuthenticated", "claimProductActionAuthenticated",
-    "startProductActionAuthenticated", "renewProductActionLease", "progressProductAction",
+    "startProductActionAuthenticated", "renewProductActionLeaseAuthenticated", "progressProductActionAuthenticated",
     "reportProductAction", "result_canonical_b64",
   ]) assert.equal(source.includes(required), true, required);
 });

@@ -303,9 +303,10 @@ const RPC_SPECS = {
     ],
     casts: ["uuid", "text", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "text", "text"],
   },
-  ordax_renew_product_action_lease_v1: {
+  ordax_authenticated_renew_product_action_lease_v1: {
     keys: [
       "p_device_id",
+      "p_token_sha256",
       "p_request_id",
       "p_effect_id",
       "p_attempt_id",
@@ -315,12 +316,12 @@ const RPC_SPECS = {
       "p_boot_id",
       "p_lease_seconds",
     ],
-    casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "integer"],
-    resultCast: "text",
+    casts: ["uuid", "text", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "integer"],
   },
-  ordax_progress_product_action_v1: {
+  ordax_authenticated_progress_product_action_v1: {
     keys: [
       "p_device_id",
+      "p_token_sha256",
       "p_request_id",
       "p_effect_id",
       "p_attempt_id",
@@ -332,7 +333,7 @@ const RPC_SPECS = {
       "p_message",
       "p_progress_percent",
     ],
-    casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "text", "text", "smallint"],
+    casts: ["uuid", "text", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "text", "text", "smallint"],
   },
   ordax_report_product_action_v1: {
     keys: [
@@ -1068,10 +1069,11 @@ export async function resolveOrchestratorReadAuthorization(
   });
 }
 
-export async function renewProductActionLease(
+export async function renewProductActionLeaseAuthenticated(
   env: ProductPostgresEnv,
   input: {
     deviceId: string;
+    tokenSha256: string;
     requestId: string;
     effectId: string;
     attemptId: string;
@@ -1081,9 +1083,10 @@ export async function renewProductActionLease(
     bootId: string;
     leaseSeconds?: number;
   },
-): Promise<string | null> {
-  return callRpc<string | null>(env, "ordax_renew_product_action_lease_v1", {
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_authenticated_renew_product_action_lease_v1", {
     p_device_id: input.deviceId,
+    p_token_sha256: input.tokenSha256,
     p_request_id: input.requestId,
     p_effect_id: input.effectId,
     p_attempt_id: input.attemptId,
@@ -1095,10 +1098,11 @@ export async function renewProductActionLease(
   });
 }
 
-export async function progressProductAction(
+export async function progressProductActionAuthenticated(
   env: ProductPostgresEnv,
   input: {
     deviceId: string;
+    tokenSha256: string;
     requestId: string;
     effectId: string;
     attemptId: string;
@@ -1110,9 +1114,10 @@ export async function progressProductAction(
     message: string | null;
     progressPercent: number | null;
   },
-): Promise<boolean> {
-  return callRpc<boolean>(env, "ordax_progress_product_action_v1", {
+): Promise<JsonObject> {
+  return callRpc<JsonObject>(env, "ordax_authenticated_progress_product_action_v1", {
     p_device_id: input.deviceId,
+    p_token_sha256: input.tokenSha256,
     p_request_id: input.requestId,
     p_effect_id: input.effectId,
     p_attempt_id: input.attemptId,

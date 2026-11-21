@@ -63,8 +63,8 @@ class ProductReadonlyWorkerContractTests(unittest.TestCase):
 
     def test_mcp_action_requires_server_resolved_attested_device(self):
         self.assertIn("resolveOrBootstrapAttestedSession", self.entry)
-        self.assertIn("createAttestedDeviceActionHandler(env, trusted)", self.entry)
-        self.assertIn("createAttestedProjectActionHandler(env, trusted)", self.entry)
+        self.assertIn("createAttestedDeviceActionHandler(env, trusted, wakeDependencies)", self.entry)
+        self.assertIn("createAttestedProjectActionHandler(env, trusted, wakeDependencies)", self.entry)
         self.assertIn("ownerUserId: resolved.ownerUserId", self.entry)
         self.assertIn("clientId: resolved.clientId", self.entry)
         self.assertIn("deviceId: resolved.deviceId", self.entry)

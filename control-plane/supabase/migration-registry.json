@@ -1509,6 +1509,18 @@
         "blob_sha": "6d6bf761013ae68198852a36d53b40f1ad4df76c"
       },
       "ledger_name": "product_authenticated_report_v1"
+    },
+    {
+      "name": "20261121071000_product_authenticated_lease_progress_v1",
+      "applied_version": "20261121070703",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261121071000_product_authenticated_lease_progress_v1.sql",
+        "blob_sha": "144204aa6beda752e6e8ce0913b4bfc1b4ee7790"
+      },
+      "ledger_name": "product_authenticated_lease_progress_v1"
     }
   ]
 }

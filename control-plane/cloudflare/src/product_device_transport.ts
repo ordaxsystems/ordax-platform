@@ -10,9 +10,9 @@ import {
   commitProjectWorkspaceResource,
   confirmDeviceProjectBinding,
   claimProductActionAuthenticated,
-  progressProductAction,
+  progressProductActionAuthenticated,
   recordProductHeartbeatAuthenticated,
-  renewProductActionLease,
+  renewProductActionLeaseAuthenticated,
   readDeviceProjectBindingIntents,
   resolveOrchestratorReadAuthorization,
   verifyProjectWorkspaceResource,
@@ -352,29 +352,43 @@ async function startAuthenticated(request: Request, env: ProductPostgresEnv): Pr
     ?"runtime_provenance_conflict":"lease_not_active"},409);
 }
 
-async function lease(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
+async function lease(request: Request, env: ProductPostgresEnv): Promise<Response> {
+  const credentials = deviceRequestCredentials(request);
+  if (!credentials) return respond({ ok: false, error: "device_auth_required" }, 401);
   const body = await readBoundedJsonObject(request, 16 * 1024);
   const ctx = body ? executionContext(body) : null;
-  if (!ctx) return respond({ ok: false, error: "lease_invalid" }, 400);
-  const leaseSeconds = canonicalDeviceLeaseSeconds(body!.lease_seconds);
-  if (leaseSeconds === null) {
-    return respond({ ok: false, error: "lease_invalid" }, 400);
+  const leaseSeconds = body ? canonicalDeviceLeaseSeconds(body.lease_seconds) : null;
+  if (!ctx || leaseSeconds === null) {
+    const auth = await authenticateDeviceRequest(request, env);
+    return auth.ok ? respond({ ok: false, error: "lease_invalid" }, 400) : auth.response;
   }
-  const leaseExpiresAt = await renewProductActionLease(env, { deviceId, ...ctx, leaseSeconds });
-  return respond({ ok: leaseExpiresAt !== null, lease_expires_at: leaseExpiresAt,
-    ...(leaseExpiresAt === null ? { error: "lease_not_active" } : {}) }, leaseExpiresAt ? 200 : 409);
+  const result = await renewProductActionLeaseAuthenticated(env, {
+    deviceId: credentials.deviceId, tokenSha256: await sha256Hex(credentials.rawToken), ...ctx, leaseSeconds,
+  });
+  if (result.error === "invalid_device_token") return respond({ ok: false, error: result.error }, 401);
+  if (typeof result.ok !== "boolean" || (result.ok && typeof result.lease_expires_at !== "string"))
+    return respond({ ok: false, error: "product_postgres_invalid_response" }, 503);
+  return respond({ ok: result.ok, lease_expires_at: result.ok ? result.lease_expires_at : null,
+    ...(result.ok ? {} : { error: "lease_not_active" }) }, result.ok ? 200 : 409);
 }
 
-async function progress(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
+async function progress(request: Request, env: ProductPostgresEnv): Promise<Response> {
+  const credentials = deviceRequestCredentials(request);
+  if (!credentials) return respond({ ok: false, error: "device_auth_required" }, 401);
   const body = await readBoundedJsonObject(request, 32 * 1024);
   const ctx = body ? executionContext(body) : null;
   const progress = canonicalDeviceActionProgress(body);
   if (!ctx || !progress) {
-    return respond({ ok: false, error: "progress_invalid" }, 400);
+    const auth = await authenticateDeviceRequest(request, env);
+    return auth.ok ? respond({ ok: false, error: "progress_invalid" }, 400) : auth.response;
   }
-  const ok = await progressProductAction(env, { deviceId, ...ctx,
-    stage: progress.stage, message: progress.message, progressPercent: progress.percent });
-  return respond({ ok, ...(ok ? {} : { error: "lease_not_active" }) }, ok ? 200 : 409);
+  const result = await progressProductActionAuthenticated(env, {
+    deviceId: credentials.deviceId, tokenSha256: await sha256Hex(credentials.rawToken), ...ctx,
+    stage: progress.stage, message: progress.message, progressPercent: progress.percent,
+  });
+  if (result.error === "invalid_device_token") return respond({ ok: false, error: result.error }, 401);
+  if (typeof result.ok !== "boolean") return respond({ ok: false, error: "product_postgres_invalid_response" }, 503);
+  return respond({ ok: result.ok, ...(result.ok ? {} : { error: "lease_not_active" }) }, result.ok ? 200 : 409);
 }
 
 /** Product-workspace proof travels exclusively over the existing device-
@@ -730,14 +744,26 @@ export async function handleProductDeviceTransport(
     }
   }
 
+  if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/lease") {
+    try { return await lease(request, env); }
+    catch (error) {
+      if (error instanceof ProductPostgresError) return respond({ok:false,error:error.code},error.status);
+      return unexpectedProductDeviceTransportFailure(error, "execution", "lease");
+    }
+  }
+  if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/progress") {
+    try { return await progress(request, env); }
+    catch (error) {
+      if (error instanceof ProductPostgresError) return respond({ok:false,error:error.code},error.status);
+      return unexpectedProductDeviceTransportFailure(error, "execution", "progress");
+    }
+  }
+
   // Reject unknown routes BEFORE authenticating through SQL: no operation
   // exists to authorize. Known routes (including disabled staged features)
   // preserve the auth-first contract and must not expose feature flags.
   let execute: (deviceId: string) => Promise<Response>;
   switch (path) {
-    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/lease":
-      execute = deviceId => lease(request, env, deviceId);
-      break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/orchestrator-read-authorization":
       execute = deviceId => orchestratorAuthorization(request, env, deviceId);
       break;
@@ -773,9 +799,6 @@ export async function handleProductDeviceTransport(
           return respond({ ok: false, error: "not_found" }, 404);
         return projectBindingConfirm(request, env, deviceId);
       };
-      break;
-    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/progress":
-      execute = deviceId => progress(request, env, deviceId);
       break;
     default:
       return respond({ ok: false, error: "not_found" }, 404);
