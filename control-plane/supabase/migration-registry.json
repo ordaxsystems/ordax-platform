@@ -1449,6 +1449,18 @@
         "blob_sha": "d02a680214f3e4e8601cf41796452e4b041724f1"
       },
       "ledger_name": "product_atomic_heartbeat_v1"
+    },
+    {
+      "name": "20261121004000_product_atomic_action_start_v1",
+      "applied_version": "20261121003323",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261121004000_product_atomic_action_start_v1.sql",
+        "blob_sha": "1b484f3b12ed7a8ed7f1f58516fb6531e0adb24b"
+      },
+      "ledger_name": "product_atomic_action_start_v1"
     }
   ]
 }

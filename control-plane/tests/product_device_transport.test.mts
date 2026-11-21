@@ -139,6 +139,27 @@ test("device transport source has no D1, operator bearer, websocket queue, pairi
   ]) assert.equal(source.includes(required), true, required);
 });
 
+test("start uses an imported, single atomic SQL RPC instead of a missing binder", () => {
+  const migration = fs.readFileSync(path.resolve(HERE,
+    "../supabase/migrations/20261121004000_product_atomic_action_start_v1.sql"), "utf8");
+  const store = fs.readFileSync(path.resolve(HERE,
+    "../cloudflare/src/product_postgres_store.ts"), "utf8");
+  const source = fs.readFileSync(SRC, "utf8");
+  const handler = source.split("async function start(")[1]?.split("\n\nasync function lease(")[0];
+  assert.ok(handler);
+  assert.match(handler, /await startProductAction\(env/);
+  assert.match(handler, /runtimeKind: provenance\?\.runtimeKind \?\? null/);
+  assert.match(handler, /agentVersion: provenance\?\.agentVersion \?\? null/);
+  assert.doesNotMatch(source, /bindProductActionRuntimeProvenance/);
+  assert.match(store, /callRpc<JsonObject>\(env, "ordax_start_product_action_atomic_v1"/);
+  assert.doesNotMatch(store, /ordax_start_product_action_v1: \{/);
+  assert.doesNotMatch(store, /ordax_bind_product_action_runtime_provenance_v1: \{/);
+  assert.match(migration, /public\.ordax_start_product_action_v1\(/);
+  assert.match(migration, /public\.ordax_bind_product_action_runtime_provenance_v1\(/);
+  assert.match(migration, /exception when sqlstate 'P4103'/);
+  assert.match(migration, /to ordax_edge_executor;/);
+});
+
 test("terminal report and Runtime provenance commit in one PostgreSQL transaction", () => {
   const migration = fs.readFileSync(path.resolve(HERE,
     "../supabase/migrations/20261121001500_product_atomic_terminal_report_v1.sql"), "utf8");
