@@ -428,6 +428,13 @@ const RPC_SPECS = {
     ],
     casts: ["uuid", "boolean", "text", "text", "text", "boolean", "integer"],
   },
+  ordax_authenticated_product_heartbeat_v1: {
+    keys: [
+      "p_device_id", "p_token_sha256", "p_online", "p_runtime_kind",
+      "p_agent_version", "p_capability_digest", "p_force", "p_max_concurrent_jobs",
+    ],
+    casts: ["uuid", "text", "boolean", "text", "text", "text", "boolean", "integer"],
+  },
   ordax_record_product_capacity_v1: {
     keys: ["p_device_id", "p_max_concurrent_jobs"],
     casts: ["uuid", "integer"],
@@ -1194,6 +1201,37 @@ export async function listRecentProductMcpActions(
 }
 
 /** A single bounded PostgreSQL call updates presence and actual capacity. */
+/** Device credential and existing atomic heartbeat execute in one SQL call. */
+export async function recordProductHeartbeatAuthenticated(
+  env: ProductPostgresEnv,
+  input: {
+    deviceId: string;
+    tokenSha256: string;
+    online: boolean;
+    runtimeKind: "ordax-os" | "desktop-agent" | "mobile-client" | "other";
+    agentVersion: string;
+    capabilityDigest: string;
+    force: boolean;
+    maxConcurrentJobs: number;
+  },
+): Promise<{ok: boolean; recorded?: boolean; error?: string}> {
+  if (!Number.isInteger(input.maxConcurrentJobs)
+      || input.maxConcurrentJobs < 1 || input.maxConcurrentJobs > 32)
+    throw new ProductPostgresError("product_device_capacity_invalid", 400);
+  return callRpc<{ok: boolean; recorded?: boolean; error?: string}>(
+    env, "ordax_authenticated_product_heartbeat_v1", {
+      p_device_id: input.deviceId,
+      p_token_sha256: input.tokenSha256,
+      p_online: input.online,
+      p_runtime_kind: input.runtimeKind,
+      p_agent_version: input.agentVersion,
+      p_capability_digest: input.capabilityDigest,
+      p_force: input.force,
+      p_max_concurrent_jobs: input.maxConcurrentJobs,
+    },
+  );
+}
+
 export async function recordProductHeartbeat(
   env: ProductPostgresEnv,
   input: {
