@@ -102,6 +102,81 @@ test("Forge MCP read call uses a fresh Platform receipt and returns the Forge re
   assert.equal(enqueued[0].idempotencyKey,"forge:read:66666666-6666-4666-8666-666666666666");
 });
 
+
+test("Forge MCP pending action wait uses bounded Supabase reads with final deadline receipt",async()=>{
+  let clock=0,calls=0,enqueues=0;
+  const sleeps:number[]=[];
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,
+    resolve:async()=>resolution(),
+    randomUUID:()=> "66666666-6666-4666-8666-666666666666",
+    now:()=>clock,
+    sleep:async(ms:number)=>{sleeps.push(ms);clock+=ms;},
+    enqueue:async()=>{enqueues++;return {ok:true,replayed:false,
+      request_id:REQUEST,effect_id:EFFECT,status:"queued"};},
+    getAction:async()=>{calls++;return {ok:true,request_id:REQUEST,
+      effect_id:EFFECT,status:"queued",result:null};},
+  });
+  const response=await gateway(request({jsonrpc:"2.0",id:70,method:"tools/call",
+    params:{name:"forge_projects_list",arguments:{}}}));
+  assert.equal(response.status,200);
+  const body:any=await response.json();
+  assert.equal(body.result.structuredContent.pending,true);
+  assert.equal(body.result.structuredContent.request_id,REQUEST);
+  assert.equal(enqueues,1,"waiting cannot enqueue a second operation");
+  assert.deepEqual(sleeps,[250,500,1000,2000,2000,2000,250]);
+  assert.equal(clock,8000);
+  assert.equal(calls,8,"pending wait must use one initial and seven bounded reads");
+});
+
+test("Forge MCP wait returns terminal receipt promptly and reads at the deadline",async()=>{
+  for(const finalAt of [750,8000]){
+    let clock=0,calls=0;
+    const sleeps:number[]=[];
+    const gateway=createForgeMcpGateway(env,{
+      authenticateMcp:mcpIdentity as any,
+      resolve:async()=>resolution(),
+      randomUUID:()=> "66666666-6666-4666-8666-666666666666",
+      now:()=>clock,
+      sleep:async(ms:number)=>{sleeps.push(ms);clock+=ms;},
+      enqueue:async()=>({ok:true,replayed:false,
+        request_id:REQUEST,effect_id:EFFECT,status:"queued"}),
+      getAction:async()=>{calls++;return clock>=finalAt
+        ? {ok:true,request_id:REQUEST,effect_id:EFFECT,status:"succeeded",
+            result:{projects:[]},error_code:null}
+        : {ok:true,request_id:REQUEST,effect_id:EFFECT,status:"running"};},
+    });
+    const response=await gateway(request({jsonrpc:"2.0",id:71,method:"tools/call",
+      params:{name:"forge_projects_list",arguments:{}}}));
+    const body:any=await response.json();
+    assert.deepEqual(body.result.structuredContent,{projects:[]});
+    assert.equal(clock,finalAt);
+    assert.equal(calls,finalAt===750?3:8);
+    assert.equal(sleeps.reduce((a,b)=>a+b,0),finalAt);
+  }
+});
+
+test("Forge MCP aborts status polling on DB errors without false pending",async()=>{
+  let reads=0,sleeps=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,
+    resolve:async()=>resolution(),
+    randomUUID:()=> "66666666-6666-4666-8666-666666666666",
+    now:()=>0,
+    sleep:async()=>{sleeps++;},
+    enqueue:async()=>({ok:true,replayed:false,
+      request_id:REQUEST,effect_id:EFFECT,status:"queued"}),
+    getAction:async()=>{reads++;return {ok:false,error:"forge_action_status_unavailable"};},
+  });
+  const response=await gateway(request({jsonrpc:"2.0",id:72,method:"tools/call",
+    params:{name:"forge_projects_list",arguments:{}}}));
+  const body:any=await response.json();
+  assert.equal(body.result.isError,true);
+  assert.deepEqual(body.result.structuredContent,{ok:false,error:"forge_action_status_unavailable"});
+  assert.equal(reads,1);
+  assert.equal(sleeps,0);
+});
+
 test("Forge MCP stays installable when no Forge instance is registered",async()=>{
   const gateway=createForgeMcpGateway(env,{
     authenticateMcp:mcpIdentity as any,
