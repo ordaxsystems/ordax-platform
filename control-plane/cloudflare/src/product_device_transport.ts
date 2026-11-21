@@ -11,8 +11,7 @@ import {
   confirmDeviceProjectBinding,
   claimProductAction,
   progressProductAction,
-  recordProductPresence,
-  recordProductCapacity,
+  recordProductHeartbeat,
   renewProductActionLease,
   readDeviceProjectBindingIntents,
   resolveOrchestratorReadAuthorization,
@@ -208,21 +207,20 @@ async function heartbeat(request: Request, env: ProductPostgresEnv, deviceId: st
       || (body.runtime_kind !== undefined && !Object.prototype.hasOwnProperty.call(body, "capabilities_digest"))) {
     return respond({ ok: false, error: "heartbeat_invalid" }, 400);
   }
-  const recorded = await recordProductPresence(env, {
+  const heartbeatResult = await recordProductHeartbeat(env, {
     deviceId,
     online: status !== "offline",
     runtimeKind: runtimeKind as RuntimeKind,
     agentVersion,
     capabilityDigest,
     force: status === "offline",
+    maxConcurrentJobs,
   });
-  const capacityRecorded = await recordProductCapacity(env, {
-    deviceId, maxConcurrentJobs,
-  });
-  if (!capacityRecorded && status !== "offline") {
+  if (heartbeatResult.ok !== true || typeof heartbeatResult.recorded !== "boolean") {
     return respond({ ok: false, error: "product_capacity_unavailable" }, 503);
   }
-  return respond({ ok: true, recorded, server_time: new Date().toISOString() });
+  return respond({ ok: true, recorded: heartbeatResult.recorded,
+    server_time: new Date().toISOString() });
 }
 
 /**

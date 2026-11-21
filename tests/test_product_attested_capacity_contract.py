@@ -39,7 +39,7 @@ class ProductCapacityContractTests(unittest.TestCase):
         self.assertIn("rawCapacity > 32",self.transport)
         self.assertIn("maxConcurrentJobs = typeof rawCapacity",self.transport)
         self.assertIn("rawCapacity : 4",self.transport)
-        self.assertIn("recordProductCapacity(env",self.transport)
+        self.assertIn("recordProductHeartbeat(env",self.transport)
         self.assertIn('"ordax_record_product_capacity_v1"',self.store)
         self.assertNotIn("new Queue(",self.transport)
 

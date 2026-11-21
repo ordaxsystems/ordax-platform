@@ -24,8 +24,8 @@ class DeviceCapacityRpcAllowlistTests(unittest.TestCase):
 
     def test_heartbeat_preserves_authenticated_device_path(self):
         source = TRANSPORT.read_text(encoding="utf-8")
-        self.assertIn("await recordProductPresence(env", source)
-        self.assertIn("await recordProductCapacity(env", source)
+        self.assertIn("await recordProductHeartbeat(env", source)
+        self.assertNotIn("await recordProductCapacity(env", source)
         self.assertIn("maxConcurrentJobs = typeof rawCapacity", source)
         self.assertIn("rawCapacity : 4", source)
         self.assertIn('error: "product_capacity_unavailable"', source)
