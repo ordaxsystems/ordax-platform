@@ -97,6 +97,50 @@ test("Owner onboarding state exposes bounded product state without provider cred
       next_state: "needs_github_installation",
     }],
     next_state: null,
+    onboarding_availability: {
+      github_authorization_configured: false,
+      project_device_binding_enabled: false,
+    },
+  });
+});
+
+test("Owner onboarding reports only validated deployment setup without disclosing secrets", async () => {
+  const clientSecret = "example-secret-not-for-production-0123456789";
+  const pkceSecret = "independent-example-pkce-0123456789";
+  const configured = {
+    PRODUCT_GITHUB_APP_CLIENT_ID: "Ov23li-example-id",
+    PRODUCT_GITHUB_APP_CLIENT_SECRET: clientSecret,
+    PRODUCT_GITHUB_APP_PKCE_SECRET: pkceSecret,
+    PRODUCT_GITHUB_APP_INSTALL_URL: "https://github.com/apps/ordax-test/installations/new",
+    OWNER_PROJECT_DEVICE_BINDING_ENABLED: "enabled",
+  };
+  const readState = async () => ({
+    ok: true, device_id: DEVICE,
+    spaces: [{ space_id: SPACE, name: "Existing personal", kind: "personal", state: "active" }],
+    projects: [], next_state: "needs_project",
+  });
+  const handler = createOwnerProjectOnboardingHandler(configured, {
+    authenticate: authenticated, readState,
+  });
+  const response = await handler(stateRequest());
+  assert.equal(response.status, 200);
+  const view = await response.json();
+  assert.deepEqual(view.onboarding_availability, {
+    github_authorization_configured: true,
+    project_device_binding_enabled: true,
+  });
+  assert.equal(view.next_state, "needs_project");
+  assert.equal(JSON.stringify(view).includes(clientSecret), false);
+  assert.equal(JSON.stringify(view).includes(pkceSecret), false);
+
+  const partiallyConfigured = createOwnerProjectOnboardingHandler({
+    ...configured, PRODUCT_GITHUB_APP_CLIENT_SECRET: "invalid",
+    OWNER_PROJECT_DEVICE_BINDING_ENABLED: "disabled",
+  }, { authenticate: authenticated, readState });
+  const partial = await (await partiallyConfigured(stateRequest())).json();
+  assert.deepEqual(partial.onboarding_availability, {
+    github_authorization_configured: false,
+    project_device_binding_enabled: false,
   });
 });
 
