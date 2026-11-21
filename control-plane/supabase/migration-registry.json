@@ -1473,6 +1473,18 @@
         "blob_sha": "562278f9ad5310f1ff4e8dd715d96caf154d9c04"
       },
       "ledger_name": "product_authenticated_claim_v1"
+    },
+    {
+      "name": "20261121034000_product_authenticated_heartbeat_v1",
+      "applied_version": "20261121033336",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261121034000_product_authenticated_heartbeat_v1.sql",
+        "blob_sha": "106f53bc9018e6e95aba32c8149326d36672233d"
+      },
+      "ledger_name": "product_authenticated_heartbeat_v1"
     }
   ]
 }
