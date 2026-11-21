@@ -203,8 +203,8 @@ test("start uses an imported, single atomic SQL RPC instead of a missing binder"
   const handler = source.split("async function startAuthenticated(")[1]?.split("\nasync function lease(")[0];
   assert.ok(handler);
   assert.match(handler, /await startProductActionAuthenticated\(env/);
-  assert.match(handler, /runtimeKind: provenance\?\.runtimeKind \?\? null/);
-  assert.match(handler, /agentVersion: provenance\?\.agentVersion \?\? null/);
+  assert.match(handler, /runtimeKind:\s*provenance\?\.runtimeKind\s*\?\?\s*null/);
+  assert.match(handler, /agentVersion:\s*provenance\?\.agentVersion\s*\?\?\s*null/);
   assert.doesNotMatch(source, /bindProductActionRuntimeProvenance/);
   assert.match(store, /callRpc<JsonObject>\(env, "ordax_authenticated_start_product_action_v1"/);
   assert.doesNotMatch(store, /ordax_start_product_action_v1: \{/);
