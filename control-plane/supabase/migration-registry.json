@@ -1461,6 +1461,18 @@
         "blob_sha": "1b484f3b12ed7a8ed7f1f58516fb6531e0adb24b"
       },
       "ledger_name": "product_atomic_action_start_v1"
+    },
+    {
+      "name": "20261121031500_product_authenticated_claim_v1",
+      "applied_version": "20261121031538",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261121031500_product_authenticated_claim_v1.sql",
+        "blob_sha": "562278f9ad5310f1ff4e8dd715d96caf154d9c04"
+      },
+      "ledger_name": "product_authenticated_claim_v1"
     }
   ]
 }
