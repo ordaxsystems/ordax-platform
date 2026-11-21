@@ -139,6 +139,27 @@ test("device transport source has no D1, operator bearer, websocket queue, pairi
   ]) assert.equal(source.includes(required), true, required);
 });
 
+test("terminal report and Runtime provenance commit in one PostgreSQL transaction", () => {
+  const migration = fs.readFileSync(path.resolve(HERE,
+    "../supabase/migrations/20261121001500_product_atomic_terminal_report_v1.sql"), "utf8");
+  const store = fs.readFileSync(path.resolve(HERE,
+    "../cloudflare/src/product_postgres_store.ts"), "utf8");
+  const source = fs.readFileSync(SRC, "utf8");
+  assert.match(migration, /create or replace function public\.ordax_report_product_action_atomic_v1\(/i);
+  assert.match(migration, /public\.ordax_report_product_action_v1\(/);
+  assert.match(migration, /public\.ordax_bind_product_action_runtime_provenance_v1\(/);
+  assert.match(migration, /exception when sqlstate 'P4101'/);
+  assert.match(migration, /grant execute on function public\.ordax_report_product_action_atomic_v1\([\s\S]*?to ordax_edge_executor;/);
+  assert.match(migration, /revoke all on function public\.ordax_report_product_action_atomic_v1\([\s\S]*?from public, anon, authenticated, service_role, ordax_edge_executor;/);
+  assert.match(store, /ordax_report_product_action_atomic_v1: \{/);
+  assert.match(store, /callRpc<JsonObject>\(env, "ordax_report_product_action_atomic_v1"/);
+  assert.match(source, /runtimeKind: provenance\?\.runtimeKind \?\? null/);
+  assert.match(source, /agentVersion: provenance\?\.agentVersion \?\? null/);
+  const terminalReportOnly = source.split("async function report(")[1]?.split("\n\nfunction exactKeys")[0];
+  assert.ok(terminalReportOnly, "terminal report handler must remain present");
+  assert.doesNotMatch(terminalReportOnly, /await bindProductActionRuntimeProvenance\(/);
+});
+
 test("device heartbeat persists one canonical digest, never a capability array", () => {
   const source = fs.readFileSync(SRC, "utf8");
   assert.equal(source.includes('body.capabilities_digest'), true);
