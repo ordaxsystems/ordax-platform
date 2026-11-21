@@ -352,14 +352,14 @@ const RPC_SPECS = {
     ],
     casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "uuid", "text", "jsonb", "text", "text"],
   },
-  ordax_report_product_action_atomic_v1: {
+  ordax_authenticated_report_product_action_v1: {
     keys: [
-      "p_device_id", "p_request_id", "p_effect_id", "p_attempt_id", "p_lease_id",
+      "p_device_id", "p_token_sha256", "p_request_id", "p_effect_id", "p_attempt_id", "p_lease_id",
       "p_execution_epoch", "p_agent_instance_id", "p_boot_id", "p_report_id",
       "p_status", "p_result", "p_result_sha256", "p_error_code",
       "p_runtime_kind", "p_agent_version",
     ],
-    casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text",
+    casts: ["uuid", "text", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text",
       "uuid", "text", "jsonb", "text", "text", "text", "text"],
   },
   ordax_get_product_action_v1: {
@@ -1126,10 +1126,11 @@ export async function progressProductAction(
   });
 }
 
-export async function reportProductAction(
+export async function reportProductActionAuthenticated(
   env: ProductPostgresEnv,
   input: {
     deviceId: string;
+    tokenSha256: string;
     requestId: string;
     effectId: string;
     attemptId: string;
@@ -1146,8 +1147,9 @@ export async function reportProductAction(
     agentVersion: string | null;
   },
 ): Promise<JsonObject> {
-  return callRpc<JsonObject>(env, "ordax_report_product_action_atomic_v1", {
+  return callRpc<JsonObject>(env, "ordax_authenticated_report_product_action_v1", {
     p_device_id: input.deviceId,
+    p_token_sha256: input.tokenSha256,
     p_request_id: input.requestId,
     p_effect_id: input.effectId,
     p_attempt_id: input.attemptId,

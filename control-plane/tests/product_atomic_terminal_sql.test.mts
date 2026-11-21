@@ -9,6 +9,10 @@ const migration=fs.readFileSync(new URL(
   "../supabase/migrations/20261121001500_product_atomic_terminal_report_v1.sql",import.meta.url,
 ),"utf8");
 
+const authenticatedMigration=fs.readFileSync(new URL(
+  "../supabase/migrations/20261121070000_product_authenticated_report_v1.sql",import.meta.url,
+),"utf8");
+const TOKEN="b".repeat(64);
 const DEVICE="11111111-1111-4111-8111-111111111111";
 const REQUEST="22222222-2222-4222-8222-222222222222";
 const SECOND="33333333-3333-4333-8333-333333333333";
@@ -29,6 +33,14 @@ test("atomic receipt rollback, exact replay and least privilege",async()=>{
       create role authenticated;
       create role service_role;
       create role ordax_edge_executor;
+      create table public.test_terminal_credentials(
+        device_id uuid primary key, token_sha256 text not null, revoked boolean not null default false
+      );
+      create function public.ordax_authenticate_product_device_v1(p_device_id uuid,p_token_sha256 text)
+      returns boolean language sql stable as $stub$
+        select exists(select 1 from public.test_terminal_credentials
+          where device_id=p_device_id and token_sha256=p_token_sha256 and not revoked);
+      $stub$;
       create table public.test_terminal_actions(
         request_id uuid primary key, status text not null default 'leased',
         report_id uuid, result jsonb, runtime_kind text, agent_version text,
@@ -81,21 +93,30 @@ test("atomic receipt rollback, exact replay and least privilege",async()=>{
       $stub$;
     `);
     await db.exec(migration);
+    await db.exec(authenticatedMigration);
+    await db.query("insert into public.test_terminal_credentials(device_id,token_sha256) values($1,$2)",[DEVICE,TOKEN]);
     await db.query(
       "insert into public.test_terminal_actions(request_id,runtime_kind,agent_version) values($1,$2,$3)",
       [REQUEST,"desktop-agent","0.4.7"]);
-    const submit=async(requestId:string,reportId:string,kind:string|null,version:string|null)=>
+    const submit=async(requestId:string,reportId:string,kind:string|null,version:string|null,token:string|null=TOKEN)=>
       (await db.query(
-        "select public.ordax_report_product_action_atomic_v1("+
-        "$1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::bigint,"+
-        "$7::uuid,$8::text,$9::uuid,$10::text,$11::jsonb,$12::text,"+
-        "$13::text,$14::text,$15::text) as result",
-        [DEVICE,requestId,EFFECT,ATTEMPT,LEASE,1,AGENT,"boot-example",
+        "select public.ordax_authenticated_report_product_action_v1("+
+        "$1::uuid,$2::text,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7::bigint,"+
+        "$8::uuid,$9::text,$10::uuid,$11::text,$12::jsonb,$13::text,"+
+        "$14::text,$15::text,$16::text) as result",
+        [DEVICE,token,requestId,EFFECT,ATTEMPT,LEASE,1,AGENT,"boot-example",
           reportId,"succeeded",JSON.stringify({ok:true}),"a".repeat(64),null,kind,version],
       )).rows[0].result;
     const read=async(requestId:string)=>(await db.query(
       "select * from public.test_terminal_actions where request_id=$1",[requestId],
     )).rows[0];
+    for (const token of [null,"invalid","c".repeat(64)])
+      assert.deepEqual(await submit(REQUEST,REPORT,"desktop-agent","0.4.7",token),
+        {ok:false,error:"invalid_device_token"});
+    assert.equal((await read(REQUEST)).audit_count,0);
+    await db.query("update public.test_terminal_credentials set revoked=true where device_id=$1",[DEVICE]);
+    assert.deepEqual(await submit(REQUEST,REPORT,"desktop-agent","0.4.7"),{ok:false,error:"invalid_device_token"});
+    await db.query("update public.test_terminal_credentials set revoked=false where device_id=$1",[DEVICE]);
     const conflict=await submit(REQUEST,REPORT,"desktop-agent","0.4.8");
     assert.deepEqual(conflict,{ok:false,error:"runtime_provenance_conflict"});
     const before=await read(REQUEST);
@@ -124,5 +145,16 @@ test("atomic receipt rollback, exact replay and least privilege",async()=>{
       ["public.ordax_report_product_action_atomic_v1("+
         "uuid,uuid,uuid,uuid,uuid,bigint,uuid,text,uuid,text,jsonb,text,text,text,text)"]);
     assert.deepEqual(perms.rows[0],{anon_exec:false,auth_exec:false,edge_exec:true});
+    const authPerms=await db.query(
+      "select has_function_privilege('anon',$1,'EXECUTE') anon_exec,"+
+      "has_function_privilege('authenticated',$1,'EXECUTE') auth_exec,"+
+      "has_function_privilege('service_role',$1,'EXECUTE') service_exec,"+
+      "has_function_privilege('ordax_edge_executor',$1,'EXECUTE') edge_exec",
+      ["public.ordax_authenticated_report_product_action_v1("+
+        "uuid,text,uuid,uuid,uuid,uuid,bigint,uuid,text,uuid,text,jsonb,text,text,text,text)"]);
+    assert.deepEqual(authPerms.rows[0],{anon_exec:false,auth_exec:false,service_exec:false,edge_exec:true});
+    await db.query("update public.test_terminal_credentials set revoked=true where device_id=$1",[DEVICE]);
+    assert.deepEqual(await submit(REQUEST,REPORT,"desktop-agent","0.4.7"),{ok:false,error:"invalid_device_token"});
+    assert.equal((await read(REQUEST)).audit_count,1);
   } finally { await db.close(); }
 });

@@ -16,7 +16,7 @@ import {
   readDeviceProjectBindingIntents,
   resolveOrchestratorReadAuthorization,
   verifyProjectWorkspaceResource,
-  reportProductAction,
+  reportProductActionAuthenticated,
   startProductActionAuthenticated,
   ProductPostgresError,
   type ProductPostgresEnv,
@@ -496,8 +496,14 @@ async function orchestratorAuthorization(request: Request, env: ProductPostgresE
   return respond(result, result.ok === true ? 200 : 403);
 }
 
-async function report(request: Request, env: ProductPostgresEnv, deviceId: string,
+async function report(request: Request, env: ProductPostgresEnv,
   context?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
+  const credentials = deviceRequestCredentials(request);
+  if (!credentials) return respond({ ok: false, error: "device_auth_required" }, 401);
+  const invalid = async (error: string, status = 400) => {
+    const auth = await authenticateDeviceRequest(request, env);
+    return auth.ok ? respond({ ok: false, error }, status) : auth.response;
+  };
   const body = await readBoundedJsonObject(request, 640 * 1024);
   const ctx = body ? executionContext(body) : null;
   const provenance = body ? runtimeProvenance(body) : null;
@@ -513,11 +519,11 @@ async function report(request: Request, env: ProductPostgresEnv, deviceId: strin
       || (status !== "succeeded" && status !== "failed" && status !== "cancelled")
       || !resultBytes || resultBytes.byteLength > 524288
       || !HEX64.test(resultSha256) || (errorCode !== null && errorCode.length > 120)) {
-    return respond({ ok: false, error: "report_invalid" }, 400);
+    return invalid("report_invalid");
   }
   const observedDigest = await sha256Hex(new TextDecoder().decode(resultBytes));
   if (observedDigest !== resultSha256) {
-    return respond({ ok: false, error: "result_digest_mismatch" }, 400);
+    return invalid("result_digest_mismatch");
   }
   let result: Json;
   try {
@@ -525,17 +531,20 @@ async function report(request: Request, env: ProductPostgresEnv, deviceId: strin
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("shape");
     result = parsed as Json;
   } catch {
-    return respond({ ok: false, error: "report_invalid" }, 400);
+    return invalid("report_invalid");
   }
   if (!isProductReportJsonbSafe(result)) {
-    return respond({ ok: false, error: "report_result_invalid_unicode" }, 422);
+    return invalid("report_result_invalid_unicode", 422);
   }
-  const committed = await reportProductAction(env, {
-    deviceId, ...ctx, reportId, status, result, resultSha256, errorCode,
+  const deviceId = credentials.deviceId;
+  const committed = await reportProductActionAuthenticated(env, {
+    deviceId, tokenSha256: await sha256Hex(credentials.rawToken),
+    ...ctx, reportId, status, result, resultSha256, errorCode,
     runtimeKind: provenance?.runtimeKind ?? null,
     agentVersion: provenance?.agentVersion ?? null,
   });
   if (committed.ok !== true) {
+    if (committed.error === "invalid_device_token") return respond(committed, 401);
     const conflict = committed.error === "terminal_report_conflict" || committed.error === "lease_not_active";
     return respond(committed, conflict ? 409 : 400);
   }
@@ -711,6 +720,16 @@ export async function handleProductDeviceTransport(
     }
   }
 
+  if (path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/report"
+      || path === PRODUCT_DEVICE_TRANSPORT_PREFIX + "/recover-report") {
+    try { return await report(request, env, context); }
+    catch (error) {
+      if (error instanceof ProductPostgresError)
+        return respond({ ok: false, error: error.code }, error.status);
+      return unexpectedProductDeviceTransportFailure(error, "execution", "report");
+    }
+  }
+
   // Reject unknown routes BEFORE authenticating through SQL: no operation
   // exists to authorize. Known routes (including disabled staged features)
   // preserve the auth-first contract and must not expose feature flags.
@@ -757,10 +776,6 @@ export async function handleProductDeviceTransport(
       break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/progress":
       execute = deviceId => progress(request, env, deviceId);
-      break;
-    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/report":
-    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/recover-report":
-      execute = deviceId => report(request, env, deviceId, context);
       break;
     default:
       return respond({ ok: false, error: "not_found" }, 404);

@@ -232,13 +232,21 @@ test("terminal report and Runtime provenance commit in one PostgreSQL transactio
   assert.match(migration, /exception when sqlstate 'P4101'/);
   assert.match(migration, /grant execute on function public\.ordax_report_product_action_atomic_v1\([\s\S]*?to ordax_edge_executor;/);
   assert.match(migration, /revoke all on function public\.ordax_report_product_action_atomic_v1\([\s\S]*?from public, anon, authenticated, service_role, ordax_edge_executor;/);
-  assert.match(store, /ordax_report_product_action_atomic_v1: \{/);
-  assert.match(store, /callRpc<JsonObject>\(env, "ordax_report_product_action_atomic_v1"/);
+  const authenticated = fs.readFileSync(path.resolve(HERE,
+    "../supabase/migrations/20261121070000_product_authenticated_report_v1.sql"), "utf8");
+  assert.match(authenticated, /public\.ordax_authenticate_product_device_v1\(/);
+  assert.match(authenticated, /public\.ordax_report_product_action_atomic_v1\(/);
+  assert.match(store, /ordax_authenticated_report_product_action_v1: \{/);
+  assert.match(store, /callRpc<JsonObject>\(env, "ordax_authenticated_report_product_action_v1"/);
   assert.match(source, /runtimeKind: provenance\?\.runtimeKind \?\? null/);
   assert.match(source, /agentVersion: provenance\?\.agentVersion \?\? null/);
   const terminalReportOnly = source.split("async function report(")[1]?.split("\n\nfunction exactKeys")[0];
   assert.ok(terminalReportOnly, "terminal report handler must remain present");
   assert.doesNotMatch(terminalReportOnly, /await bindProductActionRuntimeProvenance\(/);
+  assert.match(terminalReportOnly, /await reportProductActionAuthenticated\(env/);
+  assert.match(terminalReportOnly, /tokenSha256: await sha256Hex\(credentials.rawToken\)/);
+  assert.match(terminalReportOnly, /const auth = await authenticateDeviceRequest\(request, env\)/);
+  assert.match(terminalReportOnly, /invalid_device_token.*401/);
 });
 
 test("Device heartbeat performs one authenticated atomic SQL RPC", () => {
