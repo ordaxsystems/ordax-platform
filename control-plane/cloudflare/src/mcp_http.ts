@@ -927,6 +927,17 @@ function pendingActionMessage(status: unknown): string {
   return "Action has not reached a verified terminal state; check ordax_action_status with this request_id.";
 }
 
+/** Delay for a nonterminal Product action: caller-owned deadline and per-read
+ * authorization remain authoritative. The default immediate status read and
+ * first 250/500/1000ms updates are unchanged. Beyond that, 2/2.5s polling
+ * reduces Hyperdrive traffic without caching results, tokens or grants.
+ */
+export function canonicalProductStatusPollDelayMs(remainingMs: number, round: number): number {
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return 0;
+  const step = Math.max(0, Math.min(4, Math.floor(round)));
+  return Math.min(remainingMs, 250 * (2 ** step), 2500);
+}
+
 /** Reuse the same one-retry read policy for direct status and accepted-action
  * polling. The deadline is owned by the caller, not inferred from a response.
  * A transient failure may justify one *read*, never another enqueue.
@@ -994,11 +1005,11 @@ async function waitForAction(source: Request, requestId: string, timeoutMs: numb
       const stage = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as JsonObject).status : null;
       return { ...projected, message: pendingActionMessage(stage) };
     }
-    // Polling every 250ms can issue ~80 authenticated PostgreSQL reads in a
-    // 20-second tool wait. Back off to 1.5s while preserving initial latency;
-    // never sleep past the caller's requested deadline.
+    // Preserve quick first reads, then widen bounded waits for long-running
+    // actions. Every read still rechecks the signed OAuth owner/client and
+    // canonical PostgreSQL grants. Never sleep past the caller's deadline.
     const remainingMs = Math.max(0, deadline - Date.now());
-    const delayMs = Math.min(remainingMs, 250 * (2 ** Math.min(pollRound, 3)), 1500);
+    const delayMs = canonicalProductStatusPollDelayMs(remainingMs, pollRound);
     pollRound++;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
