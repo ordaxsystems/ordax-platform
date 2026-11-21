@@ -353,6 +353,16 @@ const RPC_SPECS = {
     ],
     casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text", "uuid", "text", "jsonb", "text", "text"],
   },
+  ordax_report_product_action_atomic_v1: {
+    keys: [
+      "p_device_id", "p_request_id", "p_effect_id", "p_attempt_id", "p_lease_id",
+      "p_execution_epoch", "p_agent_instance_id", "p_boot_id", "p_report_id",
+      "p_status", "p_result", "p_result_sha256", "p_error_code",
+      "p_runtime_kind", "p_agent_version",
+    ],
+    casts: ["uuid", "uuid", "uuid", "uuid", "uuid", "bigint", "uuid", "text",
+      "uuid", "text", "jsonb", "text", "text", "text", "text"],
+  },
   ordax_bind_product_action_runtime_provenance_v1: {
     keys: [
       "p_device_id",
@@ -1108,9 +1118,11 @@ export async function reportProductAction(
     result: JsonObject;
     resultSha256: string;
     errorCode: string | null;
+    runtimeKind: "ordax-os" | "desktop-agent" | "mobile-client" | "other" | null;
+    agentVersion: string | null;
   },
 ): Promise<JsonObject> {
-  return callRpc<JsonObject>(env, "ordax_report_product_action_v1", {
+  return callRpc<JsonObject>(env, "ordax_report_product_action_atomic_v1", {
     p_device_id: input.deviceId,
     p_request_id: input.requestId,
     p_effect_id: input.effectId,
@@ -1124,6 +1136,8 @@ export async function reportProductAction(
     p_result: input.result,
     p_result_sha256: input.resultSha256,
     p_error_code: input.errorCode,
+    p_runtime_kind: input.runtimeKind,
+    p_agent_version: input.agentVersion,
   });
 }
 
