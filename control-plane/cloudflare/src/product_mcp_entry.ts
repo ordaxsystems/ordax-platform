@@ -81,7 +81,10 @@ import {
 } from "./product_github_webhook.ts";
 import {createForgeMcpGateway,FORGE_MCP_HOSTNAME} from "./forge_mcp_gateway.ts";
 
-type Env = ProductAuthEnv & ProductPostgresEnv;
+type Env = ProductAuthEnv & ProductPostgresEnv & {
+  FORGE_NATIVE_DELEGATION_ENABLED?: string;
+  FORGE_NATIVE_OAUTH_CLIENT_ID?: string;
+};
 
 // ChatGPT keeps the only public MCP identity on mcp.ordax.com.br. The
 // workers.dev hostname is a separate, path-restricted network ingress for the
@@ -236,6 +239,9 @@ function resourceMetadata(origin: string, issuer: string) {
 type McpRoutingHint = Readonly<{
   toolName: string;
   explicitNonNullSpace: boolean;
+  // Correlation intent only. Runtime attestation + signed native client are
+  // checked independently before this becomes retry-correlation authority.
+  nativeSessionRequested: boolean;
 }>;
 
 async function mcpRoutingHint(request: Request): Promise<McpRoutingHint | null> {
@@ -249,8 +255,11 @@ async function mcpRoutingHint(request: Request): Promise<McpRoutingHint | null> 
   const name = body.params.name;
   if (typeof name !== "string") return null;
   const args = body.params.arguments;
+  const meta = body.params._meta;
   return {
     toolName: name,
+    nativeSessionRequested: Boolean(meta && typeof meta === "object"
+      && !Array.isArray(meta) && Object.hasOwn(meta, "ordax/native-session")),
     // Device-scoped commands never inherit a model-supplied Space. Detect
     // that denial without creating an Owner challenge for an impossible call.
     // Project-scoped commands still resolve their Space via the canonical RPC.
@@ -547,6 +556,7 @@ export function createCanonicalProductMcpGateway(
       }
 
       let verifiedActionDeviceId: string | undefined;
+      let verifiedNativeRetryClientId: string | undefined;
       let handlers: OrdaxMcpHandlers = sessionDeviceBinding
         ? { ...deniedHandlers, sessionDeviceBinding }
         : sessionOwnerSelection
@@ -617,6 +627,15 @@ export function createCanonicalProductMcpGateway(
               deviceId: resolved.deviceId,
             });
             verifiedActionDeviceId = trusted.deviceId;
+            // This native marker was accepted by the SAME SQL resolve that
+            // selected the Runtime-confirmed device, after Forge OAuth and
+            // rollout validation. Pass only this request-local client proof
+            // into the shared MCP retry digest; never trust _meta by itself.
+            if (routingHint?.nativeSessionRequested
+              && env.FORGE_NATIVE_DELEGATION_ENABLED === "enabled"
+              && typeof env.FORGE_NATIVE_OAUTH_CLIENT_ID === "string"
+              && trusted.clientId === env.FORGE_NATIVE_OAUTH_CLIENT_ID.toLowerCase())
+              verifiedNativeRetryClientId = trusted.clientId;
           } else {
             pending = resolved.error === "central_session_pending";
             if (CENTRAL_SESSION_REMEDIATION_ERRORS.has(resolved.error)) {
@@ -652,6 +671,7 @@ export function createCanonicalProductMcpGateway(
       return handleOrdaxMcp(request, {
         ...handlers,
         verifiedActionDeviceId,
+        verifiedNativeRetryClientId,
         waitForCompletion: (deviceId, requestId, remainingMs) =>
           waitProductActionCompletion(env, deviceId, requestId, remainingMs),
       }, allowedTools, context);

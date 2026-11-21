@@ -19,6 +19,10 @@ export interface OrdaxMcpHandlers {
   /** Request-local device selected by the attested PostgreSQL session, never by
    * MCP action arguments. Used only for an advisory pre-read completion wait. */
   verifiedActionDeviceId?: string;
+  /** Set ONLY by the Product gateway after the Forge native correlation has
+   * passed signed OAuth, the enabled rollout and a fresh Runtime-confirmed
+   * PostgreSQL session resolve. It never comes from JSON-RPC arguments. */
+  verifiedNativeRetryClientId?: string;
   /** Advisory wait after canonical authorization; never returns a receipt. */
   waitForCompletion?: (deviceId: string, requestId: string, remainingMs: number) => Promise<"signalled" | "timeout" | "unavailable">;
   listRecentActions?: (input: { pendingOnly: boolean; limit: number }) => Promise<Response>;
@@ -1122,8 +1126,10 @@ function canonicalRetryValue(value: unknown): unknown {
   return value;
 }
 
-/** Stable per signed OAuth client, ChatGPT session marker, JSON-RPC call ID
- * and exact tool call. JSON-RPC permits sequential request ID reuse, so an ID
+/** Stable per signed OAuth client, independently verified session marker,
+ * JSON-RPC call ID and exact tool call. Forge native markers are accepted
+ * ONLY with the Product gateway's request-local Runtime-attested proof.
+ * JSON-RPC permits sequential request ID reuse, so an ID
  * alone cannot distinguish a retry from a later, different tool invocation.
  * The tool name and canonical arguments participate only in this in-memory
  * digest; neither content nor marker is persisted or forwarded. PostgreSQL
@@ -1133,6 +1139,7 @@ export async function verifiedMcpRetryDigest(
   sessionPayload: JsonObject,
   requestId: string | number,
   params: unknown,
+  verifiedNativeClientId?: string,
 ): Promise<string | null> {
   if (!params || typeof params !== "object" || Array.isArray(params)) return null;
   const object = params as JsonObject;
@@ -1142,11 +1149,21 @@ export async function verifiedMcpRetryDigest(
   if (!meta || typeof meta !== "object" || Array.isArray(meta)
     || typeof name !== "string" || !name
     || !args || typeof args !== "object" || Array.isArray(args)) return null;
-  const marker = (meta as JsonObject)["openai/session"];
+  const chatgpt = (meta as JsonObject)["openai/session"];
+  const native = (meta as JsonObject)["ordax/native-session"];
   const session = sessionPayload.session;
   const clientId = session && typeof session === "object" && !Array.isArray(session)
     ? (session as JsonObject).client_id : null;
-  if (!validChatGptSessionMarker(marker) || !isCanonicalUuid(clientId)) return null;
+  if (!isCanonicalUuid(clientId)) return null;
+  const verifiedNative = native !== undefined && chatgpt === undefined
+    && typeof native === "string" && /^[A-Za-z0-9_-]{43}$/.test(native)
+    && isCanonicalUuid(verifiedNativeClientId)
+    && verifiedNativeClientId.toLowerCase() === clientId.toLowerCase();
+  // Native and ChatGPT sessions are separate correlation namespaces. Never
+  // fall back to the ChatGPT marker when a native marker is also present.
+  if (native !== undefined && !verifiedNative) return null;
+  const marker = verifiedNative ? "forge-native-v1:" + native : chatgpt;
+  if (!verifiedNative && !validChatGptSessionMarker(marker)) return null;
   // Preserve JSON-RPC type: numeric 1 and string "1" are distinct request IDs.
   // wait_for_completion_ms controls only how long the caller observes the
   // already-enqueued action. It is not part of the device effect and therefore
@@ -1624,7 +1641,9 @@ export async function handleOrdaxMcp(
     const args = (params.arguments ?? {}) as JsonObject;
     if (!specFor(name) || (allowedTools && !allowedTools.has(name))) return rpcError(id, -32601, "Tool not found", { tool: name });
     try {
-      const retryDigest = await verifiedMcpRetryDigest(sessionPayload, id, params);
+      const retryDigest = await verifiedMcpRetryDigest(
+        sessionPayload, id, params, handlers.verifiedNativeRetryClientId,
+      );
       const result = await callTool(request, name, args, handlers, allowedTools, retryDigest);
       if (result.isError !== true && result.structuredContent?.ok !== false && handlers.recordUsage) {
         // Shadow-only accounting records actual successful tools, never an
