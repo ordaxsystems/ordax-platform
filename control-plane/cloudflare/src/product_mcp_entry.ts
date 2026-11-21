@@ -19,7 +19,8 @@ import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
 import { handleProductOwnerMcpUsageRead, PRODUCT_OWNER_MCP_USAGE_PATH } from "./product_mcp_usage_read.ts";
-import { productAuthConfigured, productOwnerAccountSession, type ProductAuthEnv } from "./product_auth.ts";
+import { productAuthConfigured, productOwnerAccountSession,
+  requestScopedProductMcpAuthenticator, type ProductAuthEnv } from "./product_auth.ts";
 import {
   checkCanonicalProductPostgresReadiness,
   productPostgresConfigured,
@@ -370,16 +371,12 @@ export async function resolveOrBootstrapAttestedSession(
 /** Injecting read handlers or a narrower tool projection is an internal test/composition seam, never an HTTP option. */
 export function createCanonicalProductMcpGateway(
   env: Env,
-  reads: ReadHandlers = createCanonicalProductMcpReadHandlers(env),
+  providedReads: ReadHandlers | undefined = undefined,
   discoveryFetch: typeof fetch = fetch,
   allowedTools: ReadonlySet<string> = PRODUCT_MCP_DIRECT_TOOLS,
   recoveryDependencies: SessionRecoveryDependencies = {},
   postgresReadiness: typeof checkCanonicalProductPostgresReadiness = checkCanonicalProductPostgresReadiness,
 ) {
-  const deniedHandlers: OrdaxMcpHandlers = {
-    ...reads,
-    createAction: async () => respond({ ok: false, error: "trusted_operation_required" }, 403),
-  };
   return async (
     request: Request,
     context?: { waitUntil(promise: Promise<unknown>): void },
@@ -491,13 +488,21 @@ export function createCanonicalProductMcpGateway(
         context ? { scheduleWake: (wake: Promise<void>) => context.waitUntil(wake) } : {});
     }
     if (url.pathname === "/mcp") {
+      // This closure belongs only to this HTTP request. Its clones share the
+      // same verified bearer, never another chat's token or auth outcome.
+      const authenticate = requestScopedProductMcpAuthenticator(request, env);
+      const reads = providedReads ?? createCanonicalProductMcpReadHandlers(env, { authenticate });
+      const deniedHandlers: OrdaxMcpHandlers = {
+        ...reads,
+        createAction: async () => respond({ ok: false, error: "trusted_operation_required" }, 403),
+      };
       const routingHint = await mcpRoutingHint(request);
       const toolName = routingHint?.toolName ?? null;
       // This single request-owned scheduler serves SQL-committed action wakes
       // and device-attested session challenges. No second queue or authority.
       const wakeDependencies = context
-        ? { scheduleWake: (wake: Promise<void>) => context.waitUntil(wake) }
-        : {};
+        ? { scheduleWake: (wake: Promise<void>) => context.waitUntil(wake), authenticate }
+        : { authenticate };
       // ordax_session is already a safe authenticated read tool. Its only new
       // side effect is opening/renewing a short-lived, server-selected device
       // challenge from the hidden provider correlation marker. This is session

@@ -371,6 +371,28 @@ export async function authenticateProductMcpClientRequest(
  * this same verified owner boundary. MCP tools continue requiring an additional
  * signed OAuth client_id in authenticateProductMcpClientRequest.
  */
+/** Reuse one signed OAuth proof only inside a single incoming MCP request.
+ * Cloned internal transport requests have the same bearer, not a new identity.
+ * A different bearer/environment always gets independent verification; expiry
+ * is rechecked before every reuse. No isolate/global token cache is created. */
+export function requestScopedProductMcpAuthenticator(
+  source: Request, env: ProductAuthEnv,
+): typeof authenticateProductMcpClientRequest {
+  const authorization = source.headers.get("authorization");
+  let checked: Promise<VerifiedProductMcpClient> | undefined;
+  return async (candidate, candidateEnv) => {
+    if (!authorization || candidateEnv !== env
+        || candidate.headers.get("authorization") !== authorization) {
+      return authenticateProductMcpClientRequest(candidate, candidateEnv);
+    }
+    const identity = await (checked ??= authenticateProductMcpClientRequest(source, env));
+    if (identity.ok && identity.expiresAt <= Math.floor(Date.now() / 1000) - CLOCK_SKEW_SECONDS) {
+      return { ok: false, error: "product_token_claims_invalid", status: 401 };
+    }
+    return identity;
+  };
+}
+
 export async function productOwnerAccountSession(
   request: Request, env: ProductAuthEnv,
 ): Promise<Response> {

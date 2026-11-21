@@ -290,3 +290,26 @@ publicar o estado real. Nenhuma fila, credencial, grant ou resultado passa
 a ser armazenado no DO. A economia global só pode ser afirmada com medição
 comparável de tráfego/consultas; prolongar uma espera também pode afetar
 custos de duração do Durable Object, a serem acompanhados em Analytics.
+
+### OAuth MCP: uma verificação por requisição HTTP para leituras e status (21/11/2026)
+
+O gateway cria um autenticador **exclusivo da requisição entrante** para
+reutilizar a mesma identidade OAuth já **assinada e verificada** entre
+`session`, `targets`, `getAction` e o handler de execução nativa/projeto.
+O reuso é permitido apenas com o **mesmo Authorization Bearer exato e a
+mesma instância do ambiente**; troca de token/ambiente exige outra
+verificação, e o prazo `exp` é reavaliado em **cada** reutilização segundo
+a tolerância de relógio já prevista no contrato JWT. Nenhuma identidade,
+token, grant, status ou resultado é armazenado entre requisições, em DO,
+KV, banco adicional ou cache global. O gateway pode continuar verificando
+o OAuth separadamente durante a recuperação atestada da sessão; a
+correção não altera os seus gates de abertura/confirmação.
+
+Nos testes, `ordax_action_status` passa de duas verificações criptográficas
+(session + status) a uma por requisição, mantendo leitura SQL autenticada
+para cada status; requisições subsequentes verificam novamente. Isto
+**reduz trabalho criptográfico no Worker**, não o número de consultas
+Hyperdrive. A pré-checagem de perfil do catálogo anterior ao enqueue
+permanece obrigatória: ela não pode ser removida enquanto o PostgreSQL
+não aplicar as mesmas regras de `profile_key` para ações, inclusive
+replays, projetos, dispositivos e revogação.

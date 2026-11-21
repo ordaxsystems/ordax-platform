@@ -15,6 +15,7 @@ import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 type ReadEnv = ProductAuthEnv & ProductPostgresEnv;
 type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction" | "recordUsage" | "usageFingerprintKey">;
 type ReadDependencies = {
+  authenticate?: typeof authenticateProductMcpClientRequest;
   listTargets?: typeof listCanonicalProductTargets;
   getAction?: typeof getProductAction;
   ensureDiscovery?: typeof ensureProductMcpTargetDiscovery;
@@ -95,13 +96,14 @@ export function createCanonicalProductMcpReadHandlers(
   env: ReadEnv,
   dependencies: ReadDependencies = {},
 ): ReadHandlers {
+  const authenticate = dependencies.authenticate ?? authenticateProductMcpClientRequest;
   const readTargets = dependencies.listTargets ?? listCanonicalProductTargets;
   const readAction = dependencies.getAction ?? getProductAction;
   const ensureDiscovery = dependencies.ensureDiscovery ?? ensureProductMcpTargetDiscovery;
   const recordUsage = dependencies.recordUsage ?? recordProductMcpUsage;
   return {
     async session(request) {
-      const identity = await authenticateProductMcpClientRequest(request, env);
+      const identity = await authenticate(request, env);
       if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
       return json({
         ok: true,
@@ -114,7 +116,7 @@ export function createCanonicalProductMcpReadHandlers(
       });
     },
     async targets(request) {
-      const identity = await authenticateProductMcpClientRequest(request, env);
+      const identity = await authenticate(request, env);
       if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
       try {
         const discovery = await ensureDiscovery(env, identity.ownerUserId, identity.clientId);
@@ -141,7 +143,7 @@ export function createCanonicalProductMcpReadHandlers(
       }
     },
     async getAction(request, requestId) {
-      const identity = await authenticateProductMcpClientRequest(request, env);
+      const identity = await authenticate(request, env);
       if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
       if (!isCanonicalUuid(requestId)) return json({ ok: false, error: "product_request_id_invalid" }, 400);
       try {
