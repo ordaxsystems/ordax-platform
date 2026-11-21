@@ -260,10 +260,18 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
     let receipt=await store.getAction({ownerUserId:identity.ownerUserId,
       clientId:identity.clientId,requestId});
     const deadline=now()+waitMs;
+    let emptyChecks=0;
+    // Action status is persisted under request_id, so no rapid DB polling is
+    // needed while waiting for the native executor. Preserve the initial
+    // immediate lookup and always make a final read at the deadline.
+    // 8s pending wait: <=8 Supabase RPCs instead of up to 33.
     while(receipt.ok&&!terminalStatus(receipt)&&now()<deadline){
-      await sleep(Math.min(250,Math.max(1,deadline-now())));
+      const remaining=deadline-now();
+      const delay=Math.min(remaining,250*2**Math.min(emptyChecks,3));
+      await sleep(Math.max(1,delay));
       receipt=await store.getAction({ownerUserId:identity.ownerUserId,
         clientId:identity.clientId,requestId});
+      emptyChecks++;
     }
     return receipt;
   }
@@ -487,6 +495,9 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
       return rpcResult(id,toolResult({ok:false,error:queued.error??"forge_action_unavailable"},true));
 
     const receipt=await waitFor(identity,queued.request_id,store,DEFAULT_WAIT_MS);
+    if(!receipt.ok)return rpcResult(id,toolResult({
+      ok:false,error:receipt.error??"forge_action_unavailable",
+    },true));
     if(terminalStatus(receipt))return rpcResult(id,completedToolResult(receipt));
     return rpcResult(id,toolResult({
       ok:true,pending:true,request_id:queued.request_id,effect_id:queued.effect_id,
