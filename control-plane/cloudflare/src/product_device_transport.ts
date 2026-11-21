@@ -87,6 +87,31 @@ function base64ToBytes(value: string): Uint8Array | null {
   }
 }
 
+/**
+ * Keep unexpected Worker code defects distinguishable from an actual
+ * PostgreSQL/Hyperdrive outage. Never log payloads, credentials, exception
+ * messages, stacks, request IDs, or arbitrary route strings.
+ */
+export function unexpectedProductDeviceTransportFailure(
+  error: unknown,
+  phase: "authentication" | "execution",
+  operation: string,
+): Response {
+  const kind = error instanceof ReferenceError ? "reference_error"
+    : error instanceof TypeError ? "type_error"
+    : error instanceof SyntaxError ? "syntax_error"
+    : error instanceof RangeError ? "range_error"
+    : "unexpected_error";
+  const safeOperation = /^[a-z][a-z-]{0,47}$/.test(operation) ? operation : "unknown";
+  console.error(JSON.stringify({
+    event: "product_device_transport_internal_failure",
+    phase,
+    operation: safeOperation,
+    kind,
+  }));
+  return respond({ ok: false, error: "product_transport_internal_failure" }, 500);
+}
+
 async function authenticateDeviceRequest(
   request: Request,
   env: ProductPostgresEnv,
@@ -110,7 +135,9 @@ async function authenticateDeviceRequest(
     if (error instanceof ProductPostgresError) {
       return { ok: false, response: respond({ ok: false, error: error.code }, error.status) };
     }
-    return { ok: false, response: respond({ ok: false, error: "product_postgres_unavailable" }, 503) };
+    return { ok: false, response: unexpectedProductDeviceTransportFailure(
+      error, "authentication", "device-auth",
+    ) };
   }
 }
 
@@ -692,6 +719,8 @@ export async function handleProductDeviceTransport(
     if (error instanceof ProductPostgresError) {
       return respond({ ok: false, error: error.code }, error.status);
     }
-    return respond({ ok: false, error: "product_postgres_unavailable" }, 503);
+    return unexpectedProductDeviceTransportFailure(
+      error, "execution", path.slice(PRODUCT_DEVICE_TRANSPORT_PREFIX.length + 1),
+    );
   }
 }
