@@ -55,6 +55,51 @@ const CLOCK_SKEW_SECONDS = 60;
 const MAX_JWKS_RESPONSE_BYTES = 128 * 1024;
 const MAX_JWKS_KEYS = 64;
 
+// Reuse public keys only within this isolate and for a bounded period.
+// Do not cache token verification outcomes or authorize stale signatures.
+const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
+const JWKS_ROTATION_RETRY_MS = 30 * 1000;
+const jwksLastRotationProbe = new Map<string, number>();
+type JwksCacheEntry = { keys: JsonWebKey[]; expiresAt: number };
+const jwksCache = new Map<string, JwksCacheEntry>();
+const jwksPending = new Map<string, Promise<JsonWebKey[] | null>>();
+
+async function fetchJwksKeys(url: string): Promise<JsonWebKey[] | null> {
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { accept: "application/json" },
+    redirect: "manual",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) return null;
+  const body = await readBoundedJsonObject(response, MAX_JWKS_RESPONSE_BYTES);
+  if (!body || !Array.isArray(body.keys) || body.keys.length > MAX_JWKS_KEYS) return null;
+  // Never share mutable provider objects with callers.
+  return body.keys.filter((key: unknown): key is JsonWebKey =>
+    isRecord(key) && typeof key.kty === "string" && typeof key.kid === "string");
+}
+
+async function cachedJwksKeys(url: string, forceRefresh = false): Promise<JsonWebKey[] | null> {
+  const pending = jwksPending.get(url);
+  if (pending) return pending;
+  const current = jwksCache.get(url);
+  if (!forceRefresh && current && Date.now() < current.expiresAt) return current.keys;
+  const loading = fetchJwksKeys(url).then((keys) => {
+    if (keys) {
+      // TTL starts after a successful fetch; failures are never cached.
+      jwksCache.set(url, { keys, expiresAt: Date.now() + JWKS_CACHE_TTL_MS });
+    }
+    return keys;
+  });
+  jwksPending.set(url, loading);
+  try {
+    return await loading;
+  } finally {
+    if (jwksPending.get(url) === loading) jwksPending.delete(url);
+  }
+}
+
+
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -148,25 +193,20 @@ async function loadJwk(env: ProductAuthEnv, kid: string, alg: string): Promise<J
   }
   if (parsed.protocol !== "https:") return null;
 
-  const response = await fetch(parsed.toString(), {
-    method: "GET",
-    headers: { accept: "application/json" },
-    redirect: "manual",
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) return null;
-
-  const body = await readBoundedJsonObject(response, MAX_JWKS_RESPONSE_BYTES);
-  if (!body || !Array.isArray(body.keys) || body.keys.length > MAX_JWKS_KEYS) return null;
-  for (const raw of body.keys) {
-    if (
-      isRecord(raw)
-      && raw.kid === kid
-      && (raw.alg == null || raw.alg === alg)
-      && typeof raw.kty === "string"
-    ) {
-      return raw as JsonWebKey;
-    }
+  const url = parsed.toString();
+  let keys = await cachedJwksKeys(url);
+  if (!keys) return null;
+  const findKey = (candidates: JsonWebKey[]) => candidates.find((raw) =>
+    raw.kid === kid && (raw.alg == null || raw.alg === alg)) ?? null;
+  const matched = findKey(keys);
+  if (matched) return matched;
+  // A previously unseen kid can indicate signing-key rotation. Refresh
+  // once rather than rejecting until the existing TTL expires.
+  if (jwksCache.has(url)
+      && Date.now() - (jwksLastRotationProbe.get(url) ?? 0) >= JWKS_ROTATION_RETRY_MS) {
+    jwksLastRotationProbe.set(url, Date.now());
+    keys = await cachedJwksKeys(url, true);
+    if (keys) return findKey(keys);
   }
   return null;
 }

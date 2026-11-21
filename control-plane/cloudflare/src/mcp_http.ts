@@ -957,9 +957,17 @@ async function readActionStatusWithRecovery(
   requestId: string,
   handlers: OrdaxMcpHandlers,
   retry: () => Promise<boolean>,
+  origin: "worker_wait" | "client_wait" | "client_poll",
 ): Promise<Response | null> {
+  // Sample complete request_id cohorts (1/16) without storing/logging IDs.
+  // This counts actual gateway reads, including transient retries, grouped
+  // by caller origin without adding any PostgreSQL/Hyperdrive queries.
+  const sampled = parseInt(requestId.slice(-1), 16) === 0;
   while (true) {
     let statusResponse: Response;
+    if (sampled) console.info(JSON.stringify({
+      event: "product_status_db_read_sample", origin, sample_rate: 16,
+    }));
     try {
       statusResponse = await handlers.getAction(
         cloneWithAuth(source, new URL(`/v3/product/actions/${requestId}`, source.url).toString(), "GET"),
@@ -986,7 +994,7 @@ async function waitForAction(source: Request, requestId: string, timeoutMs: numb
   let pollRound = 0;
   const retryRead = boundedTransientActionStatusRetry(deadline);
   while (true) {
-    const statusResponse = await readActionStatusWithRecovery(source, requestId, handlers, retryRead);
+    const statusResponse = await readActionStatusWithRecovery(source, requestId, handlers, retryRead, acceptedReceipt ? "worker_wait" : "client_wait");
     if (!statusResponse) return unreadable();
     if (!statusResponse.ok) {
       const status = statusResponse.status;
@@ -1175,6 +1183,7 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
     // and 429 as a healthy read. The request ID and OAuth client stay exact.
     const response = await readActionStatusWithRecovery(
       source, requestId, handlers, boundedTransientActionStatusRetry(Date.now() + 1000),
+      "client_poll",
     );
     if (!response) return textToolResult(unverifiedActionStatus(requestId), true);
     const projected = response.ok ? sanitizeActionPayload(await bodyJson(response), requestId)

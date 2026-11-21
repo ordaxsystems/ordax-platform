@@ -35,6 +35,27 @@ class ProductAuthContractTests(unittest.TestCase):
         self.assertIn("request: Request | Response", reader)
         self.assertIn("if (bytes > maxBytes) return null", reader)
 
+    def test_status_read_telemetry_distinguishes_worker_and_client(self) -> None:
+        source = (self.root / "control-plane/cloudflare/src/mcp_http.ts").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("product_status_db_read_sample", source)
+        self.assertIn('origin: "worker_wait" | "client_wait" | "client_poll"', source)
+        self.assertIn('sample_rate: 16', source)
+        self.assertIn('acceptedReceipt ? "worker_wait" : "client_wait"', source)
+        self.assertIn('"client_poll",', source)
+
+    def test_jwks_cache_is_bounded_singleflight_and_rotation_aware(self) -> None:
+        self.assertIn("const JWKS_CACHE_TTL_MS = 5 * 60 * 1000", self.auth)
+        self.assertIn("const JWKS_ROTATION_RETRY_MS = 30 * 1000", self.auth)
+        self.assertIn("const jwksPending = new Map", self.auth)
+        self.assertIn("const pending = jwksPending.get(url)", self.auth)
+        self.assertIn("jwksPending.set(url, loading)", self.auth)
+        self.assertIn("jwksPending.delete(url)", self.auth)
+        self.assertIn("cachedJwksKeys(url, true)", self.auth)
+        self.assertIn("if (keys) {", self.auth)
+        self.assertIn("crypto.subtle.verify", self.auth)
+
     def test_product_identity_requires_explicit_issuer_audience_and_https_jwks(self) -> None:
         self.assertIn("PRODUCT_AUTH_ISSUER", self.auth)
         self.assertIn("PRODUCT_AUTH_AUDIENCE", self.auth)
