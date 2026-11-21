@@ -256,9 +256,10 @@ function validBrowserArgs(action: string, value: unknown): value is Json {
     return keysOnly(value, ["session_id", "tab_id", "max_elements"])
       && optionalTab && (value.max_elements === undefined || boundedInteger(value.max_elements, 20, 500));
   if (action === "browser.screenshot")
-    return keysOnly(value, ["session_id", "tab_id", "width", "height"])
+    return keysOnly(value, ["session_id", "tab_id", "width", "height", "include_preview"])
       && optionalTab && (value.width === undefined || boundedInteger(value.width, 320, 2560))
-      && (value.height === undefined || boundedInteger(value.height, 240, 1600));
+      && (value.height === undefined || boundedInteger(value.height, 240, 1600))
+      && (value.include_preview === undefined || typeof value.include_preview === "boolean");
   if (action === "browser.click")
     return keysOnly(value, ["session_id", "tab_id", "node_id"])
       && optionalTab && boundedString(value.node_id, 100);

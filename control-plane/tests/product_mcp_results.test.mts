@@ -295,6 +295,31 @@ test("opt-in computer screenshot emits one native image and keeps full-resolutio
   assert.equal(receipt.content[0].text.includes(previewBase64), false);
 });
 
+test("opt-in browser screenshot produces native MCP image while retaining project-session metadata", async () => {
+  const receipt = await imageStatusReceipt({
+    ...previewData, session_id: "44444444-4444-4444-8444-444444444444",
+    artifact_name: "browser-owned.png", width: 1440, height: 900,
+    source_size_bytes: 102400, thumbnail_size: [960, 600],
+  }, "browser.screenshot") as any;
+  assert.equal(receipt.content.length, 2);
+  assert.equal(receipt.content[1].type, "image");
+  assert.equal(receipt.content[1].mimeType, "image/jpeg");
+  assert.equal(receipt.structuredContent.action.name, "browser.screenshot");
+  assert.equal(receipt.structuredContent.action.result.data.artifact_name, "browser-owned.png");
+  assert.equal(receipt.structuredContent.action.result.data.source_size_bytes, 102400);
+  assert.equal(receipt.structuredContent.action.result.data.base64, undefined);
+  assert.equal(receipt.content[0].text.includes(previewBase64), false);
+});
+
+test("browser screenshot defaults to original PNG metadata without an image content block", async () => {
+  const receipt = await imageStatusReceipt({
+    session_id: "44444444-4444-4444-8444-444444444444",
+    artifact_name: "browser-owned.png", width: 1440, height: 900, size_bytes: 102400,
+  }, "browser.screenshot") as any;
+  assert.equal(receipt.content.length, 1);
+  assert.equal(receipt.structuredContent.action.result.data.size_bytes, 102400);
+});
+
 test("screenshot without preview remains metadata-only and cannot manufacture an image block", async () => {
   const receipt = await imageStatusReceipt({
     scope: "device", mode: "desktop", width: 1920, height: 1080, size_bytes: 748321,

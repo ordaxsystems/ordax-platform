@@ -372,6 +372,8 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_screenshot") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_screenshot") as any).inputSchema.properties.include_preview.type, "boolean");
+  assert.equal((byName.get("browser_screenshot") as any).inputSchema.properties.include_preview.type, "boolean");
+  assert.equal((byName.get("browser_screenshot") as any).inputSchema.required.includes("project"), true);
   assert.equal((byName.get("computer_clipboard_read") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_text_read") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_click") as any).annotations.readOnlyHint, false);

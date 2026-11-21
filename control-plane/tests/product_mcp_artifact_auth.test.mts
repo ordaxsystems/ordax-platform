@@ -35,6 +35,15 @@ test("artifact parameters are bounded before enqueue", () => {
   assert.equal(validAttestedProjectActionArguments("artifact.preview", { artifact_name: "a.jpg" }), true);
   assert.equal(validAttestedProjectActionArguments("artifact.preview", { quality: 93 }), false);
 });
+test("browser screenshot preview requires an explicit boolean without changing project-bound grants", () => {
+  const session_id = "44444444-4444-4444-8444-444444444444";
+  assert.equal(validAttestedProjectActionArguments("browser.screenshot", { session_id }), true);
+  assert.equal(validAttestedProjectActionArguments("browser.screenshot", { session_id, include_preview: true }), true);
+  assert.equal(validAttestedProjectActionArguments("browser.screenshot", { session_id, include_preview: false }), true);
+  assert.equal(validAttestedProjectActionArguments("browser.screenshot", { session_id, include_preview: "true" }), false);
+  assert.equal(validAttestedProjectActionArguments("browser.screenshot", { session_id, include_preview: 1 }), false);
+});
+
 test("artifact grant does not inherit authority from other profiles or projects", () => {
   assert.equal(catalogAllowsAttestedProjectAction(catalog, device, scope, "artifact.preview"), true);
   assert.equal(catalogAllowsAttestedProjectAction(catalog, device, scope, "artifacts.list"), true);
