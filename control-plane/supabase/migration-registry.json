@@ -1425,6 +1425,18 @@
         "blob_sha": "ae3ccf4cbb343b8efafcaf39348b0d7a3223c91d"
       },
       "ledger_name": "product_mcp_recent_actions_v1"
+    },
+    {
+      "name": "20261121001500_product_atomic_terminal_report_v1",
+      "applied_version": "20261121001322",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261121001500_product_atomic_terminal_report_v1.sql",
+        "blob_sha": "d0d0e94085d63c6d8839f74689a1460dd46b57bc"
+      },
+      "ledger_name": "product_atomic_terminal_report_v1"
     }
   ]
 }
