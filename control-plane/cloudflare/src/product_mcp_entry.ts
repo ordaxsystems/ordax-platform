@@ -188,6 +188,7 @@ const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_PROCESS_TOOLS,
   ...ATTESTED_DEVICE_NATIVE_EXECUTION_TOOLS,
 ]);
+const ATTESTED_PROJECT_ARTIFACT_TOOLS: ReadonlySet<string> = new Set(["artifacts_list", "artifact_preview"]);
 export const ATTESTED_PROJECT_NATIVE_TOOLS: ReadonlySet<string> = new Set([
   "terminal_exec", "process_start", "process_status", "process_list",
   "process_logs", "process_write_stdin", "process_stop",
@@ -214,6 +215,7 @@ export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   "ordax_action_list",
   ...ATTESTED_DEVICE_ACTION_TOOLS,
   ...ATTESTED_PROJECT_NATIVE_TOOLS,
+  ...ATTESTED_PROJECT_ARTIFACT_TOOLS,
   ...ATTESTED_PROJECT_BLENDER_TOOLS,
   ...ATTESTED_PROJECT_BROWSER_TOOLS,
   ...ATTESTED_SPECIAL_TOOLS,
@@ -587,6 +589,7 @@ export function createCanonicalProductMcpGateway(
         };
       } else if (toolName && allowedTools.has(toolName)
         && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName) || ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
+          || ATTESTED_PROJECT_ARTIFACT_TOOLS.has(toolName)
           || ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) || ATTESTED_PROJECT_BROWSER_TOOLS.has(toolName)
           || ATTESTED_SPECIAL_TOOLS.has(toolName))) {
         let trusted: AttestedMcpDevice | null = null;
@@ -625,8 +628,8 @@ export function createCanonicalProductMcpGateway(
                   ...(trustFailure === "central_session_owner_selection_required" && ownerChallengeId
                     ? { challenge_id: ownerChallengeId, action_dispatched: false } : {}),
                 }, 409)
-              : (ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName) || ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName)
-                || ATTESTED_PROJECT_BROWSER_TOOLS.has(toolName))
+              : (ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName) || ATTESTED_PROJECT_ARTIFACT_TOOLS.has(toolName)
+                || ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) || ATTESTED_PROJECT_BROWSER_TOOLS.has(toolName))
               ? createAttestedProjectActionHandler(env, trusted, wakeDependencies)
               : ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)
                 ? createAttestedProjectContinuityHandler(env, trusted, wakeDependencies)

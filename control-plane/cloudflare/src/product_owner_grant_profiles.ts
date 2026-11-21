@@ -5,6 +5,7 @@ import {
   NATIVE_SURFACE_DEVICE_ACTIONS,
   PROJECT_BROWSER_ACTIONS,
   PROJECT_BLENDER_ACTIONS,
+  PROJECT_ARTIFACT_ACTIONS,
   PROJECT_CONTINUITY_ACTIONS,
   REPOSITORY_CATALOG_DEVICE_ACTIONS,
 } from "./product_action_scope.ts";
@@ -58,6 +59,8 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
   // Project snapshots are a separate least-privilege Product grant. Runtime
   // still requires a live resource binding before it can read any local root.
   "project-workspace-read": profile("project", ["workspace.project_snapshot"]),
+  // Does not inherit project snapshots or terminal authority.
+  "project-artifact-read": profile("project", PROJECT_ARTIFACT_ACTIONS),
   "project-browser-automation": profile("project", PROJECT_BROWSER_ACTIONS),
   "device-native-terminal": profile("device", ["computer.terminal_exec"]),
   "device-native-process": profile("device", [
