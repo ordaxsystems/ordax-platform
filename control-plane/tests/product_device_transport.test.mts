@@ -175,9 +175,9 @@ test("all awaited bare Product transport calls resolve to a local binding or nam
   };
   assert.deepEqual(unresolved(source),[],
     "a missing function import must fail CI before the Worker can deploy");
-  const broken=source.replace("  startProductAction,\n","");
+  const broken=source.replace("  startProductActionAuthenticated,\n","");
   assert.notEqual(broken,source,"mutation example must remove an actual imported symbol");
-  assert.deepEqual(unresolved(broken),["startProductAction"],
+  assert.deepEqual(unresolved(broken),["startProductActionAuthenticated"],
     "regression test must detect the same undeclared import pattern as PR #427");
 });
 
@@ -189,7 +189,7 @@ test("device transport source has no D1, operator bearer, websocket queue, pairi
   ]) assert.equal(source.includes(forbidden), false, forbidden);
   for (const required of [
     "authenticateProductDevice", "recordProductHeartbeatAuthenticated", "claimProductActionAuthenticated",
-    "startProductAction", "renewProductActionLease", "progressProductAction",
+    "startProductActionAuthenticated", "renewProductActionLease", "progressProductAction",
     "reportProductAction", "result_canonical_b64",
   ]) assert.equal(source.includes(required), true, required);
 });
@@ -200,15 +200,20 @@ test("start uses an imported, single atomic SQL RPC instead of a missing binder"
   const store = fs.readFileSync(path.resolve(HERE,
     "../cloudflare/src/product_postgres_store.ts"), "utf8");
   const source = fs.readFileSync(SRC, "utf8");
-  const handler = source.split("async function start(")[1]?.split("\n\nasync function lease(")[0];
+  const handler = source.split("async function startAuthenticated(")[1]?.split("\nasync function lease(")[0];
   assert.ok(handler);
-  assert.match(handler, /await startProductAction\(env/);
-  assert.match(handler, /runtimeKind: provenance\?\.runtimeKind \?\? null/);
-  assert.match(handler, /agentVersion: provenance\?\.agentVersion \?\? null/);
+  assert.match(handler, /await startProductActionAuthenticated\(env/);
+  assert.match(handler, /runtimeKind:\s*provenance\?\.runtimeKind\s*\?\?\s*null/);
+  assert.match(handler, /agentVersion:\s*provenance\?\.agentVersion\s*\?\?\s*null/);
   assert.doesNotMatch(source, /bindProductActionRuntimeProvenance/);
-  assert.match(store, /callRpc<JsonObject>\(env, "ordax_start_product_action_atomic_v1"/);
+  assert.match(store, /callRpc<JsonObject>\(env, "ordax_authenticated_start_product_action_v1"/);
   assert.doesNotMatch(store, /ordax_start_product_action_v1: \{/);
   assert.doesNotMatch(store, /ordax_bind_product_action_runtime_provenance_v1: \{/);
+  const authenticatedMigration = fs.readFileSync(path.resolve(HERE,
+    "../supabase/migrations/20261121041000_product_authenticated_start_v1.sql"), "utf8");
+  assert.match(authenticatedMigration, /public\.ordax_authenticate_product_device_v1\(/);
+  assert.match(authenticatedMigration, /public\.ordax_start_product_action_atomic_v1\(/);
+  assert.match(authenticatedMigration, /to ordax_edge_executor;/);
   assert.match(migration, /public\.ordax_start_product_action_v1\(/);
   assert.match(migration, /public\.ordax_bind_product_action_runtime_provenance_v1\(/);
   assert.match(migration, /exception when sqlstate 'P4103'/);

@@ -17,7 +17,7 @@ import {
   resolveOrchestratorReadAuthorization,
   verifyProjectWorkspaceResource,
   reportProductAction,
-  startProductAction,
+  startProductActionAuthenticated,
   ProductPostgresError,
   type ProductPostgresEnv,
   type ProductRemoteJob,
@@ -325,24 +325,31 @@ async function claimAuthenticated(request: Request, env: ProductPostgresEnv): Pr
   return respond({ok:true,job:claimed.job?await wireJob(claimed.job):null});
 }
 
-async function start(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
-  const body = await readBoundedJsonObject(request, 16 * 1024);
-  const ctx = body ? executionContext(body) : null;
-  const provenance = body ? runtimeProvenance(body) : null;
+async function startAuthenticated(request: Request, env: ProductPostgresEnv): Promise<Response> {
+  const credentials=deviceRequestCredentials(request);
+  if (!credentials)return respond({ok:false,error:"device_auth_required"},401);
+  const body=await readBoundedJsonObject(request,16*1024);
+  const ctx=body?executionContext(body):null;
+  const provenance=body?runtimeProvenance(body):null;
   if (!ctx || (body && hasRuntimeProvenance(body) && !provenance)) {
-    return respond({ ok: false, error: "start_invalid" }, 400);
+    // Preserve the auth-before-validation contract for malformed requests.
+    // Valid starts authenticate and mutate in one SQL operation.
+    const auth=await authenticateDeviceRequest(request,env);
+    if(!auth.ok)return auth.response;
+    return respond({ok:false,error:"start_invalid"},400);
   }
-  const started = await startProductAction(env, {
-    deviceId, ...ctx,
-    runtimeKind: provenance?.runtimeKind ?? null,
-    agentVersion: provenance?.agentVersion ?? null,
+  const started=await startProductActionAuthenticated(env,{
+    deviceId:credentials.deviceId,
+    tokenSha256:await sha256Hex(credentials.rawToken),
+    ...ctx,
+    runtimeKind:provenance?.runtimeKind??null,
+    agentVersion:provenance?.agentVersion??null,
   });
-  if (started.ok === true) return respond({ ok: true });
-  return respond({
-    ok: false,
-    error: started.error === "runtime_provenance_conflict"
-      ? "runtime_provenance_conflict" : "lease_not_active",
-  }, 409);
+  if(started.ok===false && started.error==="invalid_device_token")
+    return respond({ok:false,error:"invalid_device_token"},401);
+  if(started.ok===true)return respond({ok:true});
+  return respond({ok:false,error:started.error==="runtime_provenance_conflict"
+    ?"runtime_provenance_conflict":"lease_not_active"},409);
 }
 
 async function lease(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
@@ -687,15 +694,20 @@ export async function handleProductDeviceTransport(
       return unexpectedProductDeviceTransportFailure(error,"execution","claim");
     }
   }
+  if(path===PRODUCT_DEVICE_TRANSPORT_PREFIX+"/start"){
+    try{return await startAuthenticated(request,env);}
+    catch(error){
+      if(error instanceof ProductPostgresError)
+        return respond({ok:false,error:error.code},error.status);
+      return unexpectedProductDeviceTransportFailure(error,"execution","start");
+    }
+  }
 
   // Reject unknown routes BEFORE authenticating through SQL: no operation
   // exists to authorize. Known routes (including disabled staged features)
   // preserve the auth-first contract and must not expose feature flags.
   let execute: (deviceId: string) => Promise<Response>;
   switch (path) {
-    case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/start":
-      execute = deviceId => start(request, env, deviceId);
-      break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/lease":
       execute = deviceId => lease(request, env, deviceId);
       break;

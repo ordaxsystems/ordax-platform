@@ -150,7 +150,7 @@ class ProductPostgresAuthorityTests(unittest.TestCase):
         for rpc in (
             "ordax_enqueue_product_action_v1",
             "ordax_claim_product_action_v1",
-            "ordax_start_product_action_atomic_v1",
+            "ordax_authenticated_start_product_action_v1",
             "ordax_renew_product_action_lease_v1",
             "ordax_progress_product_action_v1",
             "ordax_report_product_action_v1",
