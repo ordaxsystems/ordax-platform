@@ -16,6 +16,9 @@ export interface OrdaxMcpHandlers {
    * ChatGPT session marker; never supplied by the model as an action argument. */
   createAction: (request: Request, retryDigest?: string | null) => Promise<Response>;
   getAction: StatusHandler;
+  /** Request-local device selected by the attested PostgreSQL session, never by
+   * MCP action arguments. Used only for an advisory pre-read completion wait. */
+  verifiedActionDeviceId?: string;
   /** Advisory wait after canonical authorization; never returns a receipt. */
   waitForCompletion?: (deviceId: string, requestId: string, remainingMs: number) => Promise<"signalled" | "timeout" | "unavailable">;
   listRecentActions?: (input: { pendingOnly: boolean; limit: number }) => Promise<Response>;
@@ -1041,7 +1044,7 @@ async function readActionStatusWithRecovery(
   }
 }
 
-async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers, acceptedReceipt = true): Promise<JsonObject> {
+async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers, acceptedReceipt = true, initiallyQueued = false): Promise<JsonObject> {
   const deadline = Date.now() + timeoutMs;
   // Creation already proved a persisted receipt; a standalone status query
   // does not. Never promote an unreadable arbitrary ID to "accepted/pending".
@@ -1050,6 +1053,25 @@ async function waitForAction(source: Request, requestId: string, timeoutMs: numb
     : unverifiedActionStatus(requestId, status);
   let pollRound = 0;
   let completionHintSeen = false;
+  // The enqueue RPC has already committed an authorized queued receipt.
+  // Give the existing completion signal a short chance to arrive before the
+  // first *redundant* status SQL read. Only the request-local attested device
+  // can select the DO. A timeout/unavailable signal falls through to a fresh
+  // PostgreSQL authorization read, never a guessed action result.
+  // Direct client status checks still begin with SQL to authorize the ID.
+  if (acceptedReceipt && initiallyQueued && timeoutMs > 0
+      && isCanonicalUuid(handlers.verifiedActionDeviceId)
+      && handlers.waitForCompletion) {
+    try {
+      const hint = await handlers.waitForCompletion(
+        handlers.verifiedActionDeviceId, requestId,
+        Math.min(1000, Math.max(1, Math.floor(timeoutMs / 4)),
+          Math.max(0, deadline - Date.now())),
+      );
+      // A stale/replayed signal must not drive an unbounded SQL loop.
+      if (hint === "signalled") completionHintSeen = true;
+    } catch { /* Advisory failure restores normal SQL-first recovery. */ }
+  }
   const retryRead = boundedTransientActionStatusRetry(deadline);
   while (true) {
     const statusResponse = await readActionStatusWithRecovery(source, requestId, handlers, retryRead, acceptedReceipt ? "worker_wait" : "client_wait");
@@ -1467,7 +1489,9 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       message: pendingActionMessage("queued"),
     });
   }
-  const finalPayload = await waitForAction(source, requestId, waitMs, handlers);
+  const finalPayload = await waitForAction(
+    source, requestId, waitMs, handlers, true, createdPayload.status === "queued",
+  );
   const action = finalPayload.action;
   const failed = finalPayload.ok === false || Boolean(action && typeof action === "object" && !Array.isArray(action) && String((action as JsonObject).status ?? "") !== "succeeded" && !finalPayload.pending);
   return textToolResult(finalPayload, failed);

@@ -169,6 +169,113 @@ test("successful completion during a bounded wait is returned, not left pending"
 });
 
 
+test("fresh queued enqueue waits for the attested completion hint before its first SQL status read", async () => {
+  const device="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  let available=false,reads=0,signals=0;
+  const result=await callQueuedAction({
+    session:async()=>Response.json({ok:true}),
+    targets:async()=>Response.json({ok:true,targets:[]}),
+    createAction:async()=>Response.json({ok:true,request_id:acceptedId,status:"queued",replayed:false}),
+    verifiedActionDeviceId:device,
+    waitForCompletion:async(receivedDevice,id,remainingMs)=>{
+      assert.equal(receivedDevice,device);
+      assert.equal(id,acceptedId);
+      assert.ok(remainingMs>0 && remainingMs<=500,
+        "first advisory wait must consume at most one quarter of the requested budget");
+      assert.equal(reads,0,"signal must precede the redundant first SQL status read");
+      signals++;
+      available=true;
+      return "signalled";
+    },
+    getAction:async()=>{
+      reads++;
+      return Response.json({ok:true,action:{
+        request_id:acceptedId,device_id:device,action:"git.status",
+        status:available?"succeeded":"queued",result:available?{ok:true}:null,
+      }});
+    },
+  },2000);
+  assert.equal(signals,1);
+  assert.equal(reads,1,"a fast completion must consume one current-authority status read, not two");
+  assert.equal(result.structuredContent.action.status,"succeeded");
+  assert.equal(result.structuredContent.pending,false);
+});
+
+test("unavailable completion channel preserves a fresh SQL read with no guessed result",async()=>{
+  const device="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  let reads=0,signals=0;
+  const result=await callQueuedAction({
+    session:async()=>Response.json({ok:true}),
+    targets:async()=>Response.json({ok:true,targets:[]}),
+    createAction:async()=>Response.json({ok:true,request_id:acceptedId,status:"queued"}),
+    verifiedActionDeviceId:device,
+    waitForCompletion:async()=>{signals++;return "unavailable";},
+    getAction:async()=>{
+      reads++;
+      return Response.json({ok:true,action:{
+        request_id:acceptedId,device_id:device,action:"git.status",
+        status:"succeeded",result:{ok:true},
+      }});
+    },
+  },1000);
+  assert.equal(signals,1);
+  assert.equal(reads,1);
+  assert.equal(result.structuredContent.action.status,"succeeded");
+});
+
+test("stale completion hint cannot repeat DO wake or manufacture a finished status",async()=>{
+  const device="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  let reads=0,signals=0;
+  const result=await callQueuedAction({
+    session:async()=>Response.json({ok:true}),
+    targets:async()=>Response.json({ok:true,targets:[]}),
+    createAction:async()=>Response.json({ok:true,request_id:acceptedId,status:"queued"}),
+    verifiedActionDeviceId:device,
+    waitForCompletion:async()=>{signals++;return "signalled";},
+    getAction:async()=>{
+      reads++;
+      return Response.json({ok:true,action:{
+        request_id:acceptedId,device_id:device,action:"git.status",
+        status:"queued",result:null,
+      }});
+    },
+  },25);
+  assert.equal(signals,1,"replayed completion signal cannot drive a busy DO loop");
+  assert.ok(reads>=1 && reads<5);
+  assert.equal(result.structuredContent.pending,true);
+  assert.equal(result.structuredContent.action.status,"queued");
+});
+
+test("direct status ID stays SQL-first even when a verified action device is available",async()=>{
+  let reads=0,signals=0;
+  const device="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const response=await handleOrdaxMcp(new Request("https://ordax.example/mcp",{
+    method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({jsonrpc:"2.0",id:47,method:"tools/call",
+      params:{name:"ordax_action_status",arguments:{request_id:acceptedId,wait_for_completion_ms:1000}}}),
+  }),{
+    session:async()=>Response.json({ok:true}),
+    targets:async()=>Response.json({ok:true,targets:[]}),
+    createAction:async()=>{assert.fail("status must never enqueue");return Response.json({});},
+    verifiedActionDeviceId:device,
+    waitForCompletion:async()=>{
+      assert.equal(reads,1,"unverified status UUID must be authorized by SQL before any DO wait");
+      signals++;
+      return "signalled";
+    },
+    getAction:async()=>{
+      reads++;
+      return Response.json({ok:true,action:{request_id:acceptedId,device_id:device,
+        action:"git.status",status:reads===1?"queued":"succeeded",
+        result:reads===1?null:{ok:true}}});
+    },
+  });
+  const result=(await response.json() as any).result.structuredContent;
+  assert.equal(signals,1);
+  assert.equal(reads,2);
+  assert.equal(result.action.status,"succeeded");
+});
+
 const legacyResult = { ok: true, summary: "projects", data: {
   default_project: "private", active_project: "private", root: "C:/private",
   projects: [

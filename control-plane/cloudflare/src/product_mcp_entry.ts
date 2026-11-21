@@ -546,6 +546,7 @@ export function createCanonicalProductMcpGateway(
         }
       }
 
+      let verifiedActionDeviceId: string | undefined;
       let handlers: OrdaxMcpHandlers = sessionDeviceBinding
         ? { ...deniedHandlers, sessionDeviceBinding }
         : sessionOwnerSelection
@@ -615,6 +616,7 @@ export function createCanonicalProductMcpGateway(
               clientId: resolved.clientId,
               deviceId: resolved.deviceId,
             });
+            verifiedActionDeviceId = trusted.deviceId;
           } else {
             pending = resolved.error === "central_session_pending";
             if (CENTRAL_SESSION_REMEDIATION_ERRORS.has(resolved.error)) {
@@ -649,6 +651,7 @@ export function createCanonicalProductMcpGateway(
       }
       return handleOrdaxMcp(request, {
         ...handlers,
+        verifiedActionDeviceId,
         waitForCompletion: (deviceId, requestId, remainingMs) =>
           waitProductActionCompletion(env, deviceId, requestId, remainingMs),
       }, allowedTools, context);

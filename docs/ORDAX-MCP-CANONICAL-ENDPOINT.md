@@ -245,3 +245,33 @@ A alteração no wake evita exclusivamente a notificação de replays já
 desse tipo ocorrerem; não se deve extrapolar o ganho para todo o
 Hyperdrive sem contadores por origem. Nenhuma consulta/alteração adicional
 é necessária para aplicar a nova política.
+
+### MCP: conclusão antecipada por sinal, com leitura SQL obrigatória (21/11/2026)
+
+Para uma ação cujo enqueue PostgreSQL **já confirmou** um recibo `queued`,
+o gateway pode aguardar **uma única vez**, antes da primeira leitura de status,
+uma notificação de conclusão no ProductDeviceWake **existente**. O destino
+da notificação é exclusivamente o `deviceId` derivado da resolução da
+sessão atestada pelo PostgreSQL nesta própria requisição; não provém de
+argumentos do modelo, headers arbitrários, cache global ou outro serviço.
+O período inicial é limitado a **25% da espera explícita, até 1 segundo**.
+Um sinal antecipado pode suprimir a consulta SQL inicial que normalmente
+retornaria `queued` para uma ação muito rápida.
+
+Um sinal é somente orientação: após aviso, timeout, erro ou indisponibilidade
+do Durable Object, o gateway executa **uma leitura PostgreSQL fresca,
+autenticada e restrita ao cliente** antes de declarar execução, resultado
+ou falha. Um sinal antigo não pode gerar ciclo de consultas rápidas. Uma
+consulta `ordax_action_status` independente continua **SQL-first**,
+porque precisa validar o direito do cliente de observar o `request_id`.
+Sem novo serviço, tabela, armazenamento, alteração no Runtime ou cache de
+grants. O `wait_for_completion_ms=0` e as confirmações de enqueue já
+existentes permanecem inalterados.
+
+Testes direcionados: sinal rápido evita uma leitura SQL de status num caso
+controlado (1 em vez de 2); canal indisponível consulta SQL normalmente;
+sinal obsoleto nunca cria sucesso; ação consultada por ID permanece
+autorizada pelo PostgreSQL antes de aguardar o sinal. Esta economia
+**não é uma redução global medida de Hyperdrive**: depende da distribuição
+de latência das ações e de sinais realmente recebidos. A meta de 70%
+continua condicionada a uma comparação de carga equivalente.
