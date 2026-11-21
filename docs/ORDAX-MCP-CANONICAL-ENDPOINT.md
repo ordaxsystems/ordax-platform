@@ -344,3 +344,17 @@ rejeitada antes de enumerar dispositivos.
 **Economia determinística por leitura válida de catálogo:** 2 consultas
 Hyperdrive → 1 (redução de 50% nesse fluxo específico), sem afirmar que o
 consumo geral da conta caiu 50% ou atingiu a meta global de 70%.
+
+### Indisponibilidade PostgreSQL/Hyperdrive na sessão MCP (21/11/2026)
+
+Quando a resolução de sessão atestada falha por indisponibilidade do
+PostgreSQL/Hyperdrive, a chamada não deve ser classificada como uma autorização
+ausente. O gateway retorna `central_session_unavailable`, sem detalhes privados,
+com `action_dispatched=false`, `retryable=true` e recomendação de intervalo
+mínimo de 300 s antes de uma nova tentativa. Não abre desafios de Owner,
+não presume grants, não consulta outro banco e não despacha uma ação.
+Falhas não classificadas continuam recebendo o erro genérico e fail-closed.
+
+O intervalo informado é um **sinal para clientes**, não um atraso imposto
+pelo Worker. A retomada real depende da autoridade PostgreSQL voltar a
+responder; não equivale a cache de permissão nem contorno de franquia.

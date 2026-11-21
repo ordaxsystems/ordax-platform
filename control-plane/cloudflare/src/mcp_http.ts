@@ -1387,6 +1387,18 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   const created = await handlers.createAction(createRequest, retryDigest);
   const createdPayload = await bodyJson(created);
   if (!created.ok) {
+    if (createdPayload.error === "central_session_unavailable") {
+      // This is a PostgreSQL/Hyperdrive availability failure, not missing
+      // authorization. Do not issue Owner prompts, enqueue or retry in a hot loop.
+      return textToolResult({
+        ok: false,
+        error: "central_session_unavailable",
+        retryable: true,
+        retry_after_seconds: 300,
+        action_dispatched: false,
+        required_action: "restore_platform_postgres_connection",
+      }, true);
+    }
     if (createdPayload.error === "central_device_offline"
       || createdPayload.error === "central_device_runtime_not_ready"
       || createdPayload.error === "central_session_pending") {

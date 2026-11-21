@@ -306,6 +306,7 @@ const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
   "central_owner_selection_in_progress",
   "central_session_revoked",
   "central_session_target_mismatch",
+  "central_session_unavailable",
 ]);
 // Preserve 32s of Runtime attestation. Early 2s checks remain responsive;
 // later 4s checks cut the maximum idle recovery SQL reads from 16 to 10.
@@ -652,7 +653,10 @@ export function createCanonicalProductMcpGateway(
             }
           }
         } catch {
+          // No attested PostgreSQL resolution is possible; never present a
+          // transient authority outage as a missing grant or trust bypass.
           trusted = null;
+          trustFailure = "central_session_unavailable";
         }
         handlers = {
           ...reads,
@@ -662,7 +666,7 @@ export function createCanonicalProductMcpGateway(
               ? async () => respond({ ok: false, error: trustFailure,
                   ...(trustFailure === "central_session_owner_selection_required" && ownerChallengeId
                     ? { challenge_id: ownerChallengeId, action_dispatched: false } : {}),
-                }, 409)
+                }, trustFailure === "central_session_unavailable" ? 503 : 409)
               : (ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName) || ATTESTED_PROJECT_ARTIFACT_TOOLS.has(toolName)
                 || ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) || ATTESTED_PROJECT_BROWSER_TOOLS.has(toolName))
               ? createAttestedProjectActionHandler(env, trusted, wakeDependencies)

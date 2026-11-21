@@ -1059,7 +1059,7 @@ test("unclassified Central session failure remains fail-closed and generic", asy
   const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
     new Set(["computer_access_status"]), {
       resolve: async () => ({ ok: false, error: "central_session_unbound" }),
-      open: async () => Response.json({ ok: false, error: "central_session_unavailable" }, { status: 503 }),
+      open: async () => Response.json({ ok: false, error: "central_session_internal_error" }, { status: 503 }),
       wait: async () => { throw new Error("must_not_wait"); },
     });
   const response = await gateway(request("computer_access_status",
@@ -1067,6 +1067,42 @@ test("unclassified Central session failure remains fail-closed and generic", asy
   const body = await response.json() as any;
   assert.equal(body.result.isError, true);
   assert.equal(body.result.structuredContent.error, "trusted_operation_required");
+});
+
+test("PostgreSQL session outage is explicit, retry-delayed and never dispatches", async () => {
+  const modes = ["resolve_unavailable", "open_unavailable", "resolve_throws"] as const;
+  for (const mode of modes) {
+    const { handlers, calls } = fakeHandlers();
+    let opened = 0, waited = 0;
+    const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+      new Set(["computer_access_status"]), {
+        resolve: async () => {
+          if (mode === "resolve_throws") throw new Error("private database connection details");
+          return mode === "resolve_unavailable"
+            ? { ok: false as const, error: "central_session_unavailable" }
+            : { ok: false as const, error: "central_session_unbound" };
+        },
+        open: async () => {
+          opened++;
+          return Response.json({ ok: false, error: "central_session_unavailable" }, { status: 503 });
+        },
+        wait: async () => { waited++; },
+      });
+    const response = await gateway(request("computer_access_status",
+      { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
+    const body = await response.json() as any;
+    assert.equal(body.result.isError, true, mode);
+    assert.deepEqual(body.result.structuredContent, {
+      ok: false, error: "central_session_unavailable", retryable: true,
+      retry_after_seconds: 300, action_dispatched: false,
+      required_action: "restore_platform_postgres_connection",
+    }, mode);
+    assert.equal(opened, mode === "open_unavailable" ? 1 : 0, mode);
+    assert.equal(waited, 0, mode);
+    assert.equal(calls.targets, 0, mode);
+    assert.equal(calls.getAction, 0, mode);
+    assert.equal(JSON.stringify(body).includes("private database connection"), false);
+  }
 });
 
 test("pending device challenge does not enqueue any action or expand grants", async () => {
