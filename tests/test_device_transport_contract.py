@@ -17,8 +17,8 @@ FOUNDATION = ROOT / "control-plane/cloudflare/production-foundation.json"
 class DeviceTransportContractTests(unittest.TestCase):
     def test_product_heartbeat_distinguishes_native_os_from_windows_without_grants(self):
         source = (SRC / "product_device_transport.ts").read_text(encoding="utf-8")
-        block = source.split("async function heartbeat(", 1)[1].split(
-            "async function claim(", 1
+        block = source.split("async function heartbeatAuthenticated(", 1)[1].split(
+            "\n/**", 1
         )[0]
         for required in (
             'const runtimeKind = body.runtime_kind === undefined ? "desktop-agent" : body.runtime_kind',
@@ -26,7 +26,8 @@ class DeviceTransportContractTests(unittest.TestCase):
             'Object.prototype.hasOwnProperty.call(body, "capabilities_digest")',
             "runtimeKind: runtimeKind as RuntimeKind",
             "const capabilityDigest = canonicalDeviceHeartbeatDigest(body)",
-            "recordProductHeartbeat(env,",
+            "recordProductHeartbeatAuthenticated(env,",
+            "tokenSha256: await sha256Hex(credentials.rawToken)",
         ):
             self.assertIn(required, block)
         self.assertNotIn("createProductGrant", block)
