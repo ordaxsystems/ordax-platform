@@ -90,6 +90,34 @@ test("non-Worker callers still await the same advisory wake", async () => {
   assert.equal(fixture.calls, 1);
 });
 
+test("terminal idempotent action replay does not wake a Runtime for finished work", async () => {
+  for (const status of ["succeeded", "failed", "cancelled"]) {
+    const fixture = wakeFixture();
+    let scheduled = 0;
+    const receipt = { ...RECEIPT, replayed: true, status };
+    const actual = await enqueueProductAction(fixture.env, {
+      ...INPUT, scheduleWake: () => { scheduled++; },
+    }, client(receipt));
+    assert.deepEqual(actual, receipt);
+    assert.equal(fixture.calls, 0, status);
+    assert.equal(scheduled, 0, status);
+  }
+});
+
+test("pending idempotent replay still retries wake to recover a previously lost signal", async () => {
+  const fixture = wakeFixture();
+  const scheduled: Promise<void>[] = [];
+  const receipt = { ...RECEIPT, replayed: true, status: "queued" };
+  const actual = await enqueueProductAction(fixture.env, {
+    ...INPUT, scheduleWake: (wake: Promise<void>) => { scheduled.push(wake); },
+  }, client(receipt));
+  assert.deepEqual(actual, receipt);
+  assert.equal(fixture.calls, 1);
+  assert.equal(scheduled.length, 1);
+  fixture.release();
+  await Promise.all(scheduled);
+});
+
 test("a denied SQL enqueue never schedules a wake or invents a persisted receipt", async () => {
   let touched = 0, scheduled = 0;
   const env = {

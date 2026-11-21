@@ -180,3 +180,24 @@ resoluções, erros e latência p50/p95/p99 após publicação autorizada.
 Não misturar essas contagens com Forge/PostgREST. Alteração de fonte na
 main não representa deploy; somente o workflow canônico com gates e
 autorização pode publicar a revisão, sem repetir releases existentes.
+
+### Wake em replays terminais — 21/11/2026
+
+O adaptador canônico de enqueue na Platform continua a emitir ProductDeviceWake
+**somente após o PostgreSQL confirmar** uma ação que ainda possa exigir
+claim. Se a mesma operação for repetida por idempotência e o recibo
+PostgreSQL já estiver em estado terminal imutável (succeeded, failed ou
+cancelled), nenhum novo wake é enviado: não há item aguardando execução,
+e acordar o Runtime produziria uma tentativa de claim desnecessária.
+Replays de ações queued, leased ou running continuam gerando sinal de
+recuperação, inclusive quando a notificação anterior tiver sido perdida.
+A ausência do sinal nunca vira prova de execução ou autorização; OAuth,
+grants e recibos permanecem no PostgreSQL canônico. Sem migração SQL,
+tabela, cache ou novo Durable Object.
+
+Provas locais em 21/11: 16/16 testes direcionados do wake passaram,
+incluindo replay terminal em três resultados, replay ainda pendente,
+negativa de enqueue, falta de contexto waitUntil e entrega concorrente.
+A economia real depende da frequência de replays terminais e não deve
+ser declarada como uma porcentagem de Hyperdrive antes de medir a
+composição de carga.
