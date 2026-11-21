@@ -54,18 +54,53 @@ function request(jwt: string, extras?: { clientIdHeader?: string; clientIdBody?:
   });
 }
 
+let mockIssuerGeneration = 0;
+
 async function verifyWithMockIssuer(
   callback: (privateKey: CryptoKey) => Promise<void>,
 ): Promise<void> {
   const pair = await keyPair();
   const oldFetch = globalThis.fetch;
+  const originalJwksUrl = config.PRODUCT_AUTH_JWKS_URL;
+  // Every mocked issuer rotates its signing key. Give each fixture a
+  // distinct JWKS URL so the production cache is tested without letting an
+  // earlier test's public key leak into a later independent fake issuer.
+  config.PRODUCT_AUTH_JWKS_URL = originalJwksUrl + "?fixture=" + ++mockIssuerGeneration;
   globalThis.fetch = async () => Response.json({ keys: [pair.publicJwk] });
   try {
     await callback(pair.keys.privateKey);
   } finally {
+    config.PRODUCT_AUTH_JWKS_URL = originalJwksUrl;
     globalThis.fetch = oldFetch;
   }
 }
+
+test("repeated JWT verification reuses JWKS without caching authentication", async () => {
+  const pair = await keyPair();
+  const oldFetch = globalThis.fetch;
+  const originalJwksUrl = config.PRODUCT_AUTH_JWKS_URL;
+  let fetches = 0;
+  config.PRODUCT_AUTH_JWKS_URL = originalJwksUrl + "?reuse=" + ++mockIssuerGeneration;
+  globalThis.fetch = async () => {
+    fetches++;
+    return Response.json({ keys: [pair.publicJwk] });
+  };
+  try {
+    const good = await signedJwt(pair.keys.privateKey, baseClaims());
+    const badParts = good.split(".");
+    const bad = badParts[0] + "." + b64(JSON.stringify({ ...baseClaims(), sub: secondClient })) + "." + badParts[2];
+    const first = await authenticateProductRequest(request(good), config);
+    const second = await authenticateProductRequest(request(good), config);
+    const tampered = await authenticateProductRequest(request(bad), config);
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.deepEqual(tampered, { ok: false, error: "product_signature_invalid", status: 401 });
+    assert.equal(fetches, 1, "JWKS must be reused, while each JWT signature is rechecked");
+  } finally {
+    config.PRODUCT_AUTH_JWKS_URL = originalJwksUrl;
+    globalThis.fetch = oldFetch;
+  }
+});
 
 test("verified OAuth JWT binds exact client and owner, never forwarded header/body", async () => {
   await verifyWithMockIssuer(async (key) => {
