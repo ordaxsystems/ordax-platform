@@ -67,7 +67,7 @@ test("oversized/infinite JWKS response is cancelled and does not authorize a JWT
     cancel() { cancelled = true; },
   }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
   try {
-    const result = await authenticateProductRequest(signedRequest(), env);
+    const result = await authenticateProductRequest(signedRequest(), { ...env, PRODUCT_AUTH_JWKS_URL: env.PRODUCT_AUTH_JWKS_URL + "?fixture=oversized" });
     assert.deepEqual(result, { ok: false, error: "product_signing_key_not_found", status: 401 });
     assert.equal(cancelled, true);
     assert.ok(chunksRead >= 17 && chunksRead <= 19, "JWKS size cap failed: " + chunksRead);
@@ -82,7 +82,7 @@ test("unexpectedly large JWKS key collections fail closed", async () => {
     keys: Array.from({ length: 65 }, () => ({ ...publicJwk, kid: "test-key", alg: "RS256" })),
   })) as typeof fetch;
   try {
-    const result = await authenticateProductRequest(signedRequest(), env);
+    const result = await authenticateProductRequest(signedRequest(), { ...env, PRODUCT_AUTH_JWKS_URL: env.PRODUCT_AUTH_JWKS_URL + "?fixture=too-many-keys" });
     assert.deepEqual(result, { ok: false, error: "product_signing_key_not_found", status: 401 });
   } finally {
     globalThis.fetch = originalFetch;
