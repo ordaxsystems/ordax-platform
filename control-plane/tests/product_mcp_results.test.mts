@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { handleOrdaxMcp } from "../cloudflare/src/mcp_http.ts";
+import { handleOrdaxMcp, canonicalProductStatusPollDelayMs } from "../cloudflare/src/mcp_http.ts";
 import { scopeProductResult } from "../cloudflare/src/product_results.ts";
 
 // PostgreSQL Product queue receipts are UUIDs, not arbitrary transport strings.
@@ -95,6 +95,40 @@ test("a lost status query after accepted enqueue does not assert action failure 
       assert.equal(result.isError, false);
     }
   }
+});
+
+test("pending Product action status uses deadline-bounded slower reads without caching auth", () => {
+  const sample = (budget: number, old = false) => {
+    let elapsed = 0, round = 0, reads = 0;
+    const delays: number[] = [];
+    while (true) {
+      reads++;
+      if (elapsed >= budget) break;
+      const remaining = budget - elapsed;
+      const delay = old
+        ? Math.min(remaining, 250 * (2 ** Math.min(round, 3)), 1500)
+        : canonicalProductStatusPollDelayMs(remaining, round);
+      delays.push(delay);
+      elapsed += delay;
+      round++;
+    }
+    return { reads, delays, elapsed };
+  };
+  assert.equal(canonicalProductStatusPollDelayMs(0, 9), 0);
+  assert.equal(canonicalProductStatusPollDelayMs(-1, 0), 0);
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map(round =>
+    canonicalProductStatusPollDelayMs(20000, round)), [250, 500, 1000, 2000, 2500, 2500]);
+  assert.equal(canonicalProductStatusPollDelayMs(77, 6), 77,
+    "the final read must always reach the exact caller deadline");
+  const short = sample(8000);
+  const long = sample(20000);
+  assert.equal(short.reads, 7);
+  assert.equal(long.reads, 12);
+  assert.equal(short.elapsed, 8000);
+  assert.equal(long.elapsed, 20000);
+  assert.equal(sample(8000, true).reads, 9);
+  assert.equal(sample(20000, true).reads, 17);
+  assert.equal(sample(0).reads, 1, "an immediate status lookup is still one current-authority read");
 });
 
 test("queued wait uses bounded backoff instead of a 250ms database polling loop", async () => {
