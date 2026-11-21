@@ -175,7 +175,7 @@ test("all awaited bare Product transport calls resolve to a local binding or nam
   };
   assert.deepEqual(unresolved(source),[],
     "a missing function import must fail CI before the Worker can deploy");
-  const broken=source.replace("  startProductActionAuthenticated,\n","");
+  const broken=source.replace(/  startProductActionAuthenticated,\r?\n/,"");
   assert.notEqual(broken,source,"mutation example must remove an actual imported symbol");
   assert.deepEqual(unresolved(broken),["startProductActionAuthenticated"],
     "regression test must detect the same undeclared import pattern as PR #427");

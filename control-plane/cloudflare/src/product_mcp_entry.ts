@@ -12,6 +12,7 @@
  * Runtime-attested Product session and current canonical PostgreSQL grants.
  */
 export { ProductDeviceWake } from "./product_device_wake.ts";
+import { waitProductActionCompletion } from "./product_device_wake.ts";
 import { handleOrdaxMcp, MAX_MCP_REQUEST_BYTES, validMcpToolCallEnvelope, type OrdaxMcpHandlers } from "./mcp_http.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
@@ -450,7 +451,7 @@ export function createCanonicalProductMcpGateway(
       return handleProductDeviceCentralSession(request, env);
     }
     if (url.pathname.startsWith(PRODUCT_DEVICE_TRANSPORT_PREFIX + "/")) {
-      return handleProductDeviceTransport(request, env);
+      return handleProductDeviceTransport(request, env, context);
     }
     if (url.pathname === PRODUCT_OWNER_PROJECT_SCOPE_PATH) {
       return handleProductOwnerProjectScope(request, env);
@@ -634,7 +635,11 @@ export function createCanonicalProductMcpGateway(
                   : createAttestedDeviceActionHandler(env, trusted, wakeDependencies),
         };
       }
-      return handleOrdaxMcp(request, handlers, allowedTools, context);
+      return handleOrdaxMcp(request, {
+        ...handlers,
+        waitForCompletion: (deviceId, requestId, remainingMs) =>
+          waitProductActionCompletion(env, deviceId, requestId, remainingMs),
+      }, allowedTools, context);
     }
     return respond({ ok: false, error: "not_found" }, 404);
   };

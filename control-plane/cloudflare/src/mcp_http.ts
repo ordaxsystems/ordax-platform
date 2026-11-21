@@ -16,6 +16,8 @@ export interface OrdaxMcpHandlers {
    * ChatGPT session marker; never supplied by the model as an action argument. */
   createAction: (request: Request, retryDigest?: string | null) => Promise<Response>;
   getAction: StatusHandler;
+  /** Advisory wait after canonical authorization; never returns a receipt. */
+  waitForCompletion?: (deviceId: string, requestId: string, remainingMs: number) => Promise<"signalled" | "timeout" | "unavailable">;
   listRecentActions?: (input: { pendingOnly: boolean; limit: number }) => Promise<Response>;
   /** Deployment-only HMAC secret. Never returned from a tool or logged. */
   usageFingerprintKey?: string;
@@ -992,6 +994,7 @@ async function waitForAction(source: Request, requestId: string, timeoutMs: numb
     ? actionMonitoringUnavailable(requestId, status)
     : unverifiedActionStatus(requestId, status);
   let pollRound = 0;
+  let completionHintSeen = false;
   const retryRead = boundedTransientActionStatusRetry(deadline);
   while (true) {
     const statusResponse = await readActionStatusWithRecovery(source, requestId, handlers, retryRead, acceptedReceipt ? "worker_wait" : "client_wait");
@@ -1017,7 +1020,15 @@ async function waitForAction(source: Request, requestId: string, timeoutMs: numb
     // actions. Every read still rechecks the signed OAuth owner/client and
     // canonical PostgreSQL grants. Never sleep past the caller's deadline.
     const remainingMs = Math.max(0, deadline - Date.now());
-    const delayMs = canonicalProductStatusPollDelayMs(remainingMs, pollRound);
+    const action = projected.action as JsonObject | undefined;
+    if (!completionHintSeen && handlers.waitForCompletion && isCanonicalUuid(action?.device_id)) {
+      const event = await handlers.waitForCompletion(action.device_id, requestId, remainingMs);
+      // A replayed/stale hint cannot cause a tight SQL loop if a subsequent
+      // canonical read is still pending. Only the database determines state.
+      if (event === "signalled") completionHintSeen = true;
+      if (event !== "unavailable") continue;
+    }
+    const delayMs = canonicalProductStatusPollDelayMs(Math.max(0, deadline - Date.now()), pollRound);
     pollRound++;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }

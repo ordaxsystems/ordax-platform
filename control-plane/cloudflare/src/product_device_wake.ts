@@ -6,20 +6,86 @@
  * device secret or queue state. Lost signalling is repaired by bounded
  * periodic Product claims, not by a second dispatch authority.
  */
+import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import type { ProductPostgresEnv } from "./product_postgres_store.ts";
 
 const INTERNAL_ORIGIN = "https://ordax-device-wake.internal";
 const MAX_DEVICE_WATCHERS = 4;
+const MAX_COMPLETION_WAITERS = 128;
+const MAX_RECENT_COMPLETIONS = 256;
+const COMPLETION_RETENTION_MS = 60_000;
+const MAX_COMPLETION_WAIT_MS = 5_000;
 
 export class ProductDeviceWake {
   private readonly ctx: DurableObjectState;
+  // Advisory only: never retain results, credentials, grants or queue state.
+  // A lost/evicted hint causes a bounded canonical SQL recovery read.
+  private readonly recentCompletions = new Map<string, number>();
+  private readonly completionWaiters = new Map<string, Set<() => void>>();
+  private waiterCount = 0;
+
+  private async waitForCompletion(id: string, timeoutMs: number): Promise<Response> {
+    if ((this.recentCompletions.get(id) ?? 0) > Date.now()) {
+      return new Response(null, { status: 204 });
+    }
+    if (this.waiterCount >= MAX_COMPLETION_WAITERS) {
+      return new Response(null, { status: 429 });
+    }
+    const waiters = this.completionWaiters.get(id) ?? new Set<() => void>();
+    this.completionWaiters.set(id, waiters);
+    this.waiterCount++;
+    const notified = await new Promise<boolean>(resolve => {
+      const finish = (signalled: boolean) => {
+        clearTimeout(timer);
+        waiters.delete(wake);
+        if (waiters.size === 0) this.completionWaiters.delete(id);
+        this.waiterCount--;
+        resolve(signalled);
+      };
+      const wake = () => finish(true);
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      waiters.add(wake);
+    });
+    return new Response(null, { status: notified ? 204 : 408 });
+  }
+
+  private publishCompletion(id: string): Response {
+    const now = Date.now();
+    for (const [key, expiry] of this.recentCompletions) {
+      if (expiry <= now) this.recentCompletions.delete(key);
+    }
+    this.recentCompletions.delete(id);
+    this.recentCompletions.set(id, now + COMPLETION_RETENTION_MS);
+    while (this.recentCompletions.size > MAX_RECENT_COMPLETIONS) {
+      const oldest = this.recentCompletions.keys().next().value;
+      if (oldest === undefined) break;
+      this.recentCompletions.delete(oldest);
+    }
+    for (const wake of this.completionWaiters.get(id) ?? []) wake();
+    return new Response(null, { status: 204 });
+  }
 
   constructor(ctx: DurableObjectState) {
     this.ctx = ctx;
   }
 
   async fetch(request: Request): Promise<Response> {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const path = url.pathname;
+    if (path === "/completion" && request.method === "POST") {
+      const id = url.searchParams.get("request_id");
+      if (!isCanonicalUuid(id)) return new Response(null, { status: 400 });
+      return this.publishCompletion(id.toLowerCase());
+    }
+    if (path === "/completion-wait" && request.method === "GET") {
+      const id = url.searchParams.get("request_id");
+      const timeoutMs = Number(url.searchParams.get("timeout_ms"));
+      if (!isCanonicalUuid(id) || !Number.isInteger(timeoutMs)
+          || timeoutMs < 1 || timeoutMs > MAX_COMPLETION_WAIT_MS) {
+        return new Response(null, { status: 400 });
+      }
+      return this.waitForCompletion(id.toLowerCase(), timeoutMs);
+    }
     if (path === "/subscribe" && request.method === "GET"
         && request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       if (this.ctx.getWebSockets().length >= MAX_DEVICE_WATCHERS) {
@@ -111,5 +177,40 @@ export async function notifyProductDeviceWake(
     // Enqueue was already committed in PostgreSQL. Never convert a lost
     // advisory signal into a second enqueue or report a false SQL failure.
     console.error(JSON.stringify({ event: "product_device_wake_delivery_failed" }));
+  }
+}
+
+// Both calls are internal to the existing Worker/DO binding. Only a
+// committed report publishes a hint; only an authorized status read may wait.
+export async function notifyProductActionCompletion(
+  env: ProductPostgresEnv, deviceId: string, requestId: string,
+): Promise<void> {
+  if (!productWakeBound(env) || !isCanonicalUuid(deviceId) || !isCanonicalUuid(requestId)) return;
+  try {
+    const ns = env.DEVICE_WAKE!;
+    const response = await ns.get(ns.idFromName(deviceId)).fetch(
+      INTERNAL_ORIGIN + "/completion?request_id=" + requestId, { method: "POST" });
+    if (!response.ok) throw new Error("completion_signal_rejected");
+  } catch {
+    console.error(JSON.stringify({ event: "product_action_completion_delivery_failed" }));
+  }
+}
+
+export async function waitProductActionCompletion(
+  env: ProductPostgresEnv, deviceId: string, requestId: string, remainingMs: number,
+): Promise<"signalled" | "timeout" | "unavailable"> {
+  if (!productWakeBound(env) || !isCanonicalUuid(deviceId) || !isCanonicalUuid(requestId)) return "unavailable";
+  const timeoutMs = Math.min(MAX_COMPLETION_WAIT_MS, Math.floor(remainingMs));
+  if (timeoutMs < 1) return "unavailable";
+  try {
+    const ns = env.DEVICE_WAKE!;
+    const response = await ns.get(ns.idFromName(deviceId)).fetch(
+      INTERNAL_ORIGIN + "/completion-wait?request_id=" + requestId + "&timeout_ms=" + timeoutMs,
+      { method: "GET" });
+    // 408 means recovery is due, not that the action failed. Both paths
+    // require a fresh authorized SQL read. Other errors use legacy recovery.
+    return response.status === 204 ? "signalled" : response.status === 408 ? "timeout" : "unavailable";
+  } catch {
+    return "unavailable";
   }
 }

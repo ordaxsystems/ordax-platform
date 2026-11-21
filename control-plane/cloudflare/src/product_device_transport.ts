@@ -27,7 +27,7 @@ import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { projectWorkspaceGrantProjection } from "./project_workspace_grant_contract.ts";
 import { canonicalGithubRepositoryFullName } from "./product_owner_project_scope.ts";
 import { canonicalDeviceWorkspaceConfirmation } from "./project_workspace_issue_contract.ts";
-import { subscribeProductDeviceWake } from "./product_device_wake.ts";
+import { notifyProductActionCompletion, subscribeProductDeviceWake } from "./product_device_wake.ts";
 
 type Json = Record<string, unknown>;
 type RuntimeKind = "ordax-os" | "desktop-agent" | "mobile-client" | "other";
@@ -496,7 +496,8 @@ async function orchestratorAuthorization(request: Request, env: ProductPostgresE
   return respond(result, result.ok === true ? 200 : 403);
 }
 
-async function report(request: Request, env: ProductPostgresEnv, deviceId: string): Promise<Response> {
+async function report(request: Request, env: ProductPostgresEnv, deviceId: string,
+  context?: { waitUntil(promise: Promise<unknown>): void }): Promise<Response> {
   const body = await readBoundedJsonObject(request, 640 * 1024);
   const ctx = body ? executionContext(body) : null;
   const provenance = body ? runtimeProvenance(body) : null;
@@ -538,6 +539,12 @@ async function report(request: Request, env: ProductPostgresEnv, deviceId: strin
     const conflict = committed.error === "terminal_report_conflict" || committed.error === "lease_not_active";
     return respond(committed, conflict ? 409 : 400);
   }
+  // PostgreSQL committed the terminal receipt before any advisory wake.
+  const notification = notifyProductActionCompletion(env, deviceId, ctx.requestId);
+  if (context) {
+    try { context.waitUntil(notification); }
+    catch { await notification; }
+  } else await notification;
   return respond(committed);
 }
 
@@ -664,6 +671,7 @@ async function projectBindingConfirm(
 export async function handleProductDeviceTransport(
   request: Request,
   env: ProductPostgresEnv,
+  context?: { waitUntil(promise: Promise<unknown>): void },
 ): Promise<Response> {
   const path = new URL(request.url).pathname;
   // Advisory signal subscribes through the same PostgreSQL-authenticated
@@ -752,7 +760,7 @@ export async function handleProductDeviceTransport(
       break;
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/report":
     case PRODUCT_DEVICE_TRANSPORT_PREFIX + "/recover-report":
-      execute = deviceId => report(request, env, deviceId);
+      execute = deviceId => report(request, env, deviceId, context);
       break;
     default:
       return respond({ ok: false, error: "not_found" }, 404);

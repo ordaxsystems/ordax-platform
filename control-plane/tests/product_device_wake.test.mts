@@ -129,3 +129,29 @@ test("DO publishes only wake string, has no persistent action queue or SQL", asy
   }));
   assert.equal(rejected.status, 404);
 });
+
+test("completion wakes multiple waiters for only the committed request and handles delivery races", async () => {
+  const object = new ProductDeviceWake({} as any);
+  const base = "https://ordax-device-wake.internal";
+  const first = "900943fd-8397-471e-bf05-c66ba4de7884";
+  const second = "900943fd-8397-471e-bf05-c66ba4de7885";
+  const wait = (id: string, ms: number) => object.fetch(new Request(
+    base + "/completion-wait?request_id=" + id + "&timeout_ms=" + ms));
+  const signal = (id: string) => object.fetch(new Request(
+    base + "/completion?request_id=" + id, { method: "POST" }));
+  const a = wait(first, 1000), b = wait(first, 1000), c = wait(second, 20);
+  assert.equal((await signal(first)).status, 204);
+  assert.equal((await a).status, 204);
+  assert.equal((await b).status, 204);
+  assert.equal((await c).status, 408);
+  assert.equal((await wait(first, 1000)).status, 204);
+  assert.equal((await wait("invalid", 1000)).status, 400);
+});
+
+test("lost completion hints time out for canonical recovery, never produce a receipt", async () => {
+  const object = new ProductDeviceWake({} as any);
+  const response = await object.fetch(new Request(
+    "https://ordax-device-wake.internal/completion-wait?request_id=" + DEVICE + "&timeout_ms=10"));
+  assert.equal(response.status, 408);
+  assert.equal(await response.text(), "");
+});

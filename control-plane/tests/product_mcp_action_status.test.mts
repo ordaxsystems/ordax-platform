@@ -279,3 +279,41 @@ test("ordax_session reveals only the effective signed OAuth client for Owner gra
     }
   });
 });
+
+test("completion notification replaces repeated status reads but never authorizes a receipt", async () => {
+  await withIssuer(async () => {
+    for (const denyAfterSignal of [false, true]) {
+      let reads = 0, waits = 0;
+      const handlers = createCanonicalProductMcpReadHandlers(env, {
+        getAction: async () => {
+          reads++;
+          if (reads === 1) return actionRecord({ status: "running" });
+          return denyAfterSignal
+            ? { ok: false, error: "product_owner_auth_ineligible" }
+            : actionRecord({ status: "succeeded", result: { ok: true } });
+        },
+      });
+      const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+        method: "POST", headers: { authorization: "Bearer " + await token(), "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: {
+          name: "ordax_action_status", arguments: { request_id: requestId, wait_for_completion_ms: 1000 },
+        } }),
+      }), { ...handlers,
+        createAction: async () => { assert.fail("status must not dispatch"); },
+        waitForCompletion: async (deviceId, id, deadline) => {
+          assert.equal(deviceId, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+          assert.equal(id, requestId);
+          assert.ok(deadline > 0);
+          assert.equal(reads, 1);
+          waits++;
+          return "signalled";
+        },
+      });
+      const body = await response.json();
+      assert.equal(reads, 2);
+      assert.equal(waits, 1);
+      assert.equal(body.result.structuredContent.ok, !denyAfterSignal);
+      if (!denyAfterSignal) assert.equal(body.result.structuredContent.action.status, "succeeded");
+    }
+  });
+});
