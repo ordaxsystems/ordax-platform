@@ -291,6 +291,10 @@ const RPC_SPECS = {
     keys: ["p_device_id", "p_agent_instance_id", "p_boot_id", "p_lease_seconds"],
     casts: ["uuid", "uuid", "text", "integer"],
   },
+  ordax_authenticated_claim_product_action_v1: {
+    keys: ["p_device_id", "p_token_sha256", "p_agent_instance_id", "p_boot_id", "p_lease_seconds"],
+    casts: ["uuid", "text", "uuid", "text", "integer"],
+  },
   ordax_start_product_action_atomic_v1: {
     keys: [
       "p_device_id", "p_request_id", "p_effect_id", "p_attempt_id",
@@ -898,6 +902,26 @@ export async function claimProductAction(
       p_lease_seconds: input.leaseSeconds ?? 120,
     },
   );
+}
+
+/** Single SQL-backed credential check plus canonical claim admission. */
+export async function claimProductActionAuthenticated(
+  env: ProductPostgresEnv,
+  input: {
+    deviceId: string;
+    tokenSha256: string;
+    agentInstanceId: string;
+    bootId: string;
+    leaseSeconds: number;
+  },
+): Promise<ProductActionClaimResult> {
+  return callRpc<ProductActionClaimResult>(env,"ordax_authenticated_claim_product_action_v1",{
+    p_device_id:input.deviceId,
+    p_token_sha256:input.tokenSha256,
+    p_agent_instance_id:input.agentInstanceId,
+    p_boot_id:input.bootId,
+    p_lease_seconds:input.leaseSeconds,
+  });
 }
 
 export async function startProductAction(
