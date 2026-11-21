@@ -1,5 +1,6 @@
 import { authenticateProductMcpClientRequest, type ProductAuthEnv, type VerifiedProductMcpClient } from "./product_auth.ts";
 import { scheduleProductDeviceWake } from "./product_device_wake.ts";
+import { resolveForgeMcpInstance } from "./forge_mcp_store.ts";
 import { validChatGptSessionMarker } from "./product_central_admission.ts";
 import {
   confirmCentralDeviceSession,
@@ -15,7 +16,6 @@ import { MAX_MCP_REQUEST_BYTES, validMcpToolCallEnvelope } from "./mcp_http.ts";
 type Env = ProductAuthEnv & ProductPostgresEnv & {
   // Rollout must be explicitly approved. Missing config fails closed.
   FORGE_NATIVE_DELEGATION_ENABLED?: string;
-  FORGE_NATIVE_OAUTH_CLIENT_ID?: string;
 };
 type Json = Record<string, unknown>;
 
@@ -41,10 +41,11 @@ async function sha256(value: string): Promise<string> {
  *
  * Forge Native uses the SAME canonical session/queue/receipt pipeline, but a
  * distinct, app-owned correlation namespace; it must not forge openai/session
- * or create an alternate device executor. Explicit rollout and the pinned
- * Forge OAuth client ID are required before even opening a challenge.
+ * or create an alternate device executor. Explicit rollout and existing
+ * PostgreSQL Forge OAuth consent/instance are required before a challenge.
  */
 type NativeClientProof = Extract<VerifiedProductMcpClient, { ok: true }>;
+type NativeClientAuthorization = typeof resolveForgeMcpInstance;
 type CentralMarkerContext = Readonly<{
   marker: string | null;
   nativeClientProof: NativeClientProof | null;
@@ -52,7 +53,10 @@ type CentralMarkerContext = Readonly<{
 
 /** A verified native identity is reusable only in this request's open/resolve
  * call. Nothing survives the request or substitutes for the fresh SQL check. */
-async function centralSessionContext(request: Request, env?: Env): Promise<CentralMarkerContext> {
+async function centralSessionContext(
+  request: Request, env?: Env,
+  authorizeNativeClient: NativeClientAuthorization = resolveForgeMcpInstance,
+): Promise<CentralMarkerContext> {
   const denied = { marker: null, nativeClientProof: null } as const;
   const body = await readBoundedJsonObject(request.clone(), MAX_MCP_REQUEST_BYTES);
   if (!validMcpToolCallEnvelope(body)) return denied;
@@ -62,14 +66,23 @@ async function centralSessionContext(request: Request, env?: Env): Promise<Centr
   const chatgpt = (meta as Json)["openai/session"];
   // No ambiguous identity namespaces or shadow fallback.
   if (native !== undefined) {
-    if (chatgpt !== undefined || env?.FORGE_NATIVE_DELEGATION_ENABLED !== "enabled"
-      || typeof env.FORGE_NATIVE_OAUTH_CLIENT_ID !== "string"
-      || !isCanonicalUuid(env.FORGE_NATIVE_OAUTH_CLIENT_ID)
+    if (chatgpt !== undefined || !env
+      || env.FORGE_NATIVE_DELEGATION_ENABLED !== "enabled"
       || typeof native !== "string"
       || !/^[A-Za-z0-9_-]{43}$/.test(native)) return denied;
     const identity = await authenticateProductMcpClientRequest(request.clone(), env);
-    if (!identity.ok
-      || identity.clientId !== env.FORGE_NATIVE_OAUTH_CLIENT_ID.toLowerCase())
+    if (!identity.ok) return denied;
+    // Reuse the EXACT PostgreSQL Forge consent/instance authority already
+    // serving the Forge gateway. No Worker-pinned OAuth ID or second grant.
+    // The idempotent Forge-instance binding NEVER selects a device or grants
+    // computer execution; the Runtime attestation and grants remain mandatory.
+    let forge;
+    try {
+      forge = await authorizeNativeClient(env, {
+        ownerUserId: identity.ownerUserId, clientId: identity.clientId,
+      });
+    } catch { return denied; }
+    if (forge?.ok !== true || !isCanonicalUuid(forge.instance_id))
       return denied;
     // Domain-separate the SQL hash from ChatGPT conversation correlations.
     // The nonce is generated only by the native Forge Core and never shown in
@@ -84,8 +97,9 @@ async function centralSessionContext(request: Request, env?: Env): Promise<Centr
 
 export async function centralSessionMarker(
   request: Request, env?: Env,
+  deps: { authorizeNativeClient?: NativeClientAuthorization } = {},
 ): Promise<string | null> {
-  return (await centralSessionContext(request, env)).marker;
+  return (await centralSessionContext(request, env, deps.authorizeNativeClient)).marker;
 }
 
 export async function openCentralSessionFromMcp(
@@ -93,11 +107,12 @@ export async function openCentralSessionFromMcp(
   env: Env,
   deps: {
     open?: typeof openCentralDeviceSession;
+    authorizeNativeClient?: NativeClientAuthorization;
     signalWake?: typeof scheduleProductDeviceWake;
     scheduleWake?: (wake: Promise<void>) => void;
   } = {},
 ): Promise<Response> {
-  const context = await centralSessionContext(request, env);
+  const context = await centralSessionContext(request, env, deps.authorizeNativeClient);
   if (!context.marker) return json({ ok: false, error: "central_session_marker_required" }, 409);
   // Forge Native already checked this exact signed OAuth client while
   // validating its nonce; do not verify the same JWT twice in one request.
@@ -140,9 +155,9 @@ export async function openCentralSessionFromMcp(
 export async function resolveCentralSessionFromMcp(
   request: Request,
   env: Env,
-  deps: { resolve?: typeof resolveCentralDeviceSession } = {},
+  deps: { resolve?: typeof resolveCentralDeviceSession; authorizeNativeClient?: NativeClientAuthorization } = {},
 ) {
-  const context = await centralSessionContext(request, env);
+  const context = await centralSessionContext(request, env, deps.authorizeNativeClient);
   if (!context.marker) return { ok: false as const, error: "central_session_marker_required" };
   const identity = context.nativeClientProof ?? await authenticateProductMcpClientRequest(request, env);
   if (!identity.ok) return { ok: false as const, error: identity.error };

@@ -31,6 +31,10 @@ FORGE_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_JHFaNBnQbkWLvdHI4zZDpQ_3RJWg6Bf
 # Rollback: remove both entries and redeploy this SAME Worker.
 CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED = "enabled"
 CENTRAL_OWNER_SELECTION_ENABLED = "enabled"
+# Native Forge correlation is an opt-in to Owner-selected Runtime attestation.
+# PostgreSQL verifies OAuth consent and Forge instance; no client ID, device,
+# grant or execution shortcut is configured in this Worker.
+FORGE_NATIVE_DELEGATION_ENABLED = "enabled"
 PRODUCT_AUTH_JWKS_URL = "https://jhfphsjptrpmtnzkpwud.supabase.co/auth/v1/.well-known/jwks.json"
 # Advisory push only: PostgreSQL remains the canonical queue/lease authority.
 PRODUCT_DEVICE_WAKE_ENABLED = "enabled"

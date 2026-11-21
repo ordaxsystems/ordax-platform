@@ -10,8 +10,11 @@ const FORGE_CLIENT="6a94ae80-a59c-4f48-a32c-2e15da34374f";
 const OTHER_CLIENT="202fd3e1-b058-4531-8750-82c57e4b6ca0";
 const DEVICE="22222222-2222-4222-8222-222222222222";
 const NONCE="N".repeat(43);
-const enabled={...env,FORGE_NATIVE_DELEGATION_ENABLED:"enabled",
-  FORGE_NATIVE_OAUTH_CLIENT_ID:FORGE_CLIENT};
+const enabled={...env,FORGE_NATIVE_DELEGATION_ENABLED:"enabled"};
+const authorizeNativeClient=async(_env:unknown,input:{ownerUserId:string;clientId:string})=>
+  input.ownerUserId===owner && input.clientId===FORGE_CLIENT
+    ?{ok:true,instance_id:DEVICE}
+    :{ok:false,error:"forge_mcp_authorization_required"};
 const nativeRequest=(jwt:string,nonce=NONCE,both=false)=>
   new Request("https://mcp.ordax.com.br/mcp",{
     method:"POST",headers:{authorization:"Bearer "+jwt,
@@ -26,8 +29,7 @@ test("native Forge correlation is disabled by default, including valid OAuth",as
   await withIssuer(async()=>{
     const jwt=await token({client_id:FORGE_CLIENT});
     let opens=0;
-    for(const e of [env,{...enabled,FORGE_NATIVE_DELEGATION_ENABLED:"disabled"},
-      {...enabled,FORGE_NATIVE_OAUTH_CLIENT_ID:""}]){
+    for(const e of [env,{...enabled,FORGE_NATIVE_DELEGATION_ENABLED:"disabled"}]){
       const make=()=>nativeRequest(jwt);
       assert.equal(await centralSessionMarker(make(),e),null);
       const response=await openCentralSessionFromMcp(make(),e,{
@@ -43,10 +45,11 @@ test("native Forge correlation is disabled by default, including valid OAuth",as
 test("only signed Forge OAuth client and exact native nonce enter the canonical SQL session",async()=>{
   await withIssuer(async()=>{
     const jwt=await token({client_id:FORGE_CLIENT});
-    assert.equal(await centralSessionMarker(nativeRequest(jwt),enabled),
+    assert.equal(await centralSessionMarker(nativeRequest(jwt),enabled,{authorizeNativeClient}),
       "forge-native-v1:"+NONCE);
     let input:any=null;
     const result=await openCentralSessionFromMcp(nativeRequest(jwt),enabled,{
+      authorizeNativeClient,
       open:async(_env,body)=>{input=body;return {
         ok:true,status:"awaiting_owner",device_id:DEVICE,
         challenge_id:"33333333-3333-4333-8333-333333333333",
@@ -81,6 +84,7 @@ test("other OAuth client, missing authentication, ambiguous marker or bad nonce 
     ];
     for(const req of cases){
       const response=await openCentralSessionFromMcp(req,enabled,{
+        authorizeNativeClient,
         open:async()=>{opens++;throw Error("unauthorized challenge");}
       });
       assert.equal(response.status,409);
@@ -94,6 +98,7 @@ test("Forge native marker never converts an unbound session into a device author
     const jwt=await token({client_id:FORGE_CLIENT});
     let resolved=0;
     const result=await resolveCentralSessionFromMcp(nativeRequest(jwt),enabled,{
+      authorizeNativeClient,
       resolve:async(_env,input)=>{
         resolved++;assert.equal(input.clientId,FORGE_CLIENT);
         assert.match(input.sessionSha256,/^[0-9a-f]{64}$/);
@@ -120,18 +125,20 @@ test("Forge Native verifies the signed OAuth token only once per open/resolve re
     });
     try {
       const opened=await openCentralSessionFromMcp(nativeRequest(jwt),enabled,{
+        authorizeNativeClient,
         open:async()=>({ok:true,status:"awaiting_owner"}),
       });
       assert.equal(opened.status,202);
       assert.equal(verifies,1,"native open must not re-verify the token after marker validation");
 
       const resolved=await resolveCentralSessionFromMcp(nativeRequest(jwt),enabled,{
+        authorizeNativeClient,
         resolve:async()=>({ok:true,device_id:DEVICE}),
       });
       assert.equal(resolved.ok,true);
       assert.equal(verifies,2,"native resolve must verify once, not twice");
 
-      assert.equal(await centralSessionMarker(nativeRequest(jwt),enabled),
+      assert.equal(await centralSessionMarker(nativeRequest(jwt),enabled,{authorizeNativeClient}),
         "forge-native-v1:"+NONCE);
       assert.equal(verifies,3,"standalone marker still independently verifies OAuth");
     } finally {
@@ -146,13 +153,37 @@ test("native correlation keeps signed-client denial even with request-local proo
     const clientMismatch=await token({client_id:OTHER_CLIENT});
     let opens=0,resolves=0;
     assert.equal((await openCentralSessionFromMcp(nativeRequest(clientMismatch),enabled,{
+      authorizeNativeClient,
       open:async()=>{opens++;return {ok:true,status:"bound"};},
     })).status,409);
     assert.deepEqual(await resolveCentralSessionFromMcp(nativeRequest(clientMismatch),enabled,{
+      authorizeNativeClient,
       resolve:async()=>{resolves++;return {ok:true,device_id:DEVICE};},
     }),{ok:false,error:"central_session_marker_required"});
     assert.equal(opens,0);
     assert.equal(resolves,0);
+  });
+});
+
+test("native correlation refuses revoked Forge consent, missing instance and unavailable SQL",async()=>{
+  await withIssuer(async()=>{
+    const jwt=await token({client_id:FORGE_CLIENT});
+    let opens=0,checks=0;
+    for(const authorizeNativeClient of [
+      async()=>{checks++;return {ok:false,error:"forge_mcp_authorization_required"};},
+      async()=>{checks++;throw Error("postgres unavailable");},
+      async()=>{checks++;return {ok:true,instance_id:"not-a-uuid"};}
+    ]){
+      assert.equal(await centralSessionMarker(nativeRequest(jwt),enabled,{authorizeNativeClient}),null);
+      const opened=await openCentralSessionFromMcp(nativeRequest(jwt),enabled,{
+        authorizeNativeClient,
+        open:async()=>{opens++;throw Error("challenge must not open");},
+      });
+      assert.equal(opened.status,409);
+      assert.equal((await opened.json()).error,"central_session_marker_required");
+    }
+    assert.equal(opens,0);
+    assert.equal(checks,6);
   });
 });
 

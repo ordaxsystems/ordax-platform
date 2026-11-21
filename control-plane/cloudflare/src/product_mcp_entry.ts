@@ -84,7 +84,6 @@ import {createForgeMcpGateway,FORGE_MCP_HOSTNAME} from "./forge_mcp_gateway.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv & {
   FORGE_NATIVE_DELEGATION_ENABLED?: string;
-  FORGE_NATIVE_OAUTH_CLIENT_ID?: string;
 };
 
 // ChatGPT keeps the only public MCP identity on mcp.ordax.com.br. The
@@ -633,14 +632,11 @@ export function createCanonicalProductMcpGateway(
               deviceId: resolved.deviceId,
             });
             verifiedActionDeviceId = trusted.deviceId;
-            // This native marker was accepted by the SAME SQL resolve that
-            // selected the Runtime-confirmed device, after Forge OAuth and
-            // rollout validation. Pass only this request-local client proof
-            // into the shared MCP retry digest; never trust _meta by itself.
+            // The SAME PostgreSQL Forge OAuth consent/instance authority
+            // and Runtime-attested device resolved this native correlation.
+            // The nonce alone never grants a retry or execution authority.
             if (routingHint?.nativeSessionRequested
-              && env.FORGE_NATIVE_DELEGATION_ENABLED === "enabled"
-              && typeof env.FORGE_NATIVE_OAUTH_CLIENT_ID === "string"
-              && trusted.clientId === env.FORGE_NATIVE_OAUTH_CLIENT_ID.toLowerCase())
+              && env.FORGE_NATIVE_DELEGATION_ENABLED === "enabled")
               verifiedNativeRetryClientId = trusted.clientId;
           } else {
             pending = resolved.error === "central_session_pending";
