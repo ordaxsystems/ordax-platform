@@ -18,7 +18,7 @@ class OrphanedLegacyHelpersTests(unittest.TestCase):
     def test_native_transport_reuses_postgres_leases_and_reports(self):
         entry = ENTRY.read_text(encoding="utf-8")
         transport = TRANSPORT.read_text(encoding="utf-8")
-        self.assertIn("handleProductDeviceTransport(request, env)", entry)
+        self.assertIn("handleProductDeviceTransport(request, env, context)", entry)
         self.assertIn("claimProductAction", transport)
         self.assertIn("renewProductActionLease", transport)
         self.assertIn("reportProductAction", transport)

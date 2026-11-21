@@ -40,7 +40,7 @@ class ProductActionScopeContractTests(unittest.TestCase):
     def test_worker_delegates_scope_catalog_without_duplicate_action_set(self) -> None:
         self.assertNotIn("const PRODUCT_PROJECT_ACTIONS", self.worker)
         self.assertNotIn("const PRODUCT_TYPED_ACTIONS_V2", self.worker)
-        self.assertIn("handleProductDeviceTransport(request, env)", self.worker)
+        self.assertIn("handleProductDeviceTransport(request, env, context)", self.worker)
         self.assertTrue(_quoted_computer_actions(self.scope))
 
     def test_scope_catalog_does_not_smuggle_shell_or_project_authority(self) -> None:

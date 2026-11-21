@@ -55,7 +55,7 @@ class DeviceTransportContractTests(unittest.TestCase):
         entry = (SRC / "product_mcp_entry.ts").read_text(encoding="utf-8")
         setup = (SRC / "product_device_setup.ts").read_text(encoding="utf-8")
         transport = (SRC / "product_device_transport.ts").read_text(encoding="utf-8")
-        self.assertIn("handleProductDeviceTransport(request, env)", entry)
+        self.assertIn("handleProductDeviceTransport(request, env, context)", entry)
         self.assertIn("handleProductDevicePresence(request, env)", entry)
         self.assertIn("handleProductDeviceSetup(request, env)", entry)
         self.assertIn("enrollProductDevice(env,", setup)

@@ -38,7 +38,7 @@ class CloudflareDeviceScopeWiringTests(unittest.TestCase):
         )
 
     def test_worker_delegates_device_actions_to_canonical_transport(self) -> None:
-        self.assertIn("handleProductDeviceTransport(request, env)", self.worker)
+        self.assertIn("handleProductDeviceTransport(request, env, context)", self.worker)
         self.assertIn("handleProductDevicePresence(request, env)", self.worker)
         self.assertNotIn("from \"./product_action_scope\"", self.worker)
         self.assertIn('from "./product_action_scope.ts"', self.mcp)
