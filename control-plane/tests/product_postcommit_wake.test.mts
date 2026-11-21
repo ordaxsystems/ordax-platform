@@ -90,8 +90,8 @@ test("non-Worker callers still await the same advisory wake", async () => {
   assert.equal(fixture.calls, 1);
 });
 
-test("terminal idempotent action replay does not wake a Runtime for finished work", async () => {
-  for (const status of ["succeeded", "failed", "cancelled"]) {
+test("already claimed or terminal idempotent action replay never wakes a Runtime", async () => {
+  for (const status of ["leased", "running", "succeeded", "failed", "cancelled", "expired"]) {
     const fixture = wakeFixture();
     let scheduled = 0;
     const receipt = { ...RECEIPT, replayed: true, status };

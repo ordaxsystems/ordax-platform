@@ -181,16 +181,17 @@ Não misturar essas contagens com Forge/PostgREST. Alteração de fonte na
 main não representa deploy; somente o workflow canônico com gates e
 autorização pode publicar a revisão, sem repetir releases existentes.
 
-### Wake em replays terminais — 21/11/2026
+### Wake em replays já reivindicados ou terminais — 21/11/2026
 
 O adaptador canônico de enqueue na Platform continua a emitir ProductDeviceWake
 **somente após o PostgreSQL confirmar** uma ação que ainda possa exigir
 claim. Se a mesma operação for repetida por idempotência e o recibo
-PostgreSQL já estiver em estado terminal imutável (succeeded, failed ou
-cancelled), nenhum novo wake é enviado: não há item aguardando execução,
-e acordar o Runtime produziria uma tentativa de claim desnecessária.
-Replays de ações queued, leased ou running continuam gerando sinal de
-recuperação, inclusive quando a notificação anterior tiver sido perdida.
+PostgreSQL já indicar leased, running, succeeded, failed, cancelled ou
+expired, nenhum novo wake é enviado: não há trabalho novo que possa
+ser reivindicado por outro claim. Replays ainda queued continuam
+gerando o sinal de recuperação, inclusive quando o anterior tiver sido perdido.
+A recuperação de leases/running expirados continua com o claim
+periódico e a autoridade de expiração PostgreSQL; o DO não concede leases.
 A ausência do sinal nunca vira prova de execução ou autorização; OAuth,
 grants e recibos permanecem no PostgreSQL canônico. Sem migração SQL,
 tabela, cache ou novo Durable Object.
@@ -221,3 +222,26 @@ grant nem modificação no app Forge. Provas locais: 21/21 testes do gateway,
 incluindo erro de autorização, transporte HTTPS e controle de chamadas.
 A economia medida é **por consulta de status**; o Forge HTTPS não deve ser
 somado indevidamente às consultas Hyperdrive do Worker Product.
+
+### Medição passiva de custo — 21/11/2026 (UTC)
+
+O agrupamento Cloudflare Analytics para o Hyperdrive canônico em
+**21:20–21:25 UTC** apresentou inicialmente 3.837 consultas estimadas e,
+após ingestão adicional, **4.138 consultas estimadas**, correspondentes a
+**1.000 eventos registrados** (`sum(sampleInterval)` vs. `count()`).
+Esses números são amostrados e sujeitos a atualização; não são a contagem
+exata de comandos SQL de uma requisição nem permitem atribuir todo o
+consumo a um único endpoint. No mesmo agrupamento, os logs do Worker
+`ordax-mcp` estimaram 1.027 invocações, mas os dois conjuntos não incluem
+uma chave de correlação direta. `pg_stat_statements` mantém contadores
+acumulados desde outubro, não um recorte de cinco minutos. Uma comparação de
+antes/depois deve normalizar as consultas pelo volume e composição de
+operações, separar PostgREST HTTPS do Hyperdrive e usar intervalos
+concluídos de duração equivalente. O objetivo de 70% de redução global
+**ainda não está comprovado**.
+
+A alteração no wake evita exclusivamente a notificação de replays já
+`leased`/`running` ou terminais. Seu ganho depende de quantos replays
+desse tipo ocorrerem; não se deve extrapolar o ganho para todo o
+Hyperdrive sem contadores por origem. Nenhuma consulta/alteração adicional
+é necessária para aplicar a nova política.

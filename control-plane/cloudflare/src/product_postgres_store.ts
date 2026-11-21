@@ -880,14 +880,12 @@ export async function enqueueProductAction(
     }
   }
   if (!recorded) throw new ProductPostgresError("product_postgres_invalid_response", 502);
-  // Wake only when there may still be work to claim. A replay of a
-  // terminal SQL receipt has no pending queue item, so its wake would provoke
-  // a redundant Runtime claim. Replayed nonterminal actions still wake,
-  // recovering a previously lost advisory signal.
-  const terminalReplay = recorded.replayed === true
-    && (recorded.status === "succeeded" || recorded.status === "failed"
-      || recorded.status === "cancelled");
-  if (recorded.ok && recorded.request_id && !terminalReplay) {
+  // New accepted enqueues and queued replays may still need a Runtime claim.
+  // Leased/running actions are already claimed; terminal actions cannot be
+  // claimed. Those replayed receipts require no additional advisory wake.
+  // A lost queued wake is recoverable by replay or periodic device claim.
+  const wakeEligible = recorded.replayed !== true || recorded.status === "queued";
+  if (recorded.ok && recorded.request_id && wakeEligible) {
     // Identical, single signalling path also serves device-attested session
     // challenges. No work or trust can be conveyed by this advisory message.
     await scheduleProductDeviceWake(env, input.deviceId, input.scheduleWake);
