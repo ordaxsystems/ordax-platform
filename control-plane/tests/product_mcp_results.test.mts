@@ -200,3 +200,81 @@ test("authorized default and project-specific results remain available", () => {
   assert.equal(scopeProductResult("project.text_read", legacyResult, null), legacyResult);
   assert.equal(scopeProductResult("projects.list", null, '["review"]'), null);
 });
+
+const previewBase64 = Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString("base64");
+const previewData = {
+  mime_type: "image/jpeg", size_bytes: 4, sha256: "a".repeat(64),
+  base64: previewBase64, image_count: 2, unique_image_count: 1,
+  items: [{ image_id: "I001", tile_id: "I001", project_artifact_path: "a.jpg" },
+    { image_id: "I002", tile_id: "I001", project_artifact_path: "b.jpg" }],
+};
+
+async function imageStatusReceipt(data: Record<string, unknown>, actionName = "artifact.preview",
+  status = "succeeded", outcomeOk = true) {
+  const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 17, method: "tools/call", params: {
+      name: "ordax_action_status", arguments: { request_id: acceptedId },
+    } }),
+  }), {
+    session: async () => Response.json({ ok: true }),
+    targets: async () => Response.json({ ok: true, targets: [] }),
+    createAction: async () => Response.json({ ok: true, request_id: acceptedId }),
+    getAction: async () => Response.json({ ok: true, action: {
+      request_id: acceptedId, action: actionName, status,
+      result: { ok: outcomeOk, summary: "preview", data },
+    } }),
+  });
+  const envelope = await response.json();
+  return envelope.result;
+}
+
+test("completed artifact preview emits native MCP image block without duplicating binary in text or structured data", async () => {
+  const receipt = await imageStatusReceipt(previewData) as any;
+  assert.equal(receipt.content.length, 2);
+  assert.equal(receipt.content[1].type, "image");
+  assert.equal(receipt.content[1].mimeType, "image/jpeg");
+  assert.equal(receipt.content[1].data, previewBase64);
+  assert.equal(receipt.structuredContent.pending, false);
+  assert.equal(receipt.structuredContent.request_id, acceptedId);
+  assert.equal(receipt.structuredContent.action.name, "artifact.preview");
+  assert.equal(receipt.structuredContent.action.result.data.base64, undefined);
+  assert.equal(receipt.structuredContent.action.result.data.image_count, 2);
+  assert.equal(receipt.structuredContent.action.result.data.items[1].tile_id, "I001");
+  assert.equal(receipt.content[0].text.includes(previewBase64), false);
+  assert.equal(JSON.stringify(receipt.structuredContent).includes(previewBase64), false);
+});
+
+test("image content projection fails closed for unrelated actions, failed outcomes and invalid binary budgets", async () => {
+  for (const [data, action, status, ok] of [
+    [previewData, "computer.terminal_exec", "succeeded", true],
+    [previewData, "artifact.preview", "failed", false],
+    [{ ...previewData, mime_type: "application/json" }, "artifact.preview", "succeeded", true],
+    [{ ...previewData, size_bytes: 262145 }, "artifact.preview", "succeeded", true],
+    [{ ...previewData, size_bytes: 2 }, "artifact.preview", "succeeded", true],
+    [{ ...previewData, base64: "NOT-BASE64" }, "artifact.preview", "succeeded", true],
+  ] as const) {
+    const receipt = await imageStatusReceipt(data, action, status, ok) as any;
+    assert.equal(receipt.content.length, 1);
+    assert.equal(receipt.content[0].type, "text");
+    assert.equal(receipt.structuredContent.action.result.data.base64, data.base64);
+  }
+});
+
+test("artifact preview schema advertises bounded image batches without changing grants", async () => {
+  const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 19, method: "tools/list", params: {} }),
+  }), {
+    session: async () => Response.json({ ok: true }),
+    targets: async () => Response.json({ ok: true, targets: [] }),
+    createAction: async () => Response.json({ ok: true, request_id: acceptedId }),
+    getAction: async () => Response.json({ ok: true }),
+  });
+  const envelope = await response.json() as any;
+  const tool = envelope.result.tools.find((item: any) => item.name === "artifact_preview");
+  assert.ok(tool, "existing project-scoped artifact tool must remain in generic catalog");
+  assert.equal(tool.inputSchema.properties.project_artifact_paths.minItems, 1);
+  assert.equal(tool.inputSchema.properties.project_artifact_paths.maxItems, 100);
+  assert.equal(tool.inputSchema.required.includes("project"), true);
+});
