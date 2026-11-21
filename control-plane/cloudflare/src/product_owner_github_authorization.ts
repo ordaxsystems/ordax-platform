@@ -100,6 +100,12 @@ function configuredGithubApp(env: ProductGithubAppEnv) {
   return { clientId, clientSecret, pkceSecret, installUrl };
 }
 
+// Only a boolean reaches the authenticated Owner readiness view; the OAuth
+// credentials remain private and share this single canonical validator.
+export function productGithubAuthorizationConfigured(env: ProductGithubAppEnv): boolean {
+  return configuredGithubApp(env) !== null;
+}
+
 type GithubAppConfig = NonNullable<ReturnType<typeof configuredGithubApp>>;
 
 function base64Url(bytes: Uint8Array): string {

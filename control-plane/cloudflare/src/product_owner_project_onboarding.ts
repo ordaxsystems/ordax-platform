@@ -7,6 +7,10 @@ import {
 } from "./product_auth.ts";
 import { canonicalGithubRepositoryFullName } from "./product_owner_project_scope.ts";
 import {
+  productGithubAuthorizationConfigured,
+  type ProductGithubAppEnv,
+} from "./product_owner_github_authorization.ts";
+import {
   createOwnerProject,
   createOwnerProjectDeviceBindingIntent,
   ProductPostgresError,
@@ -16,7 +20,7 @@ import {
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { hasExactQueryParameters } from "./request_query.ts";
 
-type Env = ProductAuthEnv & ProductPostgresEnv;
+type Env = ProductAuthEnv & ProductPostgresEnv & ProductGithubAppEnv;
 type Json = Record<string, unknown>;
 
 type Dependencies = Readonly<{
@@ -299,7 +303,13 @@ export function createOwnerProjectOnboardingHandler(env: Env, deps: Dependencies
       try {
         const raw = await readState(env, { ownerUserId: identity.ownerUserId, deviceId });
         const result = onboardingStateResponse(raw, deviceId);
-        return json(result, stateStatus(result));
+        if (result.ok !== true) return json(result, stateStatus(result));
+        // Owner-only preflight; never imply grant, consent, a registered GitHub
+        // installation, or Runtime attestation from deployment configuration.
+        return json({ ...result, onboarding_availability: {
+          github_authorization_configured: productGithubAuthorizationConfigured(env),
+          project_device_binding_enabled: env.OWNER_PROJECT_DEVICE_BINDING_ENABLED === "enabled",
+        } });
       } catch (error) {
         if (error instanceof Error && error.message === "product_postgres_invalid_response") {
           return json({ ok: false, error: "product_postgres_invalid_response" }, 503);
