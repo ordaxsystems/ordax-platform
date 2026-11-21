@@ -12,7 +12,7 @@ MCP = ROOT / "control-plane" / "cloudflare" / "src" / "mcp_http.ts"
 
 
 def _quoted_computer_actions(text: str) -> set[str]:
-    return set(re.findall(r'"(computer\.[a-z_]+)"', text))
+    return set(re.findall(r'"(computer\.[a-z_]+[a-z])"', text))
 
 
 def _mcp_computer_actions(text: str) -> set[str]:
@@ -36,6 +36,15 @@ class ProductActionScopeContractTests(unittest.TestCase):
             published,
             "device-scoped catalog must exactly match the published Computer MCP surface",
         )
+
+    def test_optional_blender_device_scope_reuses_project_catalog(self) -> None:
+        block = self.scope.split("export const PROJECT_BLENDER_ACTIONS", 1)[1].split("]);", 1)[0]
+        project_actions = set(re.findall(r'"(blender\.live_[a-z_]+)"', block))
+        published = set(re.findall(r'action:\s*"(blender\.live_[a-z_]+)", projectOptional: true', self.mcp))
+        self.assertEqual(len(project_actions), 10)
+        self.assertEqual(published, project_actions)
+        self.assertIn('...DEVICE_BLENDER_ACTIONS', self.scope)
+        self.assertIn('deviceBlenderAction(spec.action)', self.mcp)
 
     def test_worker_delegates_scope_catalog_without_duplicate_action_set(self) -> None:
         self.assertNotIn("const PRODUCT_PROJECT_ACTIONS", self.worker)
