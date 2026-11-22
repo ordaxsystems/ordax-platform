@@ -239,6 +239,7 @@ function resourceMetadata(origin: string, issuer: string) {
 type McpRoutingHint = Readonly<{
   toolName: string;
   explicitNonNullSpace: boolean;
+  explicitProject: boolean;
   // Correlation intent only. Runtime attestation + signed native client are
   // checked independently before this becomes retry-correlation authority.
   nativeSessionRequested: boolean;
@@ -258,6 +259,7 @@ async function mcpRoutingHint(request: Request): Promise<McpRoutingHint | null> 
   const meta = body.params._meta;
   return {
     toolName: name,
+    explicitProject: !!args && typeof args === "object" && Object.hasOwn(args, "project"),
     nativeSessionRequested: Boolean(meta && typeof meta === "object"
       && !Array.isArray(meta) && Object.hasOwn(meta, "ordax/native-session")),
     // Device-scoped commands never inherit a model-supplied Space. Detect
@@ -610,7 +612,8 @@ export function createCanonicalProductMcpGateway(
         };
       }
       if (toolName && allowedTools.has(toolName)
-        && ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)
+        && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName)
+          || (ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) && !routingHint?.explicitProject))
         && routingHint?.explicitNonNullSpace) {
         // The canonical device handler accepts space_id=null only. Reject
         // the explicit foreign/invalid Space at the authenticated JSON-RPC
@@ -677,7 +680,8 @@ export function createCanonicalProductMcpGateway(
                     ? { challenge_id: ownerChallengeId, action_dispatched: false } : {}),
                 }, trustFailure === "central_session_unavailable" ? 503 : 409)
               : (ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName) || ATTESTED_PROJECT_ARTIFACT_TOOLS.has(toolName)
-                || ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) || ATTESTED_PROJECT_BROWSER_TOOLS.has(toolName))
+                || (ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) && routingHint?.explicitProject)
+                || ATTESTED_PROJECT_BROWSER_TOOLS.has(toolName))
               ? createAttestedProjectActionHandler(env, trusted, wakeDependencies)
               : ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)
                 ? createAttestedProjectContinuityHandler(env, trusted, wakeDependencies)

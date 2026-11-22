@@ -5,6 +5,7 @@ import {
   NATIVE_SURFACE_DEVICE_ACTIONS,
   PROJECT_BROWSER_ACTIONS,
   PROJECT_BLENDER_ACTIONS,
+  DEVICE_BLENDER_ACTIONS,
   PROJECT_ARTIFACT_ACTIONS,
   PROJECT_CONTINUITY_ACTIONS,
   REPOSITORY_CATALOG_DEVICE_ACTIONS,
@@ -30,7 +31,9 @@ const WRITE_ACTIONS = new Set<string>([
 ]);
 
 export function productCapabilityAccessMode(capability: string): "read" | "write" {
-  return WRITE_ACTIONS.has(capability) ? "write" : "read";
+  const canonical = DEVICE_BLENDER_ACTIONS.has(capability)
+    ? capability.replace("computer.blender_", "blender.live_") : capability;
+  return WRITE_ACTIONS.has(canonical) ? "write" : "read";
 }
 
 function profile(scope: "device" | "project", capabilities: Iterable<string>): OwnerGrantProfile {
@@ -71,6 +74,7 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
     "computer.process_write_stdin",
     "computer.process_stop",
   ]),
+  "device-blender-control": profile("device", DEVICE_BLENDER_ACTIONS),
   "project-blender-control": profile("project", PROJECT_BLENDER_ACTIONS),
   "project-native-terminal": profile("project", ["terminal.exec"]),
   "project-native-process": profile("project", [

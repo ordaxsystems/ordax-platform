@@ -971,3 +971,33 @@ test("direct status succeeds immediately without extra queries when PostgreSQL r
   assert.equal(body.result.structuredContent.pending, true);
   assert.equal(body.result.structuredContent.action.status, "queued");
 });
+
+test("Blender omission selects device; explicit project selects project; invalid never falls back", async () => {
+  const enqueued: any[] = [];
+  const invoke = async (args: Record<string, unknown>) => {
+    const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: {name: "blender_status", arguments: {device_id: "device-1", wait_for_completion_ms: 0, ...args}}}),
+    }), {
+      session: async () => Response.json({ok: true}),
+      targets: async () => Response.json({ok: true, targets: []}),
+      getAction: async () => Response.json(record()),
+      createAction: async request => {
+        enqueued.push(await request.json());
+        return Response.json({ok: true, request_id: acceptedId});
+      },
+    });
+    return (await response.json() as any).result.structuredContent;
+  };
+  await invoke({});
+  await invoke({project: "owner/repo"});
+  assert.deepEqual(enqueued.map(x => [x.action,x.project,x.space_id]), [
+    ["computer.blender_status",null,null],
+    ["blender.live_status","owner/repo",null],
+  ]);
+  for (const project of [null, "", false, "local", "../repo"]) {
+    assert.equal((await invoke({project})).error, "project_invalid");
+  }
+  assert.equal(enqueued.length,2);
+});
