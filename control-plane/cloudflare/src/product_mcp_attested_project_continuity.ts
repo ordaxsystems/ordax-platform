@@ -108,8 +108,9 @@ export function validAttestedProjectContinuityArguments(action: string, value: u
   }
   if (action === "continuity.update") {
     return keysOnly(value, [
-      "repository_full_name", "summary", "next_action", "completed", "blockers", "changed_paths",
+      "repository_full_name", "summary", "next_action", "completed", "blockers", "changed_paths", "expected_revision",
     ])
+      && boundedInteger(value.expected_revision, 0, Number.MAX_SAFE_INTEGER)
       && boundedString(value.summary, 65_536)
       && (value.next_action === undefined || boundedString(value.next_action, 16_384, true))
       && boundedStringArray(value.completed, 100)
