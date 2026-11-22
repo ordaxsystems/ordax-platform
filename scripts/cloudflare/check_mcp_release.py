@@ -249,6 +249,11 @@ def validate(foundation:dict,config:dict)->bool:
         raise McpReleaseError("owner_central_rollout_flags_incomplete")
     if vars.get("PRODUCT_DEVICE_WAKE_ENABLED") != "enabled":
         raise McpReleaseError("product_device_wake_rollout_incomplete")
+    # This gate permits only the PostgreSQL-consented Forge OAuth client to
+    # request the existing Owner challenge; it never pins an OAuth client ID
+    # in Worker vars, selects a device or grants computer execution.
+    if vars.get("FORGE_NATIVE_DELEGATION_ENABLED") != "enabled":
+        raise McpReleaseError("forge_native_rollout_flag_invalid")
     if vars != {
         "PRODUCT_AUTH_ISSUER":issuer,
         "PRODUCT_AUTH_AUDIENCE":"authenticated",
@@ -258,6 +263,7 @@ def validate(foundation:dict,config:dict)->bool:
         "CENTRAL_OWNER_TARGET_PREFLIGHT_ENABLED":"enabled",
         "CENTRAL_OWNER_SELECTION_ENABLED":"enabled",
         "PRODUCT_DEVICE_WAKE_ENABLED":"enabled",
+        "FORGE_NATIVE_DELEGATION_ENABLED":"enabled",
     }:
         raise McpReleaseError("mcp_auth_vars_not_canonical")
     hyperdrive=foundation.get("live_evidence",{}).get("hyperdrive",{})

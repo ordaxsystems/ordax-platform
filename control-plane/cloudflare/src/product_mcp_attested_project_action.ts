@@ -24,7 +24,7 @@ import {
   resolveOwnerProjectScope,
 } from "./product_owner_project_scope.ts";
 import { productCapabilityAccessMode } from "./product_owner_grant_profiles.ts";
-import { PROJECT_BLENDER_ACTIONS, PROJECT_BROWSER_ACTIONS } from "./product_action_scope.ts";
+import { PROJECT_ARTIFACT_ACTIONS, PROJECT_BLENDER_ACTIONS, PROJECT_BROWSER_ACTIONS } from "./product_action_scope.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import type { AttestedMcpDevice } from "./product_mcp_attested_device_action.ts";
@@ -57,6 +57,7 @@ const PROJECT_NATIVE_ACTIONS = new Set(["terminal.exec", "process.start", "proce
 function profileForAction(action: string): string | null {
   if (PROJECT_BLENDER_ACTIONS.has(action)) return "project-blender-control";
   if (PROJECT_BROWSER_ACTIONS.has(action)) return "project-browser-automation";
+  if (PROJECT_ARTIFACT_ACTIONS.has(action)) return "project-artifact-read";
   if (action === "terminal.exec") return TERMINAL_PROFILE;
   return PROJECT_NATIVE_ACTIONS.has(action) ? PROCESS_PROFILE : null;
 }
@@ -255,9 +256,10 @@ function validBrowserArgs(action: string, value: unknown): value is Json {
     return keysOnly(value, ["session_id", "tab_id", "max_elements"])
       && optionalTab && (value.max_elements === undefined || boundedInteger(value.max_elements, 20, 500));
   if (action === "browser.screenshot")
-    return keysOnly(value, ["session_id", "tab_id", "width", "height"])
+    return keysOnly(value, ["session_id", "tab_id", "width", "height", "include_preview"])
       && optionalTab && (value.width === undefined || boundedInteger(value.width, 320, 2560))
-      && (value.height === undefined || boundedInteger(value.height, 240, 1600));
+      && (value.height === undefined || boundedInteger(value.height, 240, 1600))
+      && (value.include_preview === undefined || typeof value.include_preview === "boolean");
   if (action === "browser.click")
     return keysOnly(value, ["session_id", "tab_id", "node_id"])
       && optionalTab && boundedString(value.node_id, 100);
@@ -269,7 +271,35 @@ function validBrowserArgs(action: string, value: unknown): value is Json {
   return false;
 }
 
+function validProjectArtifactArgs(action: string, value: unknown): value is Json {
+  if (!PROJECT_ARTIFACT_ACTIONS.has(action) || !isRecord(value)) return false;
+  if (action === "artifacts.list") {
+    return keysOnly(value, ["max_items"])
+      && (value.max_items === undefined || boundedInteger(value.max_items, 1, 100));
+  }
+  if (!keysOnly(value, ["artifact_name", "project_artifact_path", "project_artifact_paths",
+    "thumbnail", "max_bytes", "max_width", "max_height", "quality"])) return false;
+  const paths = value.project_artifact_paths;
+  if (paths !== undefined) {
+    if (!Array.isArray(paths) || paths.length < 1 || paths.length > 100
+      || paths.some(path => !boundedString(path, 4096))
+      || paths.reduce((total: number, path: string) => total + new TextEncoder().encode(path).length, 0) > 16384
+      || value.artifact_name !== undefined || value.project_artifact_path !== undefined
+      || value.thumbnail === true) return false;
+  } else {
+    if (value.artifact_name !== undefined && !boundedString(value.artifact_name, 4096)) return false;
+    if (value.project_artifact_path !== undefined && !boundedString(value.project_artifact_path, 4096)) return false;
+    if (value.artifact_name !== undefined && value.project_artifact_path !== undefined) return false;
+  }
+  return (value.thumbnail === undefined || typeof value.thumbnail === "boolean")
+    && (value.max_bytes === undefined || boundedInteger(value.max_bytes, 1, 262144))
+    && (value.max_width === undefined || boundedInteger(value.max_width, 64, 4096))
+    && (value.max_height === undefined || boundedInteger(value.max_height, 64, 4096))
+    && (value.quality === undefined || boundedInteger(value.quality, 30, 92));
+}
+
 export function validAttestedProjectActionArguments(action: string, value: unknown): value is Json {
+  if (PROJECT_ARTIFACT_ACTIONS.has(action)) return validProjectArtifactArgs(action, value);
   if (PROJECT_BROWSER_ACTIONS.has(action)) return validBrowserArgs(action, value);
   if (PROJECT_BLENDER_ACTIONS.has(action)) return validAttestedBlenderActionArguments(action, value);
   if (!PROJECT_NATIVE_ACTIONS.has(action) || !isRecord(value)) return false;
@@ -353,7 +383,7 @@ export function catalogAllowsAttestedProjectAction(
     || catalog.targets.length < 1 || catalog.targets.length > 128
     || !isCanonicalUuid(trustedDeviceId)
     || (!PROJECT_NATIVE_ACTIONS.has(action) && !PROJECT_BLENDER_ACTIONS.has(action)
-      && !PROJECT_BROWSER_ACTIONS.has(action))) return false;
+      && !PROJECT_BROWSER_ACTIONS.has(action) && !PROJECT_ARTIFACT_ACTIONS.has(action))) return false;
 
   const accessMode = productCapabilityAccessMode(action);
   const ids = new Set<string>();

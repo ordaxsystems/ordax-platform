@@ -215,3 +215,45 @@ test("signed client-specific catalogs never borrow another OAuth client's device
     }
   });
 });
+
+test("production composition uses one consent-gated PostgreSQL result and preserves sanitization", async () => {
+  await withIssuer(async () => {
+    const calls: unknown[] = [];
+    const handlers = createCanonicalProductMcpReadHandlers(env, {
+      discoverTargets: async (databaseEnv, ownerUserId, oauthClientId) => {
+        assert.equal(databaseEnv, env);
+        calls.push({ ownerUserId, oauthClientId });
+        return { ...catalog(), phase: "catalog" } as any;
+      },
+    });
+    const response = await handlers.targets(request(await token(), "/v3/product/targets"));
+    assert.equal(response.status, 200);
+    const body = await response.json() as any;
+    assert.equal(body.targets.length, 2);
+    assert.equal(JSON.stringify(body).includes("private-device-token"), false);
+    assert.equal(JSON.stringify(body).includes("internal-group"), false);
+    assert.deepEqual(calls, [{ ownerUserId: owner, oauthClientId: client }]);
+  });
+});
+
+test("merged SQL never exposes targets after rejected consent or disabled Owner", async () => {
+  await withIssuer(async () => {
+    for (const [response, status, publicError] of [
+      [{ phase: "discovery", ok: false, error: "product_mcp_oauth_consent_required",
+        targets: [{device_id:device,private_token:"never"}] },403,"product_mcp_oauth_consent_required"],
+      [{ phase: "discovery", ok: false, error: "product_owner_auth_ineligible",
+        targets: [{device_id:device,private_token:"never"}] },403,"product_target_discovery_grant_failed"],
+      [{ phase: "catalog", ok: false, error: "product_owner_auth_ineligible" },403,"product_owner_auth_ineligible"],
+      [{ phase: "catalog", ok: true, targets: [{device_id:"not-uuid"}] },502,"product_postgres_invalid_response"],
+    ] as const) {
+      const handlers = createCanonicalProductMcpReadHandlers(env, {
+        discoverTargets: async () => response as any,
+      });
+      const denied = await handlers.targets(request(await token()));
+      assert.equal(denied.status, status);
+      const body = await denied.json();
+      assert.deepEqual(body, { ok:false, error:publicError });
+      assert.equal(JSON.stringify(body).includes("never"), false);
+    }
+  });
+});

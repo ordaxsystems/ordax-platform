@@ -98,6 +98,16 @@ Existem dois tipos de atualização:
 
 OAuth só deve exigir nova autorização quando a própria sessão, consentimento ou política de acesso exigir. Atualizar tools não deve ser usado para contornar grants nem para ampliar permissões silenciosamente.
 
+### Imagens MCP no ChatGPT — prova física e limite de apresentação (21/11/2026)
+
+**Comportamento canônico:** `computer_screenshot(include_preview=true)`, `browser_screenshot(include_preview=true)` e `artifact_preview` mantêm as permissões existentes; previews válidas (JPEG, até 256 KiB) entram em `tools/call.result.content[]` como bloco `type: "image"`. A mesma resposta tem `structuredContent` com recibo, identificadores, tamanho e SHA-256, mas **sem** cópia dos pixels em `base64`. A projeção ocorre apenas em ação autorizada, terminal e bem-sucedida; nenhuma tool não autorizada pode produzir imagem. Implementação: `control-plane/cloudflare/src/mcp_http.ts`; provas: `control-plane/tests/product_mcp_results.test.mts`.
+
+**Verificado no Windows físico:** Runtime `6ddefa02` instalado, Platform `9432b3c`, Worker `ordax-mcp` na versão Cloudflare `c258d5f8-0d21-4beb-a710-983983b6ad60` com 100% do tráfego durante o diagnóstico. Uma chamada real ao `computer_screenshot` em `DESKTOP-4UFL03B` produziu JPEG de 62.116 bytes; o SHA-256 foi reproduzido a partir da captura PNG salva pelo mesmo Runtime. A prévia apareceu na conversa **somente por um encaminhamento diagnóstico reduzido da imagem original**, fora da entrega MCP padrão. O retorno do conector MCP, inclusive `ordax_action_status`, expôs os metadados estruturados, mas não disponibilizou o bloco visual `content[]` para a conversa.
+
+**Limite de integração, não falha de captura:** imagens MCP são válidas pelo protocolo, mas o suporte ao bloco visual **não é garantido** por todos os clientes ChatGPT/SDK. O [suporte no fórum OpenAI](https://community.openai.com/t/chatgpt-connector-returns-empty-for-mcp-tool-results-with-type-image-while-same-tool-works-in-mcp-inspector/1375446/5) distingue o resultado visual MCP da visão efetivamente disponibilizada ao modelo. O [guia oficial de plugins](https://developers.openai.com/plugins/build/mcp-server) diferencia `content` de `structuredContent`.
+
+**Critério de aceitação:** não marcar "imagem visível no ChatGPT" apenas porque o Worker emite `content[1].type="image"` ou porque uma prévia foi renderizada por terminal/diagnóstico. É necessário comprovar no **cliente conectado** que esse bloco chegou ao modelo/à UI. Enquanto não houver essa prova, classificar como `MCP_image_valid__ChatGPT_visual_delivery_unverified`. Não copiar `base64` para `structuredContent`, não implantar proxy de imagem, não expor URL pública temporária e não ampliar OAuth/grants para mascarar o limite do cliente. Manter o resultado textual/estruturado e o bloco MCP original para clientes que o suportem.
+
 ### Regra de compatibilidade
 
 - manter sempre o endpoint canônico `/mcp`;

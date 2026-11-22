@@ -103,6 +103,82 @@ test("Forge MCP read call uses a fresh Platform receipt and returns the Forge re
 });
 
 
+test("Forge action status executes one authority-scoped read without redundant instance resolution",async()=>{
+  let resolutions=0,reads=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,
+    resolve:async()=>{resolutions++;throw Error("status must not resolve instance");},
+    getAction:async(_env,input:any)=>{
+      reads++;
+      assert.deepEqual(input,{ownerUserId:OWNER,clientId:CLIENT,requestId:REQUEST});
+      return {ok:true,request_id:REQUEST,status:"succeeded",result:{ok:true}};
+    },
+  });
+  const response=await gateway(request({jsonrpc:"2.0",id:41,method:"tools/call",
+    params:{name:"forge_action_status",arguments:{request_id:REQUEST}}}));
+  assert.equal(response.status,200);
+  const body:any=await response.json();
+  assert.equal(body.result.isError,undefined);
+  assert.deepEqual(body.result.structuredContent,
+    {ok:true,request_id:REQUEST,status:"succeeded",result:{ok:true}});
+  assert.equal(resolutions,0);
+  assert.equal(reads,1);
+});
+
+test("Forge status keeps SQL authorization denial and invalid IDs fail without a DB lookup",async()=>{
+  let resolutions=0,reads=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,
+    resolve:async()=>{resolutions++;return resolution();},
+    getAction:async()=>{
+      reads++;
+      return {ok:false,error:"forge_mcp_authorization_required"};
+    },
+  });
+  const invalid=await gateway(request({jsonrpc:"2.0",id:42,method:"tools/call",
+    params:{name:"forge_action_status",arguments:{request_id:"invalid"}}}));
+  assert.equal((await invalid.json() as any).error.code,-32602);
+  assert.equal(resolutions,0);
+  assert.equal(reads,0);
+
+  const denied=await gateway(request({jsonrpc:"2.0",id:43,method:"tools/call",
+    params:{name:"forge_action_status",arguments:{request_id:REQUEST}}}));
+  const deniedBody:any=await denied.json();
+  assert.equal(deniedBody.result.isError,true);
+  assert.deepEqual(deniedBody.result.structuredContent,
+    {ok:false,error:"forge_mcp_authorization_required"});
+  assert.equal(resolutions,0);
+  assert.equal(reads,1);
+
+  const unknown=await gateway(request({jsonrpc:"2.0",id:44,method:"unknown"}));
+  assert.equal((await unknown.json() as any).error.code,-32601);
+  assert.equal(resolutions,0);
+  assert.equal(reads,1);
+});
+
+test("Forge configured HTTPS status uses only mcp_get, preserving Supabase OAuth authority",async()=>{
+  const operations:string[]=[];
+  const gateway=createForgeMcpGateway({...env,
+    FORGE_SUPABASE_PUBLISHABLE_KEY:"sb_publishable_test"},{
+    authenticateMcp:mcpIdentity as any,
+    fetchImpl:(async(_url:any,init:any)=>{
+      const input=JSON.parse(String(init.body));
+      operations.push(input.p_operation);
+      assert.deepEqual(input.p_payload,{request_id:REQUEST});
+      assert.equal(init.headers.authorization,"Bearer test");
+      return Response.json({ok:false,error:"forge_mcp_authorization_required"});
+    }) as any,
+  });
+  const response=await gateway(request({jsonrpc:"2.0",id:45,method:"tools/call",
+    params:{name:"forge_action_status",arguments:{request_id:REQUEST}}}));
+  assert.equal(response.status,200);
+  const body:any=await response.json();
+  assert.equal(body.result.isError,true);
+  assert.deepEqual(body.result.structuredContent,
+    {ok:false,error:"forge_mcp_authorization_required"});
+  assert.deepEqual(operations,["mcp_get"]);
+});
+
 test("Forge MCP pending action wait uses bounded Supabase reads with final deadline receipt",async()=>{
   let clock=0,calls=0,enqueues=0;
   const sleeps:number[]=[];
@@ -349,7 +425,7 @@ test("Forge MCP unauthenticated requests advertise the shared Supabase OAuth res
 });
 
 
-test("Forge native claim caps Supabase RPC polling to six empty checks per 20-second wait",async()=>{
+test("Forge native claim caps Supabase RPC polling to four empty checks per 20-second wait",async()=>{
   let clock=0;
   const sleeps:number[]=[];
   const operations:string[]=[];
@@ -371,8 +447,8 @@ test("Forge native claim caps Supabase RPC polling to six empty checks per 20-se
   },FORGE_INSTANCE_CLAIM_PATH));
   assert.equal(response.status,200);
   assert.deepEqual(await response.json(),{ok:true,job:null});
-  assert.deepEqual(operations,Array(6).fill("native_claim"));
-  assert.deepEqual(sleeps,[500,1000,2000,4000,8000,4500]);
+  assert.deepEqual(operations,Array(4).fill("native_claim"));
+  assert.deepEqual(sleeps,[1000,5000,10000,4000]);
   assert.equal(clock,20000);
 });
 
@@ -399,9 +475,31 @@ test("Forge native claim stays immediate for work and never retries on failure",
     assert.equal(claims,expected>0?expected:1);
     if(expected===3){
       assert.deepEqual((await response.json() as any).job,job);
-      assert.equal(clock,1500);
+      assert.equal(clock,6000);
     }
     if(expected===0)assert.equal(clock,0);
     if(expected===-1)assert.equal(clock,0);
   }
+});
+
+test("Forge 15s idle claim performs only three SQL checks and never invents jobs",async()=>{
+  let clock=0;
+  const sleeps:number[]=[];
+  let claims=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateOwner:(()=>ownerIdentity(FORGE_NATIVE_CLIENT)) as any,
+    now:()=>clock,
+    sleep:async(ms:number)=>{sleeps.push(ms);clock+=ms;},
+    claim:async()=>{claims++;return {ok:true,job:null};},
+  });
+  const response=await gateway(request({
+    instance_id:INSTANCE,
+    agent_instance_id:"99999999-9999-4999-8999-999999999999",
+    boot_id:"forge-test",wait_ms:15000,
+  },FORGE_INSTANCE_CLAIM_PATH));
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{ok:true,job:null});
+  assert.equal(claims,3,"old 15s cadence used five SQL-backed claims");
+  assert.deepEqual(sleeps,[1000,5000,9000]);
+  assert.equal(clock,15000);
 });

@@ -119,6 +119,16 @@ class McpReleaseContract(unittest.TestCase):
         self.assertRegex(value,r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$")
         self.assertRegex(forge_key,r"^sb_publishable_[A-Za-z0-9_-]{20,}$")
         self.assertNotIn("FORGE_NATIVE_OAUTH_CLIENT_ID",self.config["vars"])
+        self.assertEqual(self.config["vars"]["FORGE_NATIVE_DELEGATION_ENABLED"],"enabled")
+        for invalid in (None,"disabled","true",""):
+            c=copy.deepcopy(self.config)
+            if invalid is None:
+                c["vars"].pop("FORGE_NATIVE_DELEGATION_ENABLED")
+            else:
+                c["vars"]["FORGE_NATIVE_DELEGATION_ENABLED"]=invalid
+            with self.subTest(forge_native_gate=invalid):
+                with self.assertRaisesRegex(McpReleaseError,"forge_native_rollout_flag_invalid"):
+                    validate(self.foundation,c)
         self.assertFalse(validate(self.foundation,self.config))
         for bad in (None, "", "not-a-uuid", "a"*512):
             c=copy.deepcopy(self.config)

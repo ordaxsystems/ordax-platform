@@ -158,6 +158,29 @@ async function importVerificationKey(jwk: JsonWebKey, alg: string): Promise<Cryp
   throw new Error("unsupported_jwt_algorithm");
 }
 
+// JWK JSON may be cached for a bounded period, but token/permission outcomes
+// must never be cached. Cache only immutable imported public verification keys.
+// WeakMap identity tracks the currently fetched JWKS objects: a rotation/refresh
+// replaces the objects and therefore imports new keys without retaining old ones.
+const verificationKeyImports = new WeakMap<JsonWebKey, Map<string, Promise<CryptoKey>>>();
+
+function importedVerificationKey(jwk: JsonWebKey, alg: string): Promise<CryptoKey> {
+  let perAlgorithm = verificationKeyImports.get(jwk);
+  if (!perAlgorithm) {
+    perAlgorithm = new Map();
+    verificationKeyImports.set(jwk, perAlgorithm);
+  }
+  const existing = perAlgorithm.get(alg);
+  if (existing) return existing;
+  const loading = importVerificationKey(jwk, alg);
+  perAlgorithm.set(alg, loading);
+  // Failed imports must never poison the cache; the next verification may retry.
+  void loading.catch(() => {
+    if (perAlgorithm?.get(alg) === loading) perAlgorithm.delete(alg);
+  });
+  return loading;
+}
+
 async function verifySignature(
   alg: string,
   key: CryptoKey,
@@ -284,7 +307,7 @@ export async function authenticateProductRequest(
   }
 
   try {
-    const key = await importVerificationKey(jwk, alg);
+    const key = await importedVerificationKey(jwk, alg);
     const signingInput = new TextEncoder().encode(parts[0] + "." + parts[1]);
     const valid = await verifySignature(alg, key, signingInput, signature);
     if (!valid) {
@@ -371,6 +394,28 @@ export async function authenticateProductMcpClientRequest(
  * this same verified owner boundary. MCP tools continue requiring an additional
  * signed OAuth client_id in authenticateProductMcpClientRequest.
  */
+/** Reuse one signed OAuth proof only inside a single incoming MCP request.
+ * Cloned internal transport requests have the same bearer, not a new identity.
+ * A different bearer/environment always gets independent verification; expiry
+ * is rechecked before every reuse. No isolate/global token cache is created. */
+export function requestScopedProductMcpAuthenticator(
+  source: Request, env: ProductAuthEnv,
+): typeof authenticateProductMcpClientRequest {
+  const authorization = source.headers.get("authorization");
+  let checked: Promise<VerifiedProductMcpClient> | undefined;
+  return async (candidate, candidateEnv) => {
+    if (!authorization || candidateEnv !== env
+        || candidate.headers.get("authorization") !== authorization) {
+      return authenticateProductMcpClientRequest(candidate, candidateEnv);
+    }
+    const identity = await (checked ??= authenticateProductMcpClientRequest(source, env));
+    if (identity.ok && identity.expiresAt <= Math.floor(Date.now() / 1000) - CLOCK_SKEW_SECONDS) {
+      return { ok: false, error: "product_token_claims_invalid", status: 401 };
+    }
+    return identity;
+  };
+}
+
 export async function productOwnerAccountSession(
   request: Request, env: ProductAuthEnv,
 ): Promise<Response> {

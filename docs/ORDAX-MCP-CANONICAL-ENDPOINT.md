@@ -142,3 +142,237 @@ A verificação funcional do cliente deve sempre distinguir:
 6. ação concluída com resultado verificável.
 
 Não inferir o passo seguinte apenas porque o anterior está verde.
+
+## Eficiência SQL da sessão MCP — 21/11/2026
+
+No gateway canônico, a ferramenta ordax_session agora consulta primeiro a
+autoridade PostgreSQL (resolve). Para vínculo já atestado, elimina-se o
+segundo RPC de abertura: **2 → 1 consulta**, sem cache e com validação
+atual de OAuth, grants e vínculo. Somente sessões não vinculadas recebem
+o desafio open existente; se open anunciar bound, resolve ainda precisa
+confirmar a autoridade. Nenhuma resposta de abertura concede execução.
+
+A recuperação de sessão ainda pendente preserva **32 segundos** de espera:
+quatro intervalos de 2s seguidos de seis intervalos de 4s, em vez dos
+16 intervalos de 2s anteriores. O máximo de resoluções de recuperação cai
+de **16 para 10** (ou **17 para 11** com o primeiro read). Nos 8 segundos
+iniciais a cadência anterior permanece; depois pode chegar a 4s. Sem
+alterações em ProductDeviceWake, no Runtime, nas permissões ou no SQL.
+
+Prova direcionada do código de 21/11: **54/54 testes aprovados**
+(product_mcp_entry.test.mts e owner_central_device_selection_route.test.mts);
+incluem espera de 32s, disputa entre confirmação e abertura de sessão,
+e rejeição de autoridade sem atestação. Não foi executada carga artificial
+em produção.
+
+Telemetria passiva Cloudflare Analytics SQL de 21/11/2026, configuração
+Hyperdrive 4b601ec5815f43259bd8040053825d2a, usando contagem estimada
+sum(sampleInterval) no dataset events.hyperdriveEvents: 17h–18h UTC,
+9.403 consultas; 18h–19h, 5.404; 19h–20h, 7.655; 20h–21h, 15.703.
+No dataset events.workersInvocations, ordax-mcp teve 9.601 requisições
+estimadas e 27 falhas estimadas das 19h às 21h UTC. Essa amostragem não
+atribui todas as consultas a um Worker, não separa a carga por tipo de
+operação, nem equivale a comparar cargas iguais antes/depois.
+
+**Meta global de redução ≥70% ainda não comprovada.** Coletar a mesma
+composição de carga para consulta por ação, claims vazios, heartbeats,
+resoluções, erros e latência p50/p95/p99 após publicação autorizada.
+Não misturar essas contagens com Forge/PostgREST. Alteração de fonte na
+main não representa deploy; somente o workflow canônico com gates e
+autorização pode publicar a revisão, sem repetir releases existentes.
+
+### Wake em replays já reivindicados ou terminais — 21/11/2026
+
+O adaptador canônico de enqueue na Platform continua a emitir ProductDeviceWake
+**somente após o PostgreSQL confirmar** uma ação que ainda possa exigir
+claim. Se a mesma operação for repetida por idempotência e o recibo
+PostgreSQL já indicar leased, running, succeeded, failed, cancelled ou
+expired, nenhum novo wake é enviado: não há trabalho novo que possa
+ser reivindicado por outro claim. Replays ainda queued continuam
+gerando o sinal de recuperação, inclusive quando o anterior tiver sido perdido.
+A recuperação de leases/running expirados continua com o claim
+periódico e a autoridade de expiração PostgreSQL; o DO não concede leases.
+A ausência do sinal nunca vira prova de execução ou autorização; OAuth,
+grants e recibos permanecem no PostgreSQL canônico. Sem migração SQL,
+tabela, cache ou novo Durable Object.
+
+Provas locais em 21/11: 16/16 testes direcionados do wake passaram,
+incluindo replay terminal em três resultados, replay ainda pendente,
+negativa de enqueue, falta de contexto waitUntil e entrega concorrente.
+A economia real depende da frequência de replays terminais e não deve
+ser declarada como uma porcentagem de Hyperdrive antes de medir a
+composição de carga.
+
+### Forge MCP: leitura direta de recibo autorizado — 21/11/2026
+
+A ferramenta `forge_action_status` não executa `mcp_resolve` antes do
+`mcp_get`. A resolução da instância era descartada nesse caminho: o recibo
+`public.ordax_get_forge_action_v1` já verifica
+`private.ordax_forge_oauth_client_authorized_v1(owner, client)` e procura
+exclusivamente o `request_id` pertencente ao mesmo owner/client. No transporte
+HTTPS, `public.ordax_forge_http_rpc_v1` também valida a identidade OAuth e
+encaminha `mcp_get` à autoridade PostgreSQL, sem reaproveitar uma autorização
+anterior ou armazenar tokens/grants no Worker.
+
+Consultas válidas de status passam de **dois RPCs Supabase a um**; entradas
+inválidas ou métodos desconhecidos não precisam resolver a instância.
+`tools/list`, `forge_connection_status` e a execução de ferramentas continuam
+resolvendo a instância dinamicamente. Não há nova tabela, serviço, cache,
+grant nem modificação no app Forge. Provas locais: 21/21 testes do gateway,
+incluindo erro de autorização, transporte HTTPS e controle de chamadas.
+A economia medida é **por consulta de status**; o Forge HTTPS não deve ser
+somado indevidamente às consultas Hyperdrive do Worker Product.
+
+### Medição passiva de custo — 21/11/2026 (UTC)
+
+O agrupamento Cloudflare Analytics para o Hyperdrive canônico em
+**21:20–21:25 UTC** apresentou inicialmente 3.837 consultas estimadas e,
+após ingestão adicional, **4.138 consultas estimadas**, correspondentes a
+**1.000 eventos registrados** (`sum(sampleInterval)` vs. `count()`).
+Esses números são amostrados e sujeitos a atualização; não são a contagem
+exata de comandos SQL de uma requisição nem permitem atribuir todo o
+consumo a um único endpoint. No mesmo agrupamento, os logs do Worker
+`ordax-mcp` estimaram 1.027 invocações, mas os dois conjuntos não incluem
+uma chave de correlação direta. `pg_stat_statements` mantém contadores
+acumulados desde outubro, não um recorte de cinco minutos. Uma comparação de
+antes/depois deve normalizar as consultas pelo volume e composição de
+operações, separar PostgREST HTTPS do Hyperdrive e usar intervalos
+concluídos de duração equivalente. O objetivo de 70% de redução global
+**ainda não está comprovado**.
+
+A alteração no wake evita exclusivamente a notificação de replays já
+`leased`/`running` ou terminais. Seu ganho depende de quantos replays
+desse tipo ocorrerem; não se deve extrapolar o ganho para todo o
+Hyperdrive sem contadores por origem. Nenhuma consulta/alteração adicional
+é necessária para aplicar a nova política.
+
+### MCP: conclusão antecipada por sinal, com leitura SQL obrigatória (21/11/2026)
+
+Para uma ação cujo enqueue PostgreSQL **já confirmou** um recibo `queued`,
+o gateway pode aguardar **uma única vez**, antes da primeira leitura de status,
+uma notificação de conclusão no ProductDeviceWake **existente**. O destino
+da notificação é exclusivamente o `deviceId` derivado da resolução da
+sessão atestada pelo PostgreSQL nesta própria requisição; não provém de
+argumentos do modelo, headers arbitrários, cache global ou outro serviço.
+O período inicial é limitado a **25% da espera explícita, até 1 segundo**.
+Um sinal antecipado pode suprimir a consulta SQL inicial que normalmente
+retornaria `queued` para uma ação muito rápida.
+
+Um sinal é somente orientação: após aviso, timeout, erro ou indisponibilidade
+do Durable Object, o gateway executa **uma leitura PostgreSQL fresca,
+autenticada e restrita ao cliente** antes de declarar execução, resultado
+ou falha. Um sinal antigo não pode gerar ciclo de consultas rápidas. Uma
+consulta `ordax_action_status` independente continua **SQL-first**,
+porque precisa validar o direito do cliente de observar o `request_id`.
+Sem novo serviço, tabela, armazenamento, alteração no Runtime ou cache de
+grants. O `wait_for_completion_ms=0` e as confirmações de enqueue já
+existentes permanecem inalterados.
+
+Testes direcionados: sinal rápido evita uma leitura SQL de status num caso
+controlado (1 em vez de 2); canal indisponível consulta SQL normalmente;
+sinal obsoleto nunca cria sucesso; ação consultada por ID permanece
+autorizada pelo PostgreSQL antes de aguardar o sinal. Esta economia
+**não é uma redução global medida de Hyperdrive**: depende da distribuição
+de latência das ações e de sinais realmente recebidos. A meta de 70%
+continua condicionada a uma comparação de carga equivalente.
+
+### ProductDeviceWake — espera de conclusão de até 10 segundos (21/11/2026)
+
+O mesmo Durable Object canônico agora aceita uma única espera de conclusão de
+até 10 s (antes 5 s), limitada pelo prazo restante do próprio chamador.
+Em ações que permanecem pendentes por 20 s, isso pode reduzir a quantidade
+de ciclos DO timeout → leitura PostgreSQL de aproximadamente quatro para
+aproximadamente dois, sem alterar o período total da chamada ou a prontidão
+de um sinal real de conclusão (que encerra a espera imediatamente).
+Status direto de um ID arbitrário continua SQL-first; todo timeout, falha,
+aviso antigo ou aviso novo depende de uma leitura SQL autenticada para
+publicar o estado real. Nenhuma fila, credencial, grant ou resultado passa
+a ser armazenado no DO. A economia global só pode ser afirmada com medição
+comparável de tráfego/consultas; prolongar uma espera também pode afetar
+custos de duração do Durable Object, a serem acompanhados em Analytics.
+
+### OAuth MCP: uma verificação por requisição HTTP para leituras e status (21/11/2026)
+
+O gateway cria um autenticador **exclusivo da requisição entrante** para
+reutilizar a mesma identidade OAuth já **assinada e verificada** entre
+`session`, `targets`, `getAction` e o handler de execução nativa/projeto.
+O reuso é permitido apenas com o **mesmo Authorization Bearer exato e a
+mesma instância do ambiente**; troca de token/ambiente exige outra
+verificação, e o prazo `exp` é reavaliado em **cada** reutilização segundo
+a tolerância de relógio já prevista no contrato JWT. Nenhuma identidade,
+token, grant, status ou resultado é armazenado entre requisições, em DO,
+KV, banco adicional ou cache global. O gateway pode continuar verificando
+o OAuth separadamente durante a recuperação atestada da sessão; a
+correção não altera os seus gates de abertura/confirmação.
+
+Nos testes, `ordax_action_status` passa de duas verificações criptográficas
+(session + status) a uma por requisição, mantendo leitura SQL autenticada
+para cada status; requisições subsequentes verificam novamente. Isto
+**reduz trabalho criptográfico no Worker**, não o número de consultas
+Hyperdrive. A pré-checagem de perfil do catálogo anterior ao enqueue
+permanece obrigatória: ela não pode ser removida enquanto o PostgreSQL
+não aplicar as mesmas regras de `profile_key` para ações, inclusive
+replays, projetos, dispositivos e revogação.
+
+### `ordax_targets`: materialização e catálogo em um único SQL (21/11/2026)
+
+O endpoint mantém o token OAuth assinado e sua identidade exata de Owner e
+cliente, mas troca a sequência anterior de **duas conexões e duas consultas
+Hyperdrive** (descoberta seguida de catálogo) por **uma conexão e uma
+consulta SQL**. Essa consulta composta invoca exclusivamente as duas funções
+PostgreSQL existentes, nesta ordem:
+
+1. `public.ordax_ensure_product_mcp_target_discovery_v1(owner, client)`
+   verifica em todas as chamadas consentimento OAuth não revogado, cliente
+   público ativo, elegibilidade do Owner e reconciliação idempotente apenas
+   do grant `product.target.read/read`.
+2. Apenas se a primeira etapa retornar `ok=true`,
+   `public.ordax_list_product_targets_v1(owner, 'product-mcp', client)`
+   lê o catálogo atual autorizado. `WITH ... AS MATERIALIZED` garante
+   uma única avaliação da descoberta; `CASE` impede enumeração após
+   recusa. O identificador do cliente vem do token assinado, nunca de
+   argumentos do modelo, headers alternativos ou outro chat.
+
+Ambas as funções SQL continuam sendo as autoridades originais; não foram
+criadas migrações, funções SECURITY DEFINER paralelas, caches de grants,
+serviços adicionais ou tabelas. Cada leitura volta ao PostgreSQL, inclusive
+após expiração ou revogação. Os testes de contrato verificam uma conexão,
+uma chamada SQL, retorno fail-closed e projeção sem dados secretos.
+A consulta foi testada no banco real com identidade inexistente, que foi
+rejeitada antes de enumerar dispositivos.
+
+**Economia determinística por leitura válida de catálogo:** 2 consultas
+Hyperdrive → 1 (redução de 50% nesse fluxo específico), sem afirmar que o
+consumo geral da conta caiu 50% ou atingiu a meta global de 70%.
+
+### Indisponibilidade PostgreSQL/Hyperdrive na sessão MCP (21/11/2026)
+
+Quando a resolução de sessão atestada falha por indisponibilidade do
+PostgreSQL/Hyperdrive, a chamada não deve ser classificada como uma autorização
+ausente. O gateway retorna `central_session_unavailable`, sem detalhes privados,
+com `action_dispatched=false`, `retryable=true` e recomendação de intervalo
+mínimo de 300 s antes de uma nova tentativa. Não abre desafios de Owner,
+não presume grants, não consulta outro banco e não despacha uma ação.
+Falhas não classificadas continuam recebendo o erro genérico e fail-closed.
+
+O intervalo informado é um **sinal para clientes**, não um atraso imposto
+pelo Worker. A retomada real depende da autoridade PostgreSQL voltar a
+responder; não equivale a cache de permissão nem contorno de franquia.
+
+### Forge Native: cadência SQL ociosa com primeira tentativa imediata (22/11/2026)
+
+No endpoint canônico `/v1/forge/instance/claim`, o primeiro claim
+continua imediato e autenticado pelo PostgreSQL. Quando a resposta tem
+`job=null`, os intervalos seguintes passam a 1 s, 5 s e 10 s (limitados
+ao prazo da requisição), sem nova consulta no instante do vencimento.
+Para a espera padrão de 15 s, há no máximo **três claims SQL** em vez de
+cinco (40% menos leituras ociosas nesse fluxo); em 20 s, quatro em vez de
+seis. A próxima requisição volta a consultar imediatamente. Não existe
+cache de grants, jobs, tokens nem novo executor, DO ou fila; um claim só
+retorna trabalho efetivamente concedido pela função SQL canônica.
+
+**Limite da métrica:** quando a configuração ativa usa o transporte
+HTTPS autorizado ao Supabase, a economia é de operações no PostgreSQL
+sem passagem por Hyperdrive; não atribuir esses 40% a redução da franquia
+Hyperdrive sem medição de rota. A prontidão e o consumo global precisam
+continuar sendo medidos separadamente.

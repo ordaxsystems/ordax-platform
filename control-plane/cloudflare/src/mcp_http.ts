@@ -16,6 +16,13 @@ export interface OrdaxMcpHandlers {
    * ChatGPT session marker; never supplied by the model as an action argument. */
   createAction: (request: Request, retryDigest?: string | null) => Promise<Response>;
   getAction: StatusHandler;
+  /** Request-local device selected by the attested PostgreSQL session, never by
+   * MCP action arguments. Used only for an advisory pre-read completion wait. */
+  verifiedActionDeviceId?: string;
+  /** Set ONLY by the Product gateway after the Forge native correlation has
+   * passed signed OAuth, the enabled rollout and a fresh Runtime-confirmed
+   * PostgreSQL session resolve. It never comes from JSON-RPC arguments. */
+  verifiedNativeRetryClientId?: string;
   /** Advisory wait after canonical authorization; never returns a receipt. */
   waitForCompletion?: (deviceId: string, requestId: string, remainingMs: number) => Promise<"signalled" | "timeout" | "unavailable">;
   listRecentActions?: (input: { pendingOnly: boolean; limit: number }) => Promise<Response>;
@@ -159,7 +166,7 @@ const TOOLS: ToolSpec[] = [
   { name: "browser_list", description: "List ORDAX-managed browser sessions within a granted project.", action: "browser.list", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "browser_tabs", description: "List page tabs in one authorized Chromium session.", action: "browser.tabs", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, session_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "session_id"] },
   { name: "browser_snapshot", description: "Inspect a bounded DOM/text snapshot of the selected Chromium tab.", action: "browser.snapshot", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, session_id: STRING, tab_id: STRING, max_elements: { type: "integer", minimum: 20, maximum: 500 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "session_id"] },
-  { name: "browser_screenshot", description: "Capture a page of an authorized Chromium session.", action: "browser.screenshot", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, session_id: STRING, tab_id: STRING, width: { type: "integer", minimum: 320, maximum: 2560 }, height: { type: "integer", minimum: 240, maximum: 1600 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "session_id"] },
+  { name: "browser_screenshot", description: "Capture a page of an authorized Chromium session. Set include_preview=true to return one bounded native JPEG from the same CDP capture while retaining the original PNG.", action: "browser.screenshot", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, session_id: STRING, tab_id: STRING, width: { type: "integer", minimum: 320, maximum: 2560 }, height: { type: "integer", minimum: 240, maximum: 1600 }, include_preview: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "session_id"] },
   { name: "browser_start", description: "Start a project-owned Chromium session, or explicitly resume a stopped ORDAX session with resume_session_id, keeping that project profile and any user-authorized login. Never imports personal Chrome cookies, bypasses sign-in, or attaches to an active session.", action: "browser.start", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, url: STRING, headless: BOOLEAN, resume_session_id: { type: "string", pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", description: "Existing stopped ORDAX browser session UUID returned by browser_list for the same authorized project." }, wait_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "browser_tab_open", description: "Open a second tab in the same authorized Chromium session and profile.", action: "browser.tab_open", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, session_id: STRING, url: STRING, wait_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "session_id"] },
   { name: "browser_navigate", description: "Navigate a selected authorized Chromium tab to an http/https URL.", action: "browser.navigate", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, session_id: STRING, tab_id: STRING, url: STRING, wait_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "session_id", "url"] },
@@ -168,7 +175,7 @@ const TOOLS: ToolSpec[] = [
   { name: "browser_stop", description: "Stop an ORDAX-owned Chromium session.", action: "browser.stop", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, session_id: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "session_id"] },
   { name: "computer_windows", description: "List visible windows on the interactive Windows desktop.", action: "computer.windows", properties: { device_id: DEVICE, space_id: SPACE, max_items: { type: "integer", minimum: 1, maximum: 500 }, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_active_window", description: "Inspect the current foreground Windows desktop window.", action: "computer.active_window", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
-  { name: "computer_screenshot", description: "Capture the full Windows desktop or active window for visual inspection.", action: "computer.screenshot", properties: { device_id: DEVICE, space_id: SPACE, mode: { type: "string", enum: ["desktop", "active_window"] }, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "computer_screenshot", description: "Capture the full Windows desktop or active window; set include_preview=true to return one bounded native JPEG visual preview from the same capture. Without it, only metadata is returned.", action: "computer.screenshot", properties: { device_id: DEVICE, space_id: SPACE, mode: { type: "string", enum: ["desktop", "active_window"] }, include_preview: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_screen_info", description: "Inspect monitor geometry, virtual desktop bounds and cursor position.", action: "computer.screen_info", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_clipboard_read", description: "Read bounded Unicode text from the interactive Windows clipboard.", action: "computer.clipboard_read", properties: { device_id: DEVICE, space_id: SPACE, max_bytes: { type: "integer", minimum: 1, maximum: 1048576 }, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "computer_focus_window", description: "Foreground-only Windows operation: bring one visible window to the foreground. This intentionally changes user focus and should be called only with explicit user consent.", action: "computer.focus_window", properties: { device_id: DEVICE, space_id: SPACE, handle: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "handle"] },
@@ -200,8 +207,8 @@ const TOOLS: ToolSpec[] = [
   { name: "computer_directory_create", description: "Create a directory within the local computer-access policy.", action: "computer.directory_create", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, parents: BOOLEAN, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "computer_path_move", description: "Move or rename an allowed computer path.", action: "computer.path_move", properties: { device_id: DEVICE, space_id: SPACE, source: STRING, destination: STRING, overwrite: BOOLEAN, expected_sha256: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "source", "destination"] },
   { name: "computer_path_remove", description: "Remove an allowed computer path. Recursive directory removal requires recursive=true.", action: "computer.path_remove", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, recursive: BOOLEAN, expected_sha256: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
-  { name: "artifacts_list", description: "List bounded artifact metadata for a granted project.", action: "artifacts.list", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, max_items: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
-  { name: "artifact_preview", description: "Read a bounded preview of a granted project artifact.", action: "artifact.preview", projectRequired: true, properties: { device_id: DEVICE, project: PROJECT, space_id: SPACE, artifact_name: STRING, project_artifact_path: STRING, thumbnail: BOOLEAN, max_bytes: { type: "integer", minimum: 1, maximum: 262144 }, max_width: { type: "integer", minimum: 1, maximum: 4096 }, max_height: { type: "integer", minimum: 1, maximum: 4096 }, quality: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
+  { name: "artifacts_list", description: "List bounded artifact metadata for a GitHub-connected project with an explicit project-artifact-read grant.", action: "artifacts.list", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, max_items: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
+  { name: "artifact_preview", description: "Preview one granted project artifact or up to 100 project images as a labeled, SHA-256 deduplicated JPEG contact sheet. Paths in project_artifact_paths must be relative to Artifacts and cannot be combined with artifact_name/project_artifact_path. Successful images return native MCP image content with original-item metadata. Requires an attested project and explicit project-artifact-read Owner grant.", action: "artifact.preview", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, artifact_name: STRING, project_artifact_path: STRING, project_artifact_paths: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1, maxItems: 100 }, thumbnail: BOOLEAN, max_bytes: { type: "integer", minimum: 1, maximum: 262144 }, max_width: { type: "integer", minimum: 1, maximum: 4096 }, max_height: { type: "integer", minimum: 1, maximum: 4096 }, quality: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "blender_status", description: "Read sanitized live Blender status for the device or a linked project.", action: "blender.live_status", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "blender_scene_snapshot", description: "Inspect a bounded snapshot of the live Blender scene.", action: "blender.live_scene_snapshot", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, max_objects: { type: "integer", minimum: 1, maximum: 10000 }, object_names: { type: "array", items: STRING, maxItems: 256 }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "blender_object_inspect", description: "Inspect one live Blender object by name or ORDAX object id.", action: "blender.live_object_inspect", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, object_name: STRING, ordax_object_id: STRING, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id"] },
@@ -753,10 +760,63 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
   return invalid;
 }
 
+/**
+ * Promote an already-authorized completed artifact.preview or explicit
+ * computer.screenshot image into one native MCP image content block. Keep the exact queue receipt and metadata; never
+ * echo a second copy of the encoded pixels in text or structuredContent.
+ *
+ * This is presentation only, not an authorization or device-action fallback.
+ * Invalid/non-image receipts retain their existing textual representation.
+ */
+function nativeArtifactImageReceipt(payload: unknown): { metadata: JsonObject; mimeType: string; base64: string } | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const receipt = payload as JsonObject;
+  if (receipt.ok !== true || receipt.pending !== false) return null;
+  const action = receipt.action;
+  if (!action || typeof action !== "object" || Array.isArray(action)) return null;
+  const completed = action as JsonObject;
+  if (!["artifact.preview", "computer.screenshot", "browser.screenshot"].includes(String(completed.name))
+    || completed.status !== "succeeded") return null;
+  const result = completed.result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+  const outcome = result as JsonObject;
+  if (outcome.ok !== true || !outcome.data || typeof outcome.data !== "object"
+    || Array.isArray(outcome.data)) return null;
+  const image = outcome.data as JsonObject;
+  const mimeType = image.mime_type;
+  const base64 = image.base64;
+  const size = image.size_bytes;
+  // Bound the representation before running any regex or creating an MCP
+  // image block. The Runtime's batch/single-preview inline limit is 256 KiB.
+  if ((mimeType !== "image/jpeg" && mimeType !== "image/png" && mimeType !== "image/webp")
+    || typeof base64 !== "string" || typeof size !== "number"
+    || !Number.isSafeInteger(size) || size < 1 || size > 262144
+    || base64.length !== Math.ceil(size / 3) * 4
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64)
+    || (size % 3 === 0 && base64.endsWith("="))
+    || (size % 3 === 1 && !base64.endsWith("=="))
+    || (size % 3 === 2 && (base64.endsWith("==") || !base64.endsWith("=")))) return null;
+  const { base64: _pixels, ...safeData } = image;
+  return {
+    mimeType, base64,
+    metadata: { ...receipt, action: { ...completed, result: { ...outcome, data: safeData } } },
+  };
+}
+
 function textToolResult(payload: unknown, isError = false): JsonObject {
-  const text = JSON.stringify(payload, null, 2);
-  const structured = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : { value: payload };
-  return { content: [{ type: "text", text }], structuredContent: structured, isError };
+  const image = !isError ? nativeArtifactImageReceipt(payload) : null;
+  const projected = image ? image.metadata : payload;
+  const text = JSON.stringify(projected, null, 2);
+  const structured = projected && typeof projected === "object" && !Array.isArray(projected)
+    ? projected : { value: projected };
+  return {
+    content: [
+      { type: "text", text },
+      ...(image ? [{ type: "image", data: image.base64, mimeType: image.mimeType }] : []),
+    ],
+    structuredContent: structured,
+    isError,
+  };
 }
 
 function cloneWithAuth(source: Request, url: string, method: string, body?: unknown): Request {
@@ -767,8 +827,8 @@ function cloneWithAuth(source: Request, url: string, method: string, body?: unkn
   return new Request(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 }
 
-function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
-  return TOOLS.filter(tool => !allowedTools || allowedTools.has(tool.name)).map((tool) => {
+function buildToolDefinitions(): JsonObject[] {
+  return TOOLS.map((tool) => {
     const invocation = toolInvocationText(tool.name);
     return {
       name: tool.name,
@@ -805,6 +865,16 @@ function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
   });
 }
 
+// Immutable public schemas are independent of sessions, grants and device state.
+// Build once per isolate; filter by the caller's current tool allowlist.
+let publicToolDefinitions: ReadonlyArray<JsonObject> | undefined;
+function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
+  // Lazy: action-only requests do not pay to construct the public catalog.
+  const definitions = publicToolDefinitions ??= Object.freeze(buildToolDefinitions());
+  return definitions.filter((tool) =>
+    !allowedTools || allowedTools.has(String(tool.name)));
+}
+
 /**
  * Deterministic MCP catalog identity, computed from the canonical public tool
  * definitions (including security annotations, input schemas and descriptions).
@@ -822,8 +892,9 @@ function currentMcpToolSurfaceRevision(): Promise<string> {
   return surfaceRevisionPromise ??= mcpCatalogRevision(toolDefinitions());
 }
 
+const TOOL_SPEC_BY_NAME: ReadonlyMap<string, ToolSpec> = new Map(TOOLS.map(tool => [tool.name, tool] as const));
 function specFor(name: string): ToolSpec | undefined {
-  return TOOLS.find((tool) => tool.name === name);
+  return TOOL_SPEC_BY_NAME.get(name);
 }
 
 type OwnerGrantHint = {
@@ -860,7 +931,9 @@ const OWNER_GRANT_HINT_BY_ACTION = new Map<string, OwnerGrantHint>([
     "browser.type",
   ].map((action) => [action, { profile: "project-browser-automation", surface: BROWSER_GRANT_SURFACE }] as const),
   ...[...DEVICE_BLENDER_ACTIONS].map((action) => [action, { profile: "device-blender-control", surface: COMPUTER_GRANT_SURFACE }] as const),
-  ...["terminal.exec"].map((action) =>
+  ["artifact.preview", "artifacts.list"].map((action) =>
+    [action, { profile: "project-artifact-read", surface: PROJECT_GRANT_SURFACE }] as const),
+  ["terminal.exec"].map((action) =>
     [action, { profile: "project-native-terminal", surface: PROJECT_GRANT_SURFACE }] as const),
   ["process.start", "process.status", "process.list", "process.logs",
     "process.write_stdin", "process.stop"].map((action) =>
@@ -988,7 +1061,7 @@ async function readActionStatusWithRecovery(
   }
 }
 
-async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers, acceptedReceipt = true): Promise<JsonObject> {
+async function waitForAction(source: Request, requestId: string, timeoutMs: number, handlers: OrdaxMcpHandlers, acceptedReceipt = true, initiallyQueued = false): Promise<JsonObject> {
   const deadline = Date.now() + timeoutMs;
   // Creation already proved a persisted receipt; a standalone status query
   // does not. Never promote an unreadable arbitrary ID to "accepted/pending".
@@ -997,6 +1070,25 @@ async function waitForAction(source: Request, requestId: string, timeoutMs: numb
     : unverifiedActionStatus(requestId, status);
   let pollRound = 0;
   let completionHintSeen = false;
+  // The enqueue RPC has already committed an authorized queued receipt.
+  // Give the existing completion signal a short chance to arrive before the
+  // first *redundant* status SQL read. Only the request-local attested device
+  // can select the DO. A timeout/unavailable signal falls through to a fresh
+  // PostgreSQL authorization read, never a guessed action result.
+  // Direct client status checks still begin with SQL to authorize the ID.
+  if (acceptedReceipt && initiallyQueued && timeoutMs > 0
+      && isCanonicalUuid(handlers.verifiedActionDeviceId)
+      && handlers.waitForCompletion) {
+    try {
+      const hint = await handlers.waitForCompletion(
+        handlers.verifiedActionDeviceId, requestId,
+        Math.min(1000, Math.max(1, Math.floor(timeoutMs / 4)),
+          Math.max(0, deadline - Date.now())),
+      );
+      // A stale/replayed signal must not drive an unbounded SQL loop.
+      if (hint === "signalled") completionHintSeen = true;
+    } catch { /* Advisory failure restores normal SQL-first recovery. */ }
+  }
   const retryRead = boundedTransientActionStatusRetry(deadline);
   while (true) {
     const statusResponse = await readActionStatusWithRecovery(source, requestId, handlers, retryRead, acceptedReceipt ? "worker_wait" : "client_wait");
@@ -1047,8 +1139,10 @@ function canonicalRetryValue(value: unknown): unknown {
   return value;
 }
 
-/** Stable per signed OAuth client, ChatGPT session marker, JSON-RPC call ID
- * and exact tool call. JSON-RPC permits sequential request ID reuse, so an ID
+/** Stable per signed OAuth client, independently verified session marker,
+ * JSON-RPC call ID and exact tool call. Forge native markers are accepted
+ * ONLY with the Product gateway's request-local Runtime-attested proof.
+ * JSON-RPC permits sequential request ID reuse, so an ID
  * alone cannot distinguish a retry from a later, different tool invocation.
  * The tool name and canonical arguments participate only in this in-memory
  * digest; neither content nor marker is persisted or forwarded. PostgreSQL
@@ -1058,6 +1152,7 @@ export async function verifiedMcpRetryDigest(
   sessionPayload: JsonObject,
   requestId: string | number,
   params: unknown,
+  verifiedNativeClientId?: string,
 ): Promise<string | null> {
   if (!params || typeof params !== "object" || Array.isArray(params)) return null;
   const object = params as JsonObject;
@@ -1067,11 +1162,21 @@ export async function verifiedMcpRetryDigest(
   if (!meta || typeof meta !== "object" || Array.isArray(meta)
     || typeof name !== "string" || !name
     || !args || typeof args !== "object" || Array.isArray(args)) return null;
-  const marker = (meta as JsonObject)["openai/session"];
+  const chatgpt = (meta as JsonObject)["openai/session"];
+  const native = (meta as JsonObject)["ordax/native-session"];
   const session = sessionPayload.session;
   const clientId = session && typeof session === "object" && !Array.isArray(session)
     ? (session as JsonObject).client_id : null;
-  if (!validChatGptSessionMarker(marker) || !isCanonicalUuid(clientId)) return null;
+  if (!isCanonicalUuid(clientId)) return null;
+  const verifiedNative = native !== undefined && chatgpt === undefined
+    && typeof native === "string" && /^[A-Za-z0-9_-]{43}$/.test(native)
+    && isCanonicalUuid(verifiedNativeClientId)
+    && verifiedNativeClientId.toLowerCase() === clientId.toLowerCase();
+  // Native and ChatGPT sessions are separate correlation namespaces. Never
+  // fall back to the ChatGPT marker when a native marker is also present.
+  if (native !== undefined && !verifiedNative) return null;
+  const marker = verifiedNative ? "forge-native-v1:" + native : chatgpt;
+  if (!verifiedNative && !validChatGptSessionMarker(marker)) return null;
   // Preserve JSON-RPC type: numeric 1 and string "1" are distinct request IDs.
   // wait_for_completion_ms controls only how long the caller observes the
   // already-enqueued action. It is not part of the device effect and therefore
@@ -1305,6 +1410,18 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
   const created = await handlers.createAction(createRequest, retryDigest);
   const createdPayload = await bodyJson(created);
   if (!created.ok) {
+    if (createdPayload.error === "central_session_unavailable") {
+      // This is a PostgreSQL/Hyperdrive availability failure, not missing
+      // authorization. Do not issue Owner prompts, enqueue or retry in a hot loop.
+      return textToolResult({
+        ok: false,
+        error: "central_session_unavailable",
+        retryable: true,
+        retry_after_seconds: 300,
+        action_dispatched: false,
+        required_action: "restore_platform_postgres_connection",
+      }, true);
+    }
     if (createdPayload.error === "central_device_offline"
       || createdPayload.error === "central_device_runtime_not_ready"
       || createdPayload.error === "central_session_pending") {
@@ -1424,7 +1541,9 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       message: pendingActionMessage("queued"),
     });
   }
-  const finalPayload = await waitForAction(source, requestId, waitMs, handlers);
+  const finalPayload = await waitForAction(
+    source, requestId, waitMs, handlers, true, createdPayload.status === "queued",
+  );
   const action = finalPayload.action;
   const failed = finalPayload.ok === false || Boolean(action && typeof action === "object" && !Array.isArray(action) && String((action as JsonObject).status ?? "") !== "succeeded" && !finalPayload.pending);
   return textToolResult(finalPayload, failed);
@@ -1557,7 +1676,9 @@ export async function handleOrdaxMcp(
     const args = (params.arguments ?? {}) as JsonObject;
     if (!specFor(name) || (allowedTools && !allowedTools.has(name))) return rpcError(id, -32601, "Tool not found", { tool: name });
     try {
-      const retryDigest = await verifiedMcpRetryDigest(sessionPayload, id, params);
+      const retryDigest = await verifiedMcpRetryDigest(
+        sessionPayload, id, params, handlers.verifiedNativeRetryClientId,
+      );
       const result = await callTool(request, name, args, handlers, allowedTools, retryDigest);
       if (result.isError !== true && result.structuredContent?.ok !== false && handlers.recordUsage) {
         // Shadow-only accounting records actual successful tools, never an

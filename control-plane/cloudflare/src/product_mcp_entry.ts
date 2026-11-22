@@ -19,7 +19,8 @@ import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { handleProductDevicePresence, PRODUCT_DEVICE_PRESENCE_PATH } from "./product_device_presence.ts";
 import { createCanonicalProductMcpReadHandlers } from "./product_mcp_reads.ts";
 import { handleProductOwnerMcpUsageRead, PRODUCT_OWNER_MCP_USAGE_PATH } from "./product_mcp_usage_read.ts";
-import { productAuthConfigured, productOwnerAccountSession, type ProductAuthEnv } from "./product_auth.ts";
+import { productAuthConfigured, productOwnerAccountSession,
+  requestScopedProductMcpAuthenticator, type ProductAuthEnv } from "./product_auth.ts";
 import {
   checkCanonicalProductPostgresReadiness,
   productPostgresConfigured,
@@ -81,7 +82,9 @@ import {
 } from "./product_github_webhook.ts";
 import {createForgeMcpGateway,FORGE_MCP_HOSTNAME} from "./forge_mcp_gateway.ts";
 
-type Env = ProductAuthEnv & ProductPostgresEnv;
+type Env = ProductAuthEnv & ProductPostgresEnv & {
+  FORGE_NATIVE_DELEGATION_ENABLED?: string;
+};
 
 // ChatGPT keeps the only public MCP identity on mcp.ordax.com.br. The
 // workers.dev hostname is a separate, path-restricted network ingress for the
@@ -188,6 +191,7 @@ const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_PROCESS_TOOLS,
   ...ATTESTED_DEVICE_NATIVE_EXECUTION_TOOLS,
 ]);
+const ATTESTED_PROJECT_ARTIFACT_TOOLS: ReadonlySet<string> = new Set(["artifacts_list", "artifact_preview"]);
 export const ATTESTED_PROJECT_NATIVE_TOOLS: ReadonlySet<string> = new Set([
   "terminal_exec", "process_start", "process_status", "process_list",
   "process_logs", "process_write_stdin", "process_stop",
@@ -214,6 +218,7 @@ export const PRODUCT_MCP_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   "ordax_action_list",
   ...ATTESTED_DEVICE_ACTION_TOOLS,
   ...ATTESTED_PROJECT_NATIVE_TOOLS,
+  ...ATTESTED_PROJECT_ARTIFACT_TOOLS,
   ...ATTESTED_PROJECT_BLENDER_TOOLS,
   ...ATTESTED_PROJECT_BROWSER_TOOLS,
   ...ATTESTED_SPECIAL_TOOLS,
@@ -235,6 +240,9 @@ type McpRoutingHint = Readonly<{
   toolName: string;
   explicitNonNullSpace: boolean;
   explicitProject: boolean;
+  // Correlation intent only. Runtime attestation + signed native client are
+  // checked independently before this becomes retry-correlation authority.
+  nativeSessionRequested: boolean;
 }>;
 
 async function mcpRoutingHint(request: Request): Promise<McpRoutingHint | null> {
@@ -248,9 +256,12 @@ async function mcpRoutingHint(request: Request): Promise<McpRoutingHint | null> 
   const name = body.params.name;
   if (typeof name !== "string") return null;
   const args = body.params.arguments;
+  const meta = body.params._meta;
   return {
     toolName: name,
     explicitProject: !!args && typeof args === "object" && Object.hasOwn(args, "project"),
+    nativeSessionRequested: Boolean(meta && typeof meta === "object"
+      && !Array.isArray(meta) && Object.hasOwn(meta, "ordax/native-session")),
     // Device-scoped commands never inherit a model-supplied Space. Detect
     // that denial without creating an Owner challenge for an impossible call.
     // Project-scoped commands still resolve their Space via the canonical RPC.
@@ -296,9 +307,11 @@ const CENTRAL_SESSION_REMEDIATION_ERRORS: ReadonlySet<string> = new Set([
   "central_owner_selection_in_progress",
   "central_session_revoked",
   "central_session_target_mismatch",
+  "central_session_unavailable",
 ]);
-const SESSION_CONFIRMATION_ATTEMPTS = 16;
-const SESSION_CONFIRMATION_INTERVAL_MS = 2000;
+// Preserve 32s of Runtime attestation. Early 2s checks remain responsive;
+// later 4s checks cut the maximum idle recovery SQL reads from 16 to 10.
+const SESSION_CONFIRMATION_DELAYS_MS = [2000, 2000, 2000, 2000, 4000, 4000, 4000, 4000, 4000, 4000] as const;
 function waitForSessionConfirmation(milliseconds: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
@@ -348,8 +361,8 @@ export async function resolveOrBootstrapAttestedSession(
     if (result.ok || result.error !== "central_session_unbound") return result;
   }
   const wait = deps.wait ?? waitForSessionConfirmation;
-  for (let attempt = 0; attempt < SESSION_CONFIRMATION_ATTEMPTS; attempt += 1) {
-    await wait(SESSION_CONFIRMATION_INTERVAL_MS);
+  for (const delayMs of SESSION_CONFIRMATION_DELAYS_MS) {
+    await wait(delayMs);
     result = await resolve(request.clone(), env);
     if (result.ok || result.error !== "central_session_unbound") return result;
   }
@@ -360,16 +373,12 @@ export async function resolveOrBootstrapAttestedSession(
 /** Injecting read handlers or a narrower tool projection is an internal test/composition seam, never an HTTP option. */
 export function createCanonicalProductMcpGateway(
   env: Env,
-  reads: ReadHandlers = createCanonicalProductMcpReadHandlers(env),
+  providedReads: ReadHandlers | undefined = undefined,
   discoveryFetch: typeof fetch = fetch,
   allowedTools: ReadonlySet<string> = PRODUCT_MCP_DIRECT_TOOLS,
   recoveryDependencies: SessionRecoveryDependencies = {},
   postgresReadiness: typeof checkCanonicalProductPostgresReadiness = checkCanonicalProductPostgresReadiness,
 ) {
-  const deniedHandlers: OrdaxMcpHandlers = {
-    ...reads,
-    createAction: async () => respond({ ok: false, error: "trusted_operation_required" }, 403),
-  };
   return async (
     request: Request,
     context?: { waitUntil(promise: Promise<unknown>): void },
@@ -481,13 +490,31 @@ export function createCanonicalProductMcpGateway(
         context ? { scheduleWake: (wake: Promise<void>) => context.waitUntil(wake) } : {});
     }
     if (url.pathname === "/mcp") {
+      // This closure belongs only to this HTTP request. Its clones share the
+      // same verified bearer, never another chat's token or auth outcome.
+      const authenticate = requestScopedProductMcpAuthenticator(request, env);
+      // The same request-scoped signed proof serves the MCP dispatcher and
+      // Central session coordination. PostgreSQL resolution remains fresh on
+      // every resolve/open and no OAuth decision crosses request boundaries.
+      const resolveSession: typeof resolveCentralSessionFromMcp =
+        recoveryDependencies.resolve ??
+        ((candidate, candidateEnv) => resolveCentralSessionFromMcp(candidate, candidateEnv, { authenticate }));
+      const openSession: typeof openCentralSessionFromMcp =
+        recoveryDependencies.open ??
+        ((candidate, candidateEnv, options) =>
+          openCentralSessionFromMcp(candidate, candidateEnv, { ...options, authenticate }));
+      const reads = providedReads ?? createCanonicalProductMcpReadHandlers(env, { authenticate });
+      const deniedHandlers: OrdaxMcpHandlers = {
+        ...reads,
+        createAction: async () => respond({ ok: false, error: "trusted_operation_required" }, 403),
+      };
       const routingHint = await mcpRoutingHint(request);
       const toolName = routingHint?.toolName ?? null;
       // This single request-owned scheduler serves SQL-committed action wakes
       // and device-attested session challenges. No second queue or authority.
       const wakeDependencies = context
-        ? { scheduleWake: (wake: Promise<void>) => context.waitUntil(wake) }
-        : {};
+        ? { scheduleWake: (wake: Promise<void>) => context.waitUntil(wake), authenticate }
+        : { authenticate };
       // ordax_session is already a safe authenticated read tool. Its only new
       // side effect is opening/renewing a short-lived, server-selected device
       // challenge from the hidden provider correlation marker. This is session
@@ -495,36 +522,14 @@ export function createCanonicalProductMcpGateway(
       let sessionDeviceBinding: OrdaxMcpHandlers["sessionDeviceBinding"];
       let sessionOwnerSelection: OrdaxMcpHandlers["sessionOwnerSelection"];
       if (toolName === "ordax_session") {
-        try {
-          const opened = await (recoveryDependencies.open ?? openCentralSessionFromMcp)(
-            request.clone(), env, wakeDependencies,
-          );
-          if (opened.ok) {
-            const raw = await opened.json() as Record<string, unknown>;
-            const challengeId = raw?.challenge_id;
-            const expiresAt = raw?.expires_at;
-            if (raw?.ok === true && raw.status === "awaiting_owner"
-                && isCanonicalUuid(challengeId) && typeof expiresAt === "string"
-                && Number.isFinite(Date.parse(expiresAt))
-                && Date.parse(expiresAt) > Date.now()) {
-              // The Owner challenge is a short-lived correlation code, not
-              // device routing authority. Only a separately signed Owner
-              // decision and enrolled Runtime confirmation can bind it.
-              sessionOwnerSelection = Object.freeze({
-                state: "awaiting_owner", challenge_id: challengeId.toLowerCase(),
-                expires_at: expiresAt, selection_location: "ordax_owner",
-                owner_confirmation_required: true, action_dispatched: false,
-              });
-            }
-          }
-        } catch { /* missing/malformed opening result never becomes authority */ }
-        // Project only the SAME durable binding authority that action routing
-        // resolves. A target-list candidate never becomes session authority.
-        try {
-          const resolved = await (recoveryDependencies.resolve ?? resolveCentralSessionFromMcp)(
-            request.clone(), env,
-          );
-          if (resolved.ok) {
+        // An already-attested binding needs one fresh SQL read, not an extra
+        // challenge/open RPC. The resolver revalidates OAuth and grants.
+        const resolveBinding = async (): Promise<boolean> => {
+          try {
+            const resolved = await resolveSession(
+              request.clone(), env,
+            );
+            if (!resolved.ok) return false;
             sessionDeviceBinding = Object.freeze({
               state: "bound",
               device_id: resolved.deviceId,
@@ -533,10 +538,42 @@ export function createCanonicalProductMcpGateway(
               dispatch_target_resolved: true,
               capability_authorization: "checked_per_action",
             });
+            return true;
+          } catch {
+            return false;
           }
-        } catch { /* authenticated identity still remains observable fail-closed */ }
+        };
+        if (!(await resolveBinding())) {
+          let openedBound = false;
+          try {
+            const opened = await openSession(
+              request.clone(), env, wakeDependencies,
+            );
+            if (opened.ok) {
+              const raw = await opened.json() as Record<string, unknown>;
+              openedBound = raw?.ok === true && raw.status === "bound";
+              const challengeId = raw?.challenge_id;
+              const expiresAt = raw?.expires_at;
+              if (raw?.ok === true && raw.status === "awaiting_owner"
+                  && isCanonicalUuid(challengeId) && typeof expiresAt === "string"
+                  && Number.isFinite(Date.parse(expiresAt))
+                  && Date.parse(expiresAt) > Date.now()) {
+                // Owner choice is only a correlation, never authority.
+                sessionOwnerSelection = Object.freeze({
+                  state: "awaiting_owner", challenge_id: challengeId.toLowerCase(),
+                  expires_at: expiresAt, selection_location: "ordax_owner",
+                  owner_confirmation_required: true, action_dispatched: false,
+                });
+              }
+            }
+          } catch { /* missing/malformed opening result never becomes authority */ }
+          // A bound opening is only a hint; recheck the PostgreSQL authority.
+          if (openedBound) await resolveBinding();
+        }
       }
 
+      let verifiedActionDeviceId: string | undefined;
+      let verifiedNativeRetryClientId: string | undefined;
       let handlers: OrdaxMcpHandlers = sessionDeviceBinding
         ? { ...deniedHandlers, sessionDeviceBinding }
         : sessionOwnerSelection
@@ -548,7 +585,7 @@ export function createCanonicalProductMcpGateway(
           ...handlers,
           async listRecentActions(query) {
             try {
-              const binding = await (recoveryDependencies.resolve ?? resolveCentralSessionFromMcp)(
+              const binding = await resolveSession(
                 historyRequest, env,
               );
               if (!binding.ok) {
@@ -590,6 +627,7 @@ export function createCanonicalProductMcpGateway(
         };
       } else if (toolName && allowedTools.has(toolName)
         && (ATTESTED_DEVICE_ACTION_TOOLS.has(toolName) || ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName)
+          || ATTESTED_PROJECT_ARTIFACT_TOOLS.has(toolName)
           || ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) || ATTESTED_PROJECT_BROWSER_TOOLS.has(toolName)
           || ATTESTED_SPECIAL_TOOLS.has(toolName))) {
         let trusted: AttestedMcpDevice | null = null;
@@ -598,7 +636,10 @@ export function createCanonicalProductMcpGateway(
         let ownerChallengeId: string | null = null;
         try {
           const resolved = await resolveOrBootstrapAttestedSession(
-            request.clone(), env, { ...recoveryDependencies, ...wakeDependencies },
+            request.clone(), env, {
+              ...recoveryDependencies, ...wakeDependencies,
+              resolve: resolveSession, open: openSession,
+            },
           );
           if (resolved.ok) {
             trusted = Object.freeze({
@@ -606,6 +647,13 @@ export function createCanonicalProductMcpGateway(
               clientId: resolved.clientId,
               deviceId: resolved.deviceId,
             });
+            verifiedActionDeviceId = trusted.deviceId;
+            // The SAME PostgreSQL Forge OAuth consent/instance authority
+            // and Runtime-attested device resolved this native correlation.
+            // The nonce alone never grants a retry or execution authority.
+            if (routingHint?.nativeSessionRequested
+              && env.FORGE_NATIVE_DELEGATION_ENABLED === "enabled")
+              verifiedNativeRetryClientId = trusted.clientId;
           } else {
             pending = resolved.error === "central_session_pending";
             if (CENTRAL_SESSION_REMEDIATION_ERRORS.has(resolved.error)) {
@@ -617,7 +665,10 @@ export function createCanonicalProductMcpGateway(
             }
           }
         } catch {
+          // No attested PostgreSQL resolution is possible; never present a
+          // transient authority outage as a missing grant or trust bypass.
           trusted = null;
+          trustFailure = "central_session_unavailable";
         }
         handlers = {
           ...reads,
@@ -627,8 +678,9 @@ export function createCanonicalProductMcpGateway(
               ? async () => respond({ ok: false, error: trustFailure,
                   ...(trustFailure === "central_session_owner_selection_required" && ownerChallengeId
                     ? { challenge_id: ownerChallengeId, action_dispatched: false } : {}),
-                }, 409)
-              : (ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName) || (ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) && routingHint?.explicitProject)
+                }, trustFailure === "central_session_unavailable" ? 503 : 409)
+              : (ATTESTED_PROJECT_NATIVE_TOOLS.has(toolName) || ATTESTED_PROJECT_ARTIFACT_TOOLS.has(toolName)
+                || (ATTESTED_PROJECT_BLENDER_TOOLS.has(toolName) && routingHint?.explicitProject)
                 || ATTESTED_PROJECT_BROWSER_TOOLS.has(toolName))
               ? createAttestedProjectActionHandler(env, trusted, wakeDependencies)
               : ATTESTED_PROJECT_CONTINUITY_TOOLS.has(toolName)
@@ -640,6 +692,8 @@ export function createCanonicalProductMcpGateway(
       }
       return handleOrdaxMcp(request, {
         ...handlers,
+        verifiedActionDeviceId,
+        verifiedNativeRetryClientId,
         waitForCompletion: (deviceId, requestId, remainingMs) =>
           waitProductActionCompletion(env, deviceId, requestId, remainingMs),
       }, allowedTools, context);

@@ -880,10 +880,12 @@ export async function enqueueProductAction(
     }
   }
   if (!recorded) throw new ProductPostgresError("product_postgres_invalid_response", 502);
-  // Only a committed queue operation may emit a non-authoritative wake.
-  // Even a replayed accepted enqueue is safe: the device must still claim
-  // the actual lease through PostgreSQL. A missing DO never changes the RPC.
-  if (recorded.ok && recorded.request_id) {
+  // New accepted enqueues and queued replays may still need a Runtime claim.
+  // Leased/running actions are already claimed; terminal actions cannot be
+  // claimed. Those replayed receipts require no additional advisory wake.
+  // A lost queued wake is recoverable by replay or periodic device claim.
+  const wakeEligible = recorded.replayed !== true || recorded.status === "queued";
+  if (recorded.ok && recorded.request_id && wakeEligible) {
     // Identical, single signalling path also serves device-attested session
     // challenges. No work or trust can be conveyed by this advisory message.
     await scheduleProductDeviceWake(env, input.deviceId, input.scheduleWake);

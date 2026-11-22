@@ -194,8 +194,9 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
       && (value.max_items === undefined || boundedInteger(value.max_items, 1, 1000));
   }
   if (action === "computer.screenshot") {
-    return keysOnly(value, ["mode"])
-      && (value.mode === undefined || value.mode === "desktop" || value.mode === "active_window");
+    return keysOnly(value, ["mode", "include_preview"])
+      && (value.mode === undefined || value.mode === "desktop" || value.mode === "active_window")
+      && (value.include_preview === undefined || typeof value.include_preview === "boolean");
   }
   if (action === "computer.clipboard_read") {
     return keysOnly(value, ["max_bytes"])

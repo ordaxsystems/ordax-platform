@@ -348,6 +348,7 @@ test("MCP discovery advertises core, computer control and promoted safe computer
     "computer_transfer_commit", "computer_transfer_abort",
     "computer_text_write", "computer_text_patch",
     "computer_directory_create", "computer_path_move", "computer_path_remove",
+    "artifacts_list", "artifact_preview",
     "blender_status", "blender_scene_snapshot", "blender_object_inspect",
     "blender_modeling_schema", "blender_start", "blender_transform",
     "blender_create_primitive", "blender_rig_create", "blender_apply_material", "blender_save",
@@ -370,6 +371,9 @@ test("MCP discovery advertises core, computer control and promoted safe computer
   assert.deepEqual((byName.get("ordax_surface_open") as any).inputSchema.required, ["device_id", "appId"]);
   assert.equal((byName.get("computer_windows") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_screenshot") as any).annotations.readOnlyHint, true);
+  assert.equal((byName.get("computer_screenshot") as any).inputSchema.properties.include_preview.type, "boolean");
+  assert.equal((byName.get("browser_screenshot") as any).inputSchema.properties.include_preview.type, "boolean");
+  assert.equal((byName.get("browser_screenshot") as any).inputSchema.required.includes("project"), true);
   assert.equal((byName.get("computer_clipboard_read") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_text_read") as any).annotations.readOnlyHint, true);
   assert.equal((byName.get("computer_click") as any).annotations.readOnlyHint, false);
@@ -637,8 +641,8 @@ test("session projects only the canonical Device-attested conversation binding",
     dispatch_target_resolved: true,
     capability_authorization: "checked_per_action",
   });
-  assert.equal(opened, 1);
-  assert.equal(resolved, 1);
+  assert.equal(opened, 0, "already-bound sessions never re-open a Device challenge");
+  assert.equal(resolved, 1, "one fresh SQL read revalidates OAuth and grants");
 });
 
 test("ordax_session exposes only pending Owner challenge correlation, never an auto-selected device", async () => {
@@ -789,16 +793,16 @@ test("native twenty-second heartbeat confirmation succeeds without a manual sess
   const confirmed = await resolveOrBootstrapAttestedSession(request("computer_text_read"), ENV, {
     resolve: async () => {
       checks++;
-      return checks < 13 ? { ok: false, error: "central_session_unbound" }
+      return waitedMs < 24000 ? { ok: false, error: "central_session_unbound" }
         : { ok: true, ownerUserId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             clientId: "product-client-123", deviceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" };
     },
     open: async () => { opens++; return Response.json({ ok: true, status: "pending" }, { status: 202 }); },
-    wait: async (milliseconds) => { assert.equal(milliseconds, 2000); waitedMs += milliseconds; },
+    wait: async (milliseconds) => { assert.ok([2000, 4000].includes(milliseconds)); waitedMs += milliseconds; },
   });
   assert.equal(confirmed.ok, true);
   assert.equal(waitedMs, 24000, "covers the actual 20s heartbeat plus confirmation latency");
-  assert.equal(checks, 13);
+  assert.equal(checks, 9, "8 recovery SQL resolves rather than 12 at 24 seconds");
   assert.equal(opens, 1, "never duplicates the device challenge");
 });
 
@@ -828,7 +832,48 @@ test("bound-open race still requires canonical SQL confirmation, never trusts a 
   });
   assert.equal(denied.ok, false);
   assert.equal(denied.error, "central_session_pending");
-  assert.equal(failures, 18, "opening a bound ticket is never sufficient to authorize a device");
+  assert.equal(failures, 12, "opening a bound ticket is never sufficient to authorize a device");
+});
+
+test("session recovery conserves SQL reads across a full 32-second pending window", async () => {
+  let checks = 0, elapsed = 0;
+  const intervals: number[] = [];
+  const result = await resolveOrBootstrapAttestedSession(request("computer_windows"), ENV, {
+    resolve: async () => {
+      checks++;
+      return { ok: false as const, error: "central_session_unbound" };
+    },
+    open: async () => Response.json({ ok: true, status: "pending" }, { status: 202 }),
+    wait: async (milliseconds) => { elapsed += milliseconds; intervals.push(milliseconds); },
+  });
+  assert.deepEqual(result, { ok: false, error: "central_session_pending" });
+  assert.equal(elapsed, 32000, "preserves the original attestation window");
+  assert.deepEqual(intervals, [2000, 2000, 2000, 2000, 4000, 4000, 4000, 4000, 4000, 4000]);
+  assert.equal(checks, 11, "10 recovery SQL reads instead of 16, plus initial read");
+});
+
+test("session introspection requires SQL confirmation even when an open reports bound", async () => {
+  const { handlers } = fakeHandlers();
+  let checks = 0, opens = 0;
+  const gateway = createCanonicalProductMcpGateway(
+    ENV, handlers, fetch, PRODUCT_MCP_DIRECT_TOOLS, {
+      resolve: async () => {
+        checks++;
+        return { ok: false as const, error: "central_session_unbound" };
+      },
+      open: async () => {
+        opens++;
+        return Response.json({ ok: true, status: "bound",
+          device_id: "33333333-3333-4333-8333-333333333333" });
+      },
+    },
+  );
+  const response = await gateway(request("ordax_session"));
+  const status = (await response.json() as any).result.structuredContent;
+  assert.equal(status.authenticated, true);
+  assert.equal("device_binding" in status, false, "opening hint grants nothing");
+  assert.equal(checks, 2, "same SQL authority rechecks post-open race");
+  assert.equal(opens, 1);
 });
 
 test("attested recovery never retries revoked, missing-marker or rejected challenges", async () => {
@@ -1015,7 +1060,7 @@ test("unclassified Central session failure remains fail-closed and generic", asy
   const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
     new Set(["computer_access_status"]), {
       resolve: async () => ({ ok: false, error: "central_session_unbound" }),
-      open: async () => Response.json({ ok: false, error: "central_session_unavailable" }, { status: 503 }),
+      open: async () => Response.json({ ok: false, error: "central_session_internal_error" }, { status: 503 }),
       wait: async () => { throw new Error("must_not_wait"); },
     });
   const response = await gateway(request("computer_access_status",
@@ -1023,6 +1068,42 @@ test("unclassified Central session failure remains fail-closed and generic", asy
   const body = await response.json() as any;
   assert.equal(body.result.isError, true);
   assert.equal(body.result.structuredContent.error, "trusted_operation_required");
+});
+
+test("PostgreSQL session outage is explicit, retry-delayed and never dispatches", async () => {
+  const modes = ["resolve_unavailable", "open_unavailable", "resolve_throws"] as const;
+  for (const mode of modes) {
+    const { handlers, calls } = fakeHandlers();
+    let opened = 0, waited = 0;
+    const gateway = createCanonicalProductMcpGateway(ENV, handlers, fetch,
+      new Set(["computer_access_status"]), {
+        resolve: async () => {
+          if (mode === "resolve_throws") throw new Error("private database connection details");
+          return mode === "resolve_unavailable"
+            ? { ok: false as const, error: "central_session_unavailable" }
+            : { ok: false as const, error: "central_session_unbound" };
+        },
+        open: async () => {
+          opened++;
+          return Response.json({ ok: false, error: "central_session_unavailable" }, { status: 503 });
+        },
+        wait: async () => { waited++; },
+      });
+    const response = await gateway(request("computer_access_status",
+      { device_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" }));
+    const body = await response.json() as any;
+    assert.equal(body.result.isError, true, mode);
+    assert.deepEqual(body.result.structuredContent, {
+      ok: false, error: "central_session_unavailable", retryable: true,
+      retry_after_seconds: 300, action_dispatched: false,
+      required_action: "restore_platform_postgres_connection",
+    }, mode);
+    assert.equal(opened, mode === "open_unavailable" ? 1 : 0, mode);
+    assert.equal(waited, 0, mode);
+    assert.equal(calls.targets, 0, mode);
+    assert.equal(calls.getAction, 0, mode);
+    assert.equal(JSON.stringify(body).includes("private database connection"), false);
+  }
 });
 
 test("pending device challenge does not enqueue any action or expand grants", async () => {
@@ -1041,8 +1122,8 @@ test("pending device challenge does not enqueue any action or expand grants", as
   assert.equal(body.result.isError, true);
   assert.equal(body.result.structuredContent.error, "central_session_pending");
   assert.equal(opens, 1);
-  assert.equal(checks, 17);
-  assert.equal(waits, 16);
+  assert.equal(checks, 11, "one initial and ten bounded recovery reads");
+  assert.equal(waits, 10);
   assert.equal(calls.targets, 0);
   assert.equal(calls.getAction, 0);
 });

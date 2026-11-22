@@ -94,7 +94,20 @@ class ProductAuthContractTests(unittest.TestCase):
         mcp = (
             self.root / "control-plane" / "cloudflare" / "src" / "product_mcp_reads.ts"
         ).read_text(encoding="utf-8")
-        self.assertIn("authenticateProductMcpClientRequest(request, env)", mcp)
+        # A request-local, signed JWT proof may be reused across cloned MCP
+        # operations. The default fallback still authenticates independently,
+        # and the gateway creates a new proof for every incoming request.
+        self.assertIn(
+            "const authenticate = dependencies.authenticate ?? authenticateProductMcpClientRequest",
+            mcp,
+        )
+        self.assertIn("const identity = await authenticate(request, env)", mcp)
+        self.assertIn("requestScopedProductMcpAuthenticator(request, env)", self.worker)
+        self.assertIn('candidate.headers.get("authorization") !== authorization', self.auth)
+        self.assertIn(
+            'identity.expiresAt <= Math.floor(Date.now() / 1000) - CLOCK_SKEW_SECONDS',
+            self.auth,
+        )
         self.assertIn("client_id: identity.clientId", mcp)
 
     def test_owner_session_never_mints_grant_or_dispatches_action(self) -> None:

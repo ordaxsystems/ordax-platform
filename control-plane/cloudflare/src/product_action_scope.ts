@@ -49,6 +49,8 @@ export function deviceBlenderAction(projectAction: string): string | null {
   return PROJECT_BLENDER_ACTIONS.has(projectAction)
     ? projectAction.replace("blender.live_", "computer.blender_") : null;
 }
+/** Read-only image and metadata actions confined to an attested Project Artifacts root. */
+export const PROJECT_ARTIFACT_ACTIONS = new Set<string>(["artifacts.list", "artifact.preview"]);
 
 export const PROJECT_CONTINUITY_ACTIONS = new Set<string>([
   "agent.project_briefing", "continuity.get", "continuity.update", "handoff.create", "handoff.get",

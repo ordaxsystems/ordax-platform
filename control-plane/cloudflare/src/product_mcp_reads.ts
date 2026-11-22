@@ -9,15 +9,17 @@ import {
   type ProductPostgresEnv,
   type ProductMcpUsageRecording,
 } from "./product_postgres_store.ts";
-import { ensureProductMcpTargetDiscovery } from "./product_mcp_discovery_store.ts";
+import { discoverAndListProductMcpTargets, ensureProductMcpTargetDiscovery } from "./product_mcp_discovery_store.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 
 type ReadEnv = ProductAuthEnv & ProductPostgresEnv;
 type ReadHandlers = Pick<OrdaxMcpHandlers, "session" | "targets" | "getAction" | "recordUsage" | "usageFingerprintKey">;
 type ReadDependencies = {
+  authenticate?: typeof authenticateProductMcpClientRequest;
   listTargets?: typeof listCanonicalProductTargets;
   getAction?: typeof getProductAction;
   ensureDiscovery?: typeof ensureProductMcpTargetDiscovery;
+  discoverTargets?: typeof discoverAndListProductMcpTargets;
   recordUsage?: (env: ReadEnv, input: ProductMcpUsageRecording) => ReturnType<typeof recordProductMcpUsage>;
 };
 
@@ -95,13 +97,15 @@ export function createCanonicalProductMcpReadHandlers(
   env: ReadEnv,
   dependencies: ReadDependencies = {},
 ): ReadHandlers {
+  const authenticate = dependencies.authenticate ?? authenticateProductMcpClientRequest;
   const readTargets = dependencies.listTargets ?? listCanonicalProductTargets;
   const readAction = dependencies.getAction ?? getProductAction;
   const ensureDiscovery = dependencies.ensureDiscovery ?? ensureProductMcpTargetDiscovery;
+  const discoverTargets = dependencies.discoverTargets ?? discoverAndListProductMcpTargets;
   const recordUsage = dependencies.recordUsage ?? recordProductMcpUsage;
   return {
     async session(request) {
-      const identity = await authenticateProductMcpClientRequest(request, env);
+      const identity = await authenticate(request, env);
       if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
       return json({
         ok: true,
@@ -114,21 +118,34 @@ export function createCanonicalProductMcpReadHandlers(
       });
     },
     async targets(request) {
-      const identity = await authenticateProductMcpClientRequest(request, env);
+      const identity = await authenticate(request, env);
       if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
       try {
-        const discovery = await ensureDiscovery(env, identity.ownerUserId, identity.clientId);
-        if (!discovery.ok) {
-          if (discovery.error === "product_mcp_oauth_consent_required") {
-            return json({ ok: false, error: discovery.error }, 403);
+        let result: Record<string, unknown>;
+        if (dependencies.ensureDiscovery || dependencies.listTargets) {
+          // Existing deterministic contract seams remain; production uses
+          // the single authoritative SQL statement below.
+          const discovery = await ensureDiscovery(env, identity.ownerUserId, identity.clientId);
+          if (!discovery.ok) {
+            if (discovery.error === "product_mcp_oauth_consent_required") {
+              return json({ ok: false, error: discovery.error }, 403);
+            }
+            return json({ ok: false, error: "product_target_discovery_grant_failed" }, 403);
           }
-          return json({ ok: false, error: "product_target_discovery_grant_failed" }, 403);
+          result = await readTargets(env, {
+            ownerUserId: identity.ownerUserId,
+            clientKind: identity.clientKind,
+            clientId: identity.clientId,
+          });
+        } else {
+          const combined = await discoverTargets(env, identity.ownerUserId, identity.clientId);
+          if (combined.phase === "discovery") {
+            const error = combined.error === "product_mcp_oauth_consent_required"
+              ? combined.error : "product_target_discovery_grant_failed";
+            return json({ ok: false, error }, 403);
+          }
+          result = combined as Record<string, unknown>;
         }
-        const result = await readTargets(env, {
-          ownerUserId: identity.ownerUserId,
-          clientKind: identity.clientKind,
-          clientId: identity.clientId,
-        });
         if (result?.ok === false && result.error === "product_owner_auth_ineligible") {
           return json({ ok: false, error: "product_owner_auth_ineligible" }, 403);
         }
@@ -141,7 +158,7 @@ export function createCanonicalProductMcpReadHandlers(
       }
     },
     async getAction(request, requestId) {
-      const identity = await authenticateProductMcpClientRequest(request, env);
+      const identity = await authenticate(request, env);
       if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
       if (!isCanonicalUuid(requestId)) return json({ ok: false, error: "product_request_id_invalid" }, 400);
       try {

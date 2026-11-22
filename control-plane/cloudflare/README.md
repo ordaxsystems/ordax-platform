@@ -49,6 +49,25 @@ R2 é armazenamento de **bytes** e não uma fonte alternativa de metadados de ne
 
 O único Durable Object registrado no Worker publicado é `ProductDeviceWake`, usado para notificação advisory. A fila de jobs, os leases e o estado de execução permanecem no PostgreSQL. `scheduled` executa a limpeza de **métricas de uso MCP** via PostgreSQL, não a rotina de retenção de artifacts anteriormente aposentada.
 
+### Reutilizacao segura de metadados no Worker
+
+`src/mcp_http.ts` monta o catalogo publico de ferramentas sob demanda e reutiliza
+descritores estaticos e lookup por nome. O allowlist da operacao continua sendo
+filtrado em cada chamada. `src/product_auth.ts` reutiliza somente importacoes
+WebCrypto de chaves **publicas** JWKS, por identidade de objeto e algoritmo.
+A renovacao das chaves substitui os objetos e importa a nova chave; falhas de
+importacao nao ficam armazenadas. Token, assinatura, claims, expiracao e
+autorizacao continuam verificados individualmente em cada requisicao.
+A mesma verificacao OAuth tambem e reutilizada pelas operacoes Central
+resolve/open no ambito da requisicao MCP, por meio do autenticador
+request-scoped existente; a resolucao SQL, os grants e a revogacao
+permanecem atuais e nunca sao compartilhados entre conversas.
+
+**Nao** ativar cache de SQL sensivel no Hyperdrive nem cache de sessoes, grants,
+leases, revogacoes ou estado vivo. Sinais wake nao dispensam claim autorizada
+no PostgreSQL. Comparar CPU e SQL reais com janelas e carga equivalentes
+antes de atribuir reducoes de consumo ao codigo.
+
 ## Segurança obrigatória
 
 - JWT assinado, issuer/audience/JWKS corretos, cliente OAuth identificado **após** a verificação da assinatura; sem confiança em headers, query, body ou argumentos do modelo como fonte de identidade.

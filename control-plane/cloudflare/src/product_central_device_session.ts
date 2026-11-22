@@ -1,5 +1,6 @@
-import { authenticateProductMcpClientRequest, type ProductAuthEnv } from "./product_auth.ts";
+import { authenticateProductMcpClientRequest, type ProductAuthEnv, type VerifiedProductMcpClient } from "./product_auth.ts";
 import { scheduleProductDeviceWake } from "./product_device_wake.ts";
+import { resolveForgeMcpInstance } from "./forge_mcp_store.ts";
 import { validChatGptSessionMarker } from "./product_central_admission.ts";
 import {
   confirmCentralDeviceSession,
@@ -12,7 +13,10 @@ import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { MAX_MCP_REQUEST_BYTES, validMcpToolCallEnvelope } from "./mcp_http.ts";
 
-type Env = ProductAuthEnv & ProductPostgresEnv;
+type Env = ProductAuthEnv & ProductPostgresEnv & {
+  // Rollout must be explicitly approved. Missing config fails closed.
+  FORGE_NATIVE_DELEGATION_ENABLED?: string;
+};
 type Json = Record<string, unknown>;
 
 export const PRODUCT_DEVICE_CENTRAL_SESSION_PATH = "/v3/product/device/central-session";
@@ -31,19 +35,72 @@ async function sha256(value: string): Promise<string> {
 }
 
 /**
- * Read the ChatGPT correlation marker from a tools/call request. This value is
- * NEVER authority by itself. It becomes useful only after an exact Product
- * OAuth client opens a challenge and the exact Product device confirms it.
+ * A correlation marker NEVER grants authority. Product OAuth + a fresh
+ * PostgreSQL challenge + Runtime confirmation + per-action grants are always
+ * required. The existing ChatGPT marker retains its original behavior.
+ *
+ * Forge Native uses the SAME canonical session/queue/receipt pipeline, but a
+ * distinct, app-owned correlation namespace; it must not forge openai/session
+ * or create an alternate device executor. Explicit rollout and existing
+ * PostgreSQL Forge OAuth consent/instance are required before a challenge.
  */
-export async function centralSessionMarker(request: Request): Promise<string | null> {
-  // The session marker is correlation data, but parsing it still occurs before
-  // JSON-RPC dispatch. Enforce the exact same stream bound as the MCP handler.
+type NativeClientProof = Extract<VerifiedProductMcpClient, { ok: true }>;
+type NativeClientAuthorization = typeof resolveForgeMcpInstance;
+type CentralMarkerContext = Readonly<{
+  marker: string | null;
+  nativeClientProof: NativeClientProof | null;
+}>;
+
+/** A verified native identity is reusable only in this request's open/resolve
+ * call. Nothing survives the request or substitutes for the fresh SQL check. */
+async function centralSessionContext(
+  request: Request, env?: Env,
+  authorizeNativeClient: NativeClientAuthorization = resolveForgeMcpInstance,
+  authenticateMcp: typeof authenticateProductMcpClientRequest = authenticateProductMcpClientRequest,
+): Promise<CentralMarkerContext> {
+  const denied = { marker: null, nativeClientProof: null } as const;
   const body = await readBoundedJsonObject(request.clone(), MAX_MCP_REQUEST_BYTES);
-  if (!validMcpToolCallEnvelope(body)) return null;
+  if (!validMcpToolCallEnvelope(body)) return denied;
   const meta = body.params._meta;
-  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
-  const marker = (meta as Json)["openai/session"];
-  return validChatGptSessionMarker(marker) ? marker : null;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return denied;
+  const native = (meta as Json)["ordax/native-session"];
+  const chatgpt = (meta as Json)["openai/session"];
+  // No ambiguous identity namespaces or shadow fallback.
+  if (native !== undefined) {
+    if (chatgpt !== undefined || !env
+      || env.FORGE_NATIVE_DELEGATION_ENABLED !== "enabled"
+      || typeof native !== "string"
+      || !/^[A-Za-z0-9_-]{43}$/.test(native)) return denied;
+    const identity = await authenticateMcp(request.clone(), env);
+    if (!identity.ok) return denied;
+    // Reuse the EXACT PostgreSQL Forge consent/instance authority already
+    // serving the Forge gateway. No Worker-pinned OAuth ID or second grant.
+    // The idempotent Forge-instance binding NEVER selects a device or grants
+    // computer execution; the Runtime attestation and grants remain mandatory.
+    let forge;
+    try {
+      forge = await authorizeNativeClient(env, {
+        ownerUserId: identity.ownerUserId, clientId: identity.clientId,
+      });
+    } catch { return denied; }
+    if (forge?.ok !== true || !isCanonicalUuid(forge.instance_id))
+      return denied;
+    // Domain-separate the SQL hash from ChatGPT conversation correlations.
+    // The nonce is generated only by the native Forge Core and never shown in
+    // a tool result, App renderer, device selection or URL.
+    return { marker: "forge-native-v1:" + native, nativeClientProof: identity };
+  }
+  return {
+    marker: validChatGptSessionMarker(chatgpt) ? chatgpt : null,
+    nativeClientProof: null,
+  };
+}
+
+export async function centralSessionMarker(
+  request: Request, env?: Env,
+  deps: { authorizeNativeClient?: NativeClientAuthorization } = {},
+): Promise<string | null> {
+  return (await centralSessionContext(request, env, deps.authorizeNativeClient)).marker;
 }
 
 export async function openCentralSessionFromMcp(
@@ -51,19 +108,24 @@ export async function openCentralSessionFromMcp(
   env: Env,
   deps: {
     open?: typeof openCentralDeviceSession;
+    authorizeNativeClient?: NativeClientAuthorization;
+    authenticate?: typeof authenticateProductMcpClientRequest;
     signalWake?: typeof scheduleProductDeviceWake;
     scheduleWake?: (wake: Promise<void>) => void;
   } = {},
 ): Promise<Response> {
-  const marker = await centralSessionMarker(request);
-  if (!marker) return json({ ok: false, error: "central_session_marker_required" }, 409);
-  const identity = await authenticateProductMcpClientRequest(request, env);
+  const authenticate = deps.authenticate ?? authenticateProductMcpClientRequest;
+  const context = await centralSessionContext(request, env, deps.authorizeNativeClient, authenticate);
+  if (!context.marker) return json({ ok: false, error: "central_session_marker_required" }, 409);
+  // Forge Native already checked this exact signed OAuth client while
+  // validating its nonce; do not verify the same JWT twice in one request.
+  const identity = context.nativeClientProof ?? await authenticate(request, env);
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
   try {
     const result = await (deps.open ?? openCentralDeviceSession)(env, {
       ownerUserId: identity.ownerUserId,
       clientId: identity.clientId,
-      sessionSha256: await sha256(marker),
+      sessionSha256: await sha256(context.marker),
     });
     if (result.ok !== true) {
       const code = typeof result.error === "string" ? result.error : "central_session_unavailable";
@@ -96,17 +158,22 @@ export async function openCentralSessionFromMcp(
 export async function resolveCentralSessionFromMcp(
   request: Request,
   env: Env,
-  deps: { resolve?: typeof resolveCentralDeviceSession } = {},
+  deps: {
+    resolve?: typeof resolveCentralDeviceSession;
+    authorizeNativeClient?: NativeClientAuthorization;
+    authenticate?: typeof authenticateProductMcpClientRequest;
+  } = {},
 ) {
-  const marker = await centralSessionMarker(request);
-  if (!marker) return { ok: false as const, error: "central_session_marker_required" };
-  const identity = await authenticateProductMcpClientRequest(request, env);
+  const authenticate = deps.authenticate ?? authenticateProductMcpClientRequest;
+  const context = await centralSessionContext(request, env, deps.authorizeNativeClient, authenticate);
+  if (!context.marker) return { ok: false as const, error: "central_session_marker_required" };
+  const identity = context.nativeClientProof ?? await authenticate(request, env);
   if (!identity.ok) return { ok: false as const, error: identity.error };
   try {
     const result = await (deps.resolve ?? resolveCentralDeviceSession)(env, {
       ownerUserId: identity.ownerUserId,
       clientId: identity.clientId,
-      sessionSha256: await sha256(marker),
+      sessionSha256: await sha256(context.marker),
     });
     if (result.ok !== true || !isCanonicalUuid(result.device_id)) {
       return { ok: false as const, error: result.error ?? "central_session_unbound" };
