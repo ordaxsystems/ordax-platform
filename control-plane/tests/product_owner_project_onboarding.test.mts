@@ -266,7 +266,9 @@ test("Project creation cannot smuggle repository identity, grants or metadata", 
 test("Project device binding intent is Owner-confirmed but never accepts local identity or grants", async () => {
   let observed: unknown = null;
   const now = Date.parse("2026-11-13T23:50:00.000Z");
+  const wokeDevices: string[] = [];
   const handler = createOwnerProjectOnboardingHandler(BINDING_ENV, {
+    wake: async (_env, deviceId) => { wokeDevices.push(deviceId); },
     authenticate: authenticated,
     randomUUID: () => INTENT,
     now: () => now,
@@ -297,6 +299,7 @@ test("Project device binding intent is Owner-confirmed but never accepts local i
     intentId: INTENT,
     expiresAt: "2026-11-13T23:55:00.000Z",
   });
+  assert.deepEqual(wokeDevices, [DEVICE], "one wake follows the committed SQL intent");
   assert.deepEqual(await response.json(), {
     ok: true,
     schema: "ordax.owner-project-device-binding-intent/1",
@@ -306,6 +309,22 @@ test("Project device binding intent is Owner-confirmed but never accepts local i
     expires_at: "2026-11-13T23:55:00.000Z",
     next_state: "awaiting_device_confirmation",
   });
+});
+
+test("Project device binding denies SQL-invalid intent without notifying the Device", async () => {
+  const wokeDevices: string[] = [];
+  const handler = createOwnerProjectOnboardingHandler(BINDING_ENV, {
+    authenticate: authenticated,
+    randomUUID: () => INTENT,
+    createBindingIntent: async () => ({ ok: false, error: "device_not_owned" }),
+    wake: async (_env, deviceId) => { wokeDevices.push(deviceId); },
+  });
+  const response = await handler(bindingIntentRequest({
+    project_id: PROJECT, device_id: DEVICE, confirm: "bind_project_device",
+  }));
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { ok: false, error: "device_not_owned" });
+  assert.deepEqual(wokeDevices, [], "an invalid or rejected SQL intent cannot signal a Device");
 });
 
 test("Project device binding intent rejects browser-supplied local refs, capability ceilings and provider identity", async () => {
