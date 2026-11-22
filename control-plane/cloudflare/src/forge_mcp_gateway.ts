@@ -33,6 +33,10 @@ const FORGE_RESOURCE_METADATA_PATH="/.well-known/oauth-protected-resource";
 const MAX_BODY=512*1024;
 const MAX_RESULT=384*1024;
 const ACTION_TTL_MS=2*60*1000;
+// The native Forge posts presence every 30 s. After two missed heartbeats
+// plus network jitter, the stored SQL "online" bit is not live proof.
+const INSTANCE_PRESENCE_TTL_MS=75_000;
+const INSTANCE_CLOCK_SKEW_MS=15_000;
 const DEFAULT_WAIT_MS=8000;
 const TERMINAL=new Set(["succeeded","failed","cancelled","expired"]);
 const TOOL_NAME=/^forge_[a-z0-9_]{2,112}$/;
@@ -140,6 +144,14 @@ function nativeOwner(identity:Awaited<ReturnType<typeof authenticateProductReque
   if(identity.clientId===null||!isCanonicalUuid(identity.clientId))
     return {ok:false,error:"forge_native_oauth_client_required",status:403};
   return {ok:true,ownerUserId:identity.subjectId};
+}
+function instancePresenceFresh(resolution:ForgeInstanceResolution,nowMs:number):boolean{
+  if(resolution.ok!==true||resolution.online!==true||
+     typeof resolution.last_seen_at!=="string")return false;
+  const observedAt=Date.parse(resolution.last_seen_at);
+  if(!Number.isFinite(observedAt)||!Number.isFinite(nowMs))return false;
+  const age=nowMs-observedAt;
+  return age>=-INSTANCE_CLOCK_SKEW_MS&&age<=INSTANCE_PRESENCE_TTL_MS;
 }
 function toolFromCatalog(resolution:ForgeInstanceResolution,name:string):ForgeTool|null{
   if(!resolution.ok||!validForgeCatalog(resolution.catalog))return null;
@@ -443,7 +455,8 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
     if(message.method==="tools/list"){
       const resolution=await resolveFor(identity,store);
       const tools=[CONNECTION_TOOL,ACTION_STATUS_TOOL,
-        ...(resolution.ok&&validForgeCatalog(resolution.catalog)?resolution.catalog:[])];
+        ...(resolution.ok&&instancePresenceFresh(resolution,now())&&
+           validForgeCatalog(resolution.catalog)?resolution.catalog:[])];
       return rpcResult(id,{tools});
     }
     if(message.method!=="tools/call")return rpcError(id,-32601,"Method not found");
@@ -469,7 +482,10 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
         ok:resolution.ok,
         ...(resolution.ok?{
           instance_id:resolution.instance_id,display_name:resolution.display_name,
-          app_version:resolution.app_version,online:resolution.online,
+          app_version:resolution.app_version,
+          online:instancePresenceFresh(resolution,now()),
+          presence_status:resolution.online!==true?"offline":
+            instancePresenceFresh(resolution,now())?"live":"heartbeat_stale",
           last_seen_at:resolution.last_seen_at,catalog_digest:resolution.catalog_digest,
         }:{error:resolution.error,candidate_count:resolution.candidate_count??0}),
       },!resolution.ok));
@@ -477,6 +493,10 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
     if(!resolution.ok||!isCanonicalUuid(resolution.instance_id)){
       return rpcResult(id,toolResult({ok:false,error:resolution.error??"forge_instance_unavailable"},true));
     }
+    // A stale persisted online bit must not queue actions for an absent
+    // executor. Existing request receipts remain readable by request_id.
+    if(!instancePresenceFresh(resolution,now()))
+      return rpcResult(id,toolResult({ok:false,error:"forge_instance_offline"},true));
     const tool=toolFromCatalog(resolution,name);
     if(!tool)return rpcError(id,-32602,"Unknown Forge tool");
     if(!shallowSchemaAllows(tool.inputSchema,args))

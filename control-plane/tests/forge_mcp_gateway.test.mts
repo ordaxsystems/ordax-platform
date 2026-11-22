@@ -41,9 +41,9 @@ function ownerIdentity(clientId:string|null=null){
     issuer:env.PRODUCT_AUTH_ISSUER,audience:"authenticated",expiresAt:4102444800,
     clientId,role:"authenticated"});
 }
-function resolution(){
+function resolution(lastSeenAt:string=new Date().toISOString()){
   return {ok:true,instance_id:INSTANCE,display_name:"Forge local",app_version:"0.2.0",
-    catalog:CATALOG,catalog_digest:"a".repeat(64),online:true,last_seen_at:new Date().toISOString()};
+    catalog:CATALOG,catalog_digest:"a".repeat(64),online:true,last_seen_at:lastSeenAt};
 }
 
 test("Forge catalog validator accepts the App-owned MCP projection and rejects direct GPT send",()=>{
@@ -74,6 +74,59 @@ test("Forge MCP tools/list projects the instance catalog without duplicating it 
   const body:any=await response.json();
   const names=body.result.tools.map((x:any)=>x.name);
   assert.deepEqual(names,["forge_connection_status","forge_action_status","forge_projects_list"]);
+});
+
+test("Forge status and tool execution require recent physical executor heartbeat",async()=>{
+  const clock=Date.parse("2026-11-22T20:00:00.000Z");
+  const cases=[
+    {name:"fresh",age:0,stored:true,online:true,reason:"live"},
+    {name:"within TTL",age:75_000,stored:true,online:true,reason:"live"},
+    {name:"stale after TTL",age:75_001,stored:true,online:false,reason:"heartbeat_stale"},
+    {name:"stale long ago",age:10*60_000,stored:true,online:false,reason:"heartbeat_stale"},
+    {name:"explicit offline",age:0,stored:false,online:false,reason:"offline"},
+    {name:"minor future clock drift",age:-15_000,stored:true,online:true,reason:"live"},
+    {name:"excessive future timestamp",age:-15_001,stored:true,online:false,reason:"heartbeat_stale"},
+  ];
+  for(const scenario of cases){
+    let enqueued=0;
+    const presence={...resolution(),
+      online:scenario.stored,last_seen_at:new Date(clock-scenario.age).toISOString()};
+    const gateway=createForgeMcpGateway(env,{
+      authenticateMcp:mcpIdentity as any,
+      resolve:async()=>presence,now:()=>clock,
+      randomUUID:()=> "66666666-6666-4666-8666-666666666666",
+      enqueue:async()=>{enqueued++;return {
+        ok:true,request_id:REQUEST,effect_id:EFFECT,status:"queued",
+      };},
+      getAction:async()=>({ok:true,request_id:REQUEST,
+        status:"succeeded",result:{projects:[]}}),
+    });
+    const status=await gateway(request({jsonrpc:"2.0",id:1,method:"tools/call",
+      params:{name:"forge_connection_status",arguments:{}}}));
+    const info:any=(await status.json()).result.structuredContent;
+    assert.equal(info.online,scenario.online,scenario.name);
+    assert.equal(info.presence_status,scenario.reason,scenario.name);
+    assert.equal(info.last_seen_at,presence.last_seen_at,scenario.name);
+
+    const list=await gateway(request({jsonrpc:"2.0",id:2,method:"tools/list",params:{}}));
+    const names=(await list.json() as any).result.tools.map((tool:any)=>tool.name);
+    assert.equal(names.includes("forge_projects_list"),scenario.online,scenario.name);
+    if(!scenario.online){
+      const call=await gateway(request({jsonrpc:"2.0",id:3,method:"tools/call",
+        params:{name:"forge_projects_list",arguments:{}}}));
+      const result:any=(await call.json()).result;
+      assert.equal(result.isError,true,scenario.name);
+      assert.equal(result.structuredContent.error,"forge_instance_offline",scenario.name);
+      assert.equal(enqueued,0,"offline Forge cannot enqueue new work");
+    }
+  }
+  const invalidGateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,now:()=>clock,
+    resolve:async()=>({...resolution(),last_seen_at:"invalid"}),
+  });
+  const invalid=await invalidGateway(request({jsonrpc:"2.0",id:4,method:"tools/call",
+    params:{name:"forge_connection_status",arguments:{}}}));
+  assert.equal((await invalid.json() as any).result.structuredContent.online,false);
 });
 
 test("Forge MCP read call uses a fresh Platform receipt and returns the Forge result",async()=>{
@@ -184,7 +237,7 @@ test("Forge MCP pending action wait uses bounded Supabase reads with final deadl
   const sleeps:number[]=[];
   const gateway=createForgeMcpGateway(env,{
     authenticateMcp:mcpIdentity as any,
-    resolve:async()=>resolution(),
+    resolve:async()=>resolution(new Date(0).toISOString()),
     randomUUID:()=> "66666666-6666-4666-8666-666666666666",
     now:()=>clock,
     sleep:async(ms:number)=>{sleeps.push(ms);clock+=ms;},
@@ -211,7 +264,7 @@ test("Forge MCP wait returns terminal receipt promptly and reads at the deadline
     const sleeps:number[]=[];
     const gateway=createForgeMcpGateway(env,{
       authenticateMcp:mcpIdentity as any,
-      resolve:async()=>resolution(),
+      resolve:async()=>resolution(new Date(0).toISOString()),
       randomUUID:()=> "66666666-6666-4666-8666-666666666666",
       now:()=>clock,
       sleep:async(ms:number)=>{sleeps.push(ms);clock+=ms;},
@@ -236,7 +289,7 @@ test("Forge MCP aborts status polling on DB errors without false pending",async(
   let reads=0,sleeps=0;
   const gateway=createForgeMcpGateway(env,{
     authenticateMcp:mcpIdentity as any,
-    resolve:async()=>resolution(),
+    resolve:async()=>resolution(new Date(0).toISOString()),
     randomUUID:()=> "66666666-6666-4666-8666-666666666666",
     now:()=>0,
     sleep:async()=>{sleeps++;},
