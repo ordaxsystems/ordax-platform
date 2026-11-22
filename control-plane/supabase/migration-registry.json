@@ -1533,6 +1533,18 @@
         "blob_sha": "8d4bfefe775e64f3d861881ee7b8a0cb0a44cedc"
       },
       "ledger_name": "project_artifact_read_capability_v1"
+    },
+    {
+      "name": "20261122060457_product_action_space_status_projection_v1",
+      "applied_version": "20261122060457",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261122060457_product_action_space_status_projection_v1.sql",
+        "blob_sha": "46bc5c261c5dcd59b1f1dbf063eda823cca337e0"
+      },
+      "ledger_name": "product_action_space_status_projection_v1"
     }
   ]
 }
