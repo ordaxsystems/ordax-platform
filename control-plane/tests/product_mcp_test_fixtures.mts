@@ -61,7 +61,7 @@ export function catalog() {
 
 export function actionRecord(overrides: Record<string, unknown> = {}) {
   return {
-    ok: true, request_id: requestId, device_id: device, project_id: projectId,
+    ok: true, request_id: requestId, device_id: device, space_id: null, project_id: projectId,
     capability: "project.text_read", status: "running", effect_id: effectId,
     result: null, error_code: null,
     execution_runtime_kind: null, execution_agent_version: null,

@@ -51,7 +51,7 @@ function fixture(){
     idempotency.set(key,requestId);creates++;
     records.set(requestId,{
       ok:true,request_id:requestId,effect_id:effectId,device_id:p.device,
-      project_id:p.project,owner_user_id:p.owner,client_id:p.client,
+      space_id:input.spaceId,project_id:p.project,owner_user_id:p.owner,client_id:p.client,
       capability:input.capability,payload:input.payload,
       status:"succeeded",created_at:"2026-10-10T19:00:00Z",
       started_at:"2026-10-10T19:00:01Z",finished_at:"2026-10-10T19:00:02Z",
@@ -112,6 +112,7 @@ test("3 signed users submit through Product RPC and read only their MCP receipt"
       assert.equal(own.status,200);
       assert.equal(own.body.result.structuredContent.action.device_id,m.device);
       assert.equal(own.body.result.structuredContent.action.project_id,m.project);
+      assert.equal(own.body.result.structuredContent.action.space_id,spaceId);
       assert.equal(own.body.result.structuredContent.action.result.data.content,m.marker);
       for(let j=0;j<members.length;j++)if(j!==i){
         const cross=await lab.doStatus(tokens[i],submitted[j].body.request_id);
