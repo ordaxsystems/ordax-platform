@@ -542,10 +542,14 @@ export function createAttestedDeviceActionHandler(
           action_dispatched: false, owner_action: "choose_device_with_runtime_capability_or_update_runtime" }, 409);
       }
 
-      // Reads are observational and must execute fresh even when the MCP client
-      // retries or reuses the same JSON-RPC call identity. Writes keep stable
-      // retry correlation so uncertain transports remain at-most-once.
-      const stableRetry = accessMode === "write" ? retryDigest : undefined;
+      // Reads execute fresh. Most writes retain the verified retry identity
+      // for at-most-once effects. Native Surface activation is a desired-state
+      // operation: a later request to reopen the same app must be dispatched
+      // again even when the MCP client reuses its JSON-RPC call ID. Replaying
+      // the old receipt after another app became active would falsely report
+      // success without observing the requested presentation.
+      const stableRetry = accessMode === "write"
+        && body.action !== "ordax.surface.open" ? retryDigest : undefined;
       const opId = stableRetry ?? operationId().toLowerCase();
       if (stableRetry === undefined && !isCanonicalUuid(opId))
         return json({ ok: false, error: "product_action_unavailable" }, 503);

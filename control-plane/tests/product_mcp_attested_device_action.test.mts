@@ -730,6 +730,35 @@ test("attested device action forwards only the trusted Worker wake scheduler", a
   assert.equal((await noContext(actionRequest("computer.screen_info"))).status, 202);
 });
 
+test("Native Surface app activation is fresh after interleaving apps with a reused MCP call identity", async () => {
+  const action = "ordax.surface.open";
+  const digest = "a".repeat(64);
+  const ids = [
+    "66666666-6666-4666-8666-666666666661",
+    "66666666-6666-4666-8666-666666666662",
+    "66666666-6666-4666-8666-666666666663",
+  ];
+  const enqueued: Array<{ appId: unknown; key: string }> = [];
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => catalog(grantGroup("ordax-surface-control", action, "write")),
+    enqueue: async (_env, input) => {
+      enqueued.push({ appId: input.payload.appId, key: input.idempotencyKey });
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => ids.shift() ?? assert.fail("each app activation needs a distinct operation"),
+  });
+  for (const appId of ["account", "store", "account"]) {
+    const response = await handler(actionRequest(action, { appId }), digest);
+    assert.equal(response.status, 202, appId);
+  }
+  assert.deepEqual(enqueued, [
+    { appId: "account", key: "mcp-write-66666666-6666-4666-8666-666666666661" },
+    { appId: "store", key: "mcp-write-66666666-6666-4666-8666-666666666662" },
+    { appId: "account", key: "mcp-write-66666666-6666-4666-8666-666666666663" },
+  ]);
+});
+
 test("Native OrdaX app activation is distinct from Windows and requires a real Owner grant",async()=>{
   const action="ordax.surface.open";
   assert.equal(validAttestedDeviceActionArguments("ordax.surface.status",{}),true);
