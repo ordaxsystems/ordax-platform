@@ -826,8 +826,8 @@ function cloneWithAuth(source: Request, url: string, method: string, body?: unkn
   return new Request(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 }
 
-function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
-  return TOOLS.filter(tool => !allowedTools || allowedTools.has(tool.name)).map((tool) => {
+function buildToolDefinitions(): JsonObject[] {
+  return TOOLS.map((tool) => {
     const invocation = toolInvocationText(tool.name);
     return {
       name: tool.name,
@@ -864,6 +864,16 @@ function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
   });
 }
 
+// Immutable public schemas are independent of sessions, grants and device state.
+// Build once per isolate; filter by the caller's current tool allowlist.
+let publicToolDefinitions: ReadonlyArray<JsonObject> | undefined;
+function toolDefinitions(allowedTools?: ReadonlySet<string>): JsonObject[] {
+  // Lazy: action-only requests do not pay to construct the public catalog.
+  const definitions = publicToolDefinitions ??= Object.freeze(buildToolDefinitions());
+  return definitions.filter((tool) =>
+    !allowedTools || allowedTools.has(String(tool.name)));
+}
+
 /**
  * Deterministic MCP catalog identity, computed from the canonical public tool
  * definitions (including security annotations, input schemas and descriptions).
@@ -881,8 +891,9 @@ function currentMcpToolSurfaceRevision(): Promise<string> {
   return surfaceRevisionPromise ??= mcpCatalogRevision(toolDefinitions());
 }
 
+const TOOL_SPEC_BY_NAME: ReadonlyMap<string, ToolSpec> = new Map(TOOLS.map(tool => [tool.name, tool] as const));
 function specFor(name: string): ToolSpec | undefined {
-  return TOOLS.find((tool) => tool.name === name);
+  return TOOL_SPEC_BY_NAME.get(name);
 }
 
 type OwnerGrantHint = {

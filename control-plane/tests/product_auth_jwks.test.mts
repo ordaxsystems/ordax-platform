@@ -55,6 +55,49 @@ test("signed Supabase-style JWT remains valid with the shared bounded JWKS reade
   }
 });
 
+test("JWKS public-key imports are shared across concurrent verification, not token outcomes", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalImport = crypto.subtle.importKey;
+  const originalDescriptor = Object.getOwnPropertyDescriptor(crypto.subtle, "importKey");
+  let fetches = 0;
+  let imports = 0;
+  const isolatedEnv = {
+    ...env,
+    PRODUCT_AUTH_JWKS_URL: env.PRODUCT_AUTH_JWKS_URL + "?fixture=shared-crypto-key",
+  };
+  globalThis.fetch = (async () => {
+    fetches++;
+    return Response.json({ keys: [{ ...publicJwk, kid: "test-key", alg: "RS256" }] });
+  }) as typeof fetch;
+  Object.defineProperty(crypto.subtle, "importKey", {
+    configurable: true,
+    value: (...args: unknown[]) => {
+      imports++;
+      return Reflect.apply(originalImport, crypto.subtle, args);
+    },
+  });
+  try {
+    const verified = await Promise.all(Array.from(
+      { length: 8 }, () => authenticateProductRequest(signedRequest(), isolatedEnv),
+    ));
+    assert.ok(verified.every((result) => result.ok === true));
+    assert.equal(fetches, 1, "concurrent JWKS reads should already coalesce");
+    assert.equal(imports, 1, "verified public key should import once per JWKS object");
+    const rejected = await authenticateProductRequest(
+      new Request("https://ordax.example/v3/product/session", {
+        headers: { authorization: "Bearer invalid" },
+      }),
+      isolatedEnv,
+    );
+    assert.equal(rejected.ok, false, "a cached public key cannot cache authorization");
+    assert.equal(imports, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalDescriptor) Object.defineProperty(crypto.subtle, "importKey", originalDescriptor);
+    else Reflect.deleteProperty(crypto.subtle, "importKey");
+  }
+});
+
 test("oversized/infinite JWKS response is cancelled and does not authorize a JWT", async () => {
   const originalFetch = globalThis.fetch;
   let chunksRead = 0;

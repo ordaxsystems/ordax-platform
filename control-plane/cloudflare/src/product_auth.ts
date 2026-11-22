@@ -158,6 +158,29 @@ async function importVerificationKey(jwk: JsonWebKey, alg: string): Promise<Cryp
   throw new Error("unsupported_jwt_algorithm");
 }
 
+// JWK JSON may be cached for a bounded period, but token/permission outcomes
+// must never be cached. Cache only immutable imported public verification keys.
+// WeakMap identity tracks the currently fetched JWKS objects: a rotation/refresh
+// replaces the objects and therefore imports new keys without retaining old ones.
+const verificationKeyImports = new WeakMap<JsonWebKey, Map<string, Promise<CryptoKey>>>();
+
+function importedVerificationKey(jwk: JsonWebKey, alg: string): Promise<CryptoKey> {
+  let perAlgorithm = verificationKeyImports.get(jwk);
+  if (!perAlgorithm) {
+    perAlgorithm = new Map();
+    verificationKeyImports.set(jwk, perAlgorithm);
+  }
+  const existing = perAlgorithm.get(alg);
+  if (existing) return existing;
+  const loading = importVerificationKey(jwk, alg);
+  perAlgorithm.set(alg, loading);
+  // Failed imports must never poison the cache; the next verification may retry.
+  void loading.catch(() => {
+    if (perAlgorithm?.get(alg) === loading) perAlgorithm.delete(alg);
+  });
+  return loading;
+}
+
 async function verifySignature(
   alg: string,
   key: CryptoKey,
@@ -284,7 +307,7 @@ export async function authenticateProductRequest(
   }
 
   try {
-    const key = await importVerificationKey(jwk, alg);
+    const key = await importedVerificationKey(jwk, alg);
     const signingInput = new TextEncoder().encode(parts[0] + "." + parts[1]);
     const valid = await verifySignature(alg, key, signingInput, signature);
     if (!valid) {
