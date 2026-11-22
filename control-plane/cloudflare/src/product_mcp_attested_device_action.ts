@@ -29,6 +29,7 @@ import {
   PROCESS_COMPUTER_CONTROL_MODE,
   OWNER_DEVICE_COMPUTER_GRANT_PROFILES,
   NATIVE_SURFACE_DEVICE_ACTIONS,
+  NATIVE_INTELLIGENCE_DEVICE_ACTIONS,
   DEVICE_BLENDER_ACTIONS,
 } from "./product_action_scope.ts";
 import { validAttestedBlenderActionArguments } from "./product_mcp_attested_project_action.ts";
@@ -84,6 +85,7 @@ const ATTESTED_DEVICE_PROCESS_ACTIONS = new Set(["computer.process_start", "comp
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
   "forge.app_read",
   ...NATIVE_SURFACE_DEVICE_ACTIONS,
+  ...NATIVE_INTELLIGENCE_DEVICE_ACTIONS,
   ...DEVICE_BLENDER_ACTIONS,
   ...OBSERVE_ACTIONS,
   ...INTERACTIVE_ACTIONS,
@@ -118,6 +120,7 @@ function requiredProfile(action: string): string | null {
   if (action === "forge.app_read") return "forge-app-read";
   if (action === "ordax.surface.status") return "ordax-surface-read";
   if (action === "ordax.surface.open") return "ordax-surface-control";
+  if (NATIVE_INTELLIGENCE_DEVICE_ACTIONS.has(action)) return "ordax-intelligence-consult";
   // Observation remains the least-privilege answer for the five capabilities
   // shared with the broader interactive profile.
   if (action === "computer.terminal_exec") return "device-native-terminal";
@@ -179,6 +182,10 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
   }
   const keys = Object.keys(value);
   if (action === "forge.app_read" || action === "ordax.surface.status") return keys.length === 0;
+  if (action === "ordax.intelligence.respond") return keysOnly(value, ["prompt", "intent", "maxTokens"])
+    && boundedString(value.prompt, 32000)
+    && (value.intent === undefined || ["ask", "explain", "summarize", "diagnose"].includes(value.intent as string))
+    && (value.maxTokens === undefined || boundedInteger(value.maxTokens, 1, 2048));
   if (action === "ordax.surface.open") return keysOnly(value, ["appId"])
     && ["account", "settings", "system", "store"].includes(value.appId as string);
 
@@ -473,10 +480,11 @@ export function catalogAllowsAttestedDeviceAction(
     if ((action === "forge.app_read" || DEVICE_BLENDER_ACTIONS.has(action))
       && rawGroup.profile_key !== profile) continue;
     // OrdaX Native authority cannot be inherited from Windows full-computer-control.
-    if (NATIVE_SURFACE_DEVICE_ACTIONS.has(action)
+    if ((NATIVE_SURFACE_DEVICE_ACTIONS.has(action) || NATIVE_INTELLIGENCE_DEVICE_ACTIONS.has(action))
       && !(rawGroup.profile_key === profile
         || (action === "ordax.surface.status" && rawGroup.profile_key === "ordax-surface-control"))) continue;
     if (!NATIVE_SURFACE_DEVICE_ACTIONS.has(action)
+      && !NATIVE_INTELLIGENCE_DEVICE_ACTIONS.has(action)
       && rawGroup.profile_key !== profile && rawGroup.profile_key !== FULL_COMPUTER_CONTROL_MODE
       && !(profile === TEXT_EDIT_COMPUTER_CONTROL_MODE
         && rawGroup.profile_key === FILESYSTEM_COMPUTER_CONTROL_MODE)) continue;
