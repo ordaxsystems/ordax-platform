@@ -76,7 +76,14 @@ test("continuity argument contracts are repository-bound and reject caller-injec
   }), true);
   assert.equal(validAttestedProjectContinuityArguments("continuity.update", {
     repository_full_name: REPOSITORY, summary: "done", completed: ["one"],
+    expected_revision: 0,
   }), true);
+  for (const invalidRevision of [undefined, null, -1, 1.5, "0", Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(validAttestedProjectContinuityArguments("continuity.update", {
+      repository_full_name: REPOSITORY, summary: "done",
+      expected_revision: invalidRevision,
+    }), false, "invalid revision: " + String(invalidRevision));
+  }
   assert.equal(validAttestedProjectContinuityArguments("handoff.create", {
     repository_full_name: REPOSITORY, summary: "handoff", ttl_hours: 24,
   }), true);
@@ -151,12 +158,14 @@ test("write continuity action cannot borrow read authority", async () => {
     repository_full_name: REPOSITORY,
     summary: "checkpoint",
     next_action: "continue",
+    expected_revision: 7,
   }));
   assert.equal(response.status, 202);
   assert.equal(observed.accessMode, "write");
   assert.deepEqual(observed.payload, {
     summary: "checkpoint",
     next_action: "continue",
+    expected_revision: 7,
     _ordax_project_scope: {
       project_id: PROJECT,
       repository_full_name: REPOSITORY,
