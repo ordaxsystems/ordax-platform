@@ -1525,12 +1525,15 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       message: pendingActionMessage("queued"),
     });
   }
-  // Wait only on a target echoed by the validated enqueue handler.
-  // The bound session device may differ from this authorized action target.
+  // A current handler echoes the validated destination so the advisory wake
+  // follows the committed target rather than the conversation's first device.
+  // Legacy ACKs without this field retain the gateway-attested wake hint;
+  // this is only a latency hint, never routing or authorization authority.
   const confirmedTarget = typeof createdPayload.device_id === "string"
-    && isCanonicalUuid(createdPayload.device_id)
-    && createdPayload.device_id.toLowerCase() === deviceId.toLowerCase()
-    ? createdPayload.device_id.toLowerCase() : undefined;
+    ? (isCanonicalUuid(createdPayload.device_id)
+      && createdPayload.device_id.toLowerCase() === deviceId.toLowerCase()
+      ? createdPayload.device_id.toLowerCase() : undefined)
+    : handlers.verifiedActionDeviceId;
   const finalPayload = await waitForAction(
     source, requestId, waitMs, { ...handlers, verifiedActionDeviceId: confirmedTarget },
     true, createdPayload.status === "queued",
