@@ -863,3 +863,31 @@ test("second granted Owner device is routed without borrowing the bound device",
   assert.equal(delivered.ownerUserId, OWNER);
   assert.equal(delivered.capability, "computer.terminal_exec");
 });
+
+test("Native Desktop denies Windows-only actions before any queue or executor attempt", async () => {
+  let enqueues = 0;
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => ({
+      ok: true,
+      targets: [{
+        device_id: DEVICE,
+        grant_groups: [grantGroup("computer-observe", "computer.processes", "read")],
+        runtime_capabilities: [
+          "agent.status", "computer.access_status",
+          "ordax.surface.open", "ordax.surface.status",
+        ],
+      }],
+    }),
+    enqueue: async () => { enqueues++; throw Error("unavailable action cannot enqueue"); },
+  });
+  const response = await handler(actionRequest("computer.processes", {}));
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    error: "product_runtime_capability_unavailable",
+    action_dispatched: false,
+    owner_action: "choose_device_with_runtime_capability_or_update_runtime",
+  });
+  assert.equal(enqueues, 0);
+});

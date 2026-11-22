@@ -208,11 +208,28 @@ async function wireJob(job: ProductRemoteJob): Promise<Json> {
 export function canonicalDeviceHeartbeatDigest(body: Json): string | null {
   if (Object.keys(body).some(key => key !== "status" && key !== "agent_version"
       && key !== "capabilities_digest" && key !== "runtime_kind"
-      && key !== "max_concurrent_jobs")) return null;
+      && key !== "max_concurrent_jobs" && key !== "capabilities")) return null;
   const digest = typeof body.capabilities_digest === "string"
     ? body.capabilities_digest.trim().toLowerCase() : "";
   return HEX64.test(digest) ? digest : null;
 }
+/**
+ * Runtime's own sorted ActionRegistry names, never Owner permission names.
+ * A malformed or stale snapshot cannot be interpreted as an authorization.
+ */
+export function canonicalHeartbeatCapabilities(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 1024) return null;
+  const names: string[] = [];
+  let previous = "";
+  for (const name of value) {
+    if (typeof name !== "string" || !/^[a-z][a-z0-9._-]{0,159}$/.test(name)
+        || (previous && previous >= name)) return null;
+    names.push(name);
+    previous = name;
+  }
+  return names;
+}
+
 async function heartbeatAuthenticated(request: Request, env: ProductPostgresEnv): Promise<Response> {
   const credentials = deviceRequestCredentials(request);
   if (!credentials) return respond({ ok: false, error: "device_auth_required" }, 401);
@@ -222,11 +239,17 @@ async function heartbeatAuthenticated(request: Request, env: ProductPostgresEnv)
     const auth = await authenticateDeviceRequest(request, env);
     return auth.ok ? respond({ ok: false, error: "heartbeat_invalid" }, 400) : auth.response;
   };
-  const body = await readBoundedJsonObject(request, 1024);
+  const body = await readBoundedJsonObject(request, 196 * 1024);
   if (!body) return invalid();
   const status = body.status;
   const agentVersion = typeof body.agent_version === "string" ? body.agent_version.trim() : "";
   const capabilityDigest = canonicalDeviceHeartbeatDigest(body);
+  const actions = body.capabilities === undefined ? undefined
+    : canonicalHeartbeatCapabilities(body.capabilities);
+  if (actions === null) return invalid();
+  if (actions !== undefined && (capabilityDigest === null
+      || await sha256Hex(JSON.stringify(actions)) !== capabilityDigest))
+    return invalid();
   const rawCapacity = body.max_concurrent_jobs;
   if (rawCapacity !== undefined && (typeof rawCapacity !== "number"
       || !Number.isInteger(rawCapacity) || rawCapacity < 1 || rawCapacity > 32))
@@ -253,6 +276,7 @@ async function heartbeatAuthenticated(request: Request, env: ProductPostgresEnv)
     capabilityDigest,
     force: status === "offline",
     maxConcurrentJobs,
+    ...(actions === undefined ? {} : { actions }),
   });
   if (heartbeatResult.ok === false && heartbeatResult.error === "invalid_device_token")
     return respond({ ok: false, error: "invalid_device_token" }, 401);

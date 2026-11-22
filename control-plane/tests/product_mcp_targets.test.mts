@@ -105,7 +105,7 @@ test("client-scoped target routing reports only non-discovery device grants, nev
   assert.equal(result.client_device_routing.attested,false);
   assert.equal(result.client_device_routing.dispatch_authorized,false);
   assert.equal(result.client_device_routing.authoritative_for_current_session,false);
-  assert.equal(result.client_device_routing.current_session_authority,"ordax_session.device_binding");
+  assert.equal(result.client_device_routing.current_session_authority,"authenticated_owner_client_and_exact_device_grant");
   assert.deepEqual(result.targets[0].connection_diagnostic, {
     state: "device_action_grant_required", attested: false, dispatch_proven: false,
     owner_action: "authorize_in_ordax_owner_permissions",
@@ -132,7 +132,7 @@ test("routing never promotes discovery, expired, project or incomplete grants",a
   assert.deepEqual(onlyDiscovery.client_device_routing,{
     state:"no_device_action_grant",owner_action:"authorize_in_ordax_owner_permissions",
     basis:"current_oauth_client_target_catalog",authoritative_for_current_session:false,
-    current_session_authority:"ordax_session.device_binding",attested:false,dispatch_authorized:false
+    current_session_authority:"authenticated_owner_client_and_exact_device_grant",attested:false,dispatch_authorized:false
   });
   assert.equal(onlyDiscovery.targets[0].connection_diagnostic.state,"device_action_grant_required");
   const partial=(await listTargets([{device_id:desktop,grant_groups:Array(128).fill(discovery)}]))
@@ -254,14 +254,41 @@ test("multiple action targets remain ambiguous, never automatically selected",as
   const result=(await listTargets(targets)).body.result.structuredContent;
   assert.equal(result.client_device_routing.state,"multiple_action_grant_candidates");
   assert.equal(result.client_device_routing.owner_action,
-    "select_device_for_new_unbound_session_in_ordax_owner");
-  assert.equal(result.client_device_routing.owner_action_scope,"new_unbound_session_only");
+    "authorize_missing_target_grants_only");
+  assert.equal(result.client_device_routing.owner_action_scope,"ungranted_action_only");
   assert.equal(result.client_device_routing.authoritative_for_current_session,false);
-  assert.equal(result.client_device_routing.current_session_authority,"ordax_session.device_binding");
+  assert.equal(result.client_device_routing.current_session_authority,"authenticated_owner_client_and_exact_device_grant");
   assert.equal("candidate_device_id" in result.client_device_routing,false);
   assert.deepEqual(result.client_device_routing.options, targets.map(t=>({
     device_id:t.device_id,display_name:"ORDAX device",reported_online:true,
     device_kind:null,target_type:"ordax_runtime_endpoint",
   })));
   assert.equal(result.client_device_routing.dispatch_authorized,false);
+});
+
+test("device-reported Runtime manifest distinguishes grants from executable actions", async () => {
+  const id = "99999999-9999-4999-8999-999999999999";
+  const result = (await listTargets([{
+    device_id: id,
+    online: true,
+    device_name: "OrdaX Desktop",
+    runtime_capabilities: [
+      "agent.status", "computer.access_status",
+      "ordax.surface.open", "ordax.surface.status",
+    ],
+    grant_groups: [{
+      profile_key: "computer-observe", space_id: null, project_id: null,
+      valid_until: null,
+      capabilities: [
+        { capability: "computer.access_status", access_mode: "read" },
+        { capability: "computer.processes", access_mode: "read" },
+      ],
+    }],
+  }])).body.result.structuredContent;
+  const target = result.targets[0];
+  assert.equal(target.runtime_capability_diagnostic.state, "device_reported");
+  assert.deepEqual(target.runtime_capability_diagnostic.unsupported_granted_actions, ["computer.processes"]);
+  assert.equal(target.connection_diagnostic.state, "online_grant_runtime_mismatch");
+  assert.equal(target.runtime_capability_diagnostic.availability_is_not_authorization, true);
+  assert.equal(result.client_device_routing.dispatch_authorized, false);
 });

@@ -579,6 +579,22 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
         } } : {}),
       }];
     });
+    // This is only a device-token-authenticated ActionRegistry projection,
+    // never an Owner grant. Incomplete or invalid reports cannot masquerade
+    // as supported actions; the executor remains the final authority.
+    const reported = target.runtime_capabilities;
+    const validReported = Array.isArray(reported) && reported.length >= 1
+      && reported.length <= 1024 && reported.every((name, index) =>
+        typeof name === "string" && /^[a-z][a-z0-9._-]{0,159}$/.test(name)
+        && (index === 0 || reported[index - 1] < name));
+    const runtimeCapabilities: string[] | null =
+      validReported && Array.isArray(reported) ? [...reported] as string[] : null;
+    const runtimeCapabilityState = reported === undefined || reported === null
+      ? "unverified" : validReported ? "device_reported" : "invalid";
+    const unsupportedGrantedActions = runtimeCapabilities === null ? []
+      : [...new Set(grantGroups.flatMap(group => group.capabilities
+          .map(item => item.capability)))].filter(name =>
+            name !== "product.target.read" && !runtimeCapabilities.includes(name)).sort();
     const name = boundedText(target.device_name) ?? "ORDAX device";
     return [{
       device_id: typeof target.device_id === "string" ? target.device_id : "",
@@ -590,6 +606,12 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
       channel: boundedText(target.channel),
       link_id: typeof target.link_id === "string" ? target.link_id : null,
       grant_groups: grantGroups,
+      runtime_capabilities: runtimeCapabilities,
+      runtime_capability_diagnostic: {
+        state: runtimeCapabilityState,
+        unsupported_granted_actions: unsupportedGrantedActions,
+        availability_is_not_authorization: true,
+      },
     }];
   });
   // Descriptive preflight only: the exact OAuth client has already scoped the
@@ -644,9 +666,13 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
     const hasCandidate = candidateIds.has(target.device_id);
     const profileOutdated = target.grant_groups.some(group =>
       "profile_alignment" in group && group.profile_alignment?.state === "owner_reauthorization_required");
+    const missingRuntime = target.runtime_capability_diagnostic?.state === "device_reported"
+      && Array.isArray(target.runtime_capability_diagnostic.unsupported_granted_actions)
+      && target.runtime_capability_diagnostic.unsupported_granted_actions.length > 0;
     const state = target.online === false ? "reported_offline"
       : target.online !== true ? "presence_unknown"
       : !hasCandidate ? "device_action_grant_required"
+      : missingRuntime ? "online_grant_runtime_mismatch"
       : profileOutdated ? "online_partial_grant_unverified"
       : "online_grant_unverified";
     return { ...target, connection_diagnostic: {
@@ -668,8 +694,9 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
       ? { state: "no_device_action_grant",
           owner_action: "authorize_in_ordax_owner_permissions" }
       : { state: "multiple_action_grant_candidates",
-          owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
-          owner_action_scope: "new_unbound_session_only",
+          selection_mode: "explicit_device_id_per_action",
+          owner_action: "authorize_missing_target_grants_only",
+          owner_action_scope: "ungranted_action_only",
           // This is only a descriptive view of the EXISTING current OAuth
           // grant candidates, never execution authority. Never truncate choices.
           ...(candidates.length <= 20 ? { options: candidates.map(target => ({
@@ -683,7 +710,7 @@ export function sanitizeTargets(payload: JsonObject): JsonObject {
   return { ok: true, targets: targetsWithDiagnostics, client_device_routing: {
     ...routing, basis: "current_oauth_client_target_catalog",
     authoritative_for_current_session: false,
-    current_session_authority: "ordax_session.device_binding",
+    current_session_authority: "authenticated_owner_client_and_exact_device_grant",
     attested: false, dispatch_authorized: false,
   } };
 }

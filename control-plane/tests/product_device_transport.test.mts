@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   canonicalDeviceHeartbeatDigest,
+  canonicalHeartbeatCapabilities,
   canonicalDeviceLeaseSeconds,
   canonicalDeviceActionProgress,
   isProductReportJsonbSafe,
@@ -276,11 +277,11 @@ test("Device heartbeat performs one authenticated atomic SQL RPC", () => {
 });
 
 
-test("device heartbeat persists one canonical digest, never a capability array", () => {
+test("heartbeat keeps one canonical digest and sends a bounded registry only on change", () => {
   const source = fs.readFileSync(SRC, "utf8");
   assert.equal(source.includes('body.capabilities_digest'), true);
-  assert.equal(source.includes('readBoundedJsonObject(request, 1024)'), true);
-  assert.equal(source.includes('48 * 1024'), false);
+  assert.equal(source.includes('readBoundedJsonObject(request, 196 * 1024)'), true);
+  assert.equal(source.includes('canonicalHeartbeatCapabilities(body.capabilities)'), true);
   assert.equal(source.includes('LEGACY_HEARTBEAT_MAX_CAPABILITIES'), false);
   assert.equal(source.includes('LEGACY_HEARTBEAT_MAX_NAME_CODEPOINTS'), false);
   assert.equal(source.includes('capabilityDigest,'), true);
@@ -299,13 +300,12 @@ test("canonical heartbeat accepts only digest-based Native and desktop payloads"
   }), digest);
 });
 
-test("retired capability arrays, mixed schemas and forged authority fields fail closed", () => {
+test("unauthenticated capability arrays and forged authority fields fail closed", () => {
   const digest = "a".repeat(64);
   const variants = [
     {},
     { status: "online", agent_version: "1.30.3", capabilities: ["a", "b"] },
     { capabilities: [] },
-    { capabilities_digest: digest, capabilities: ["x"] },
     { capabilities_digest: "x" },
     { capabilities_digest: 5 },
     { capabilities_digest: [] },
@@ -317,6 +317,15 @@ test("retired capability arrays, mixed schemas and forged authority fields fail 
   for (const body of variants) {
     assert.equal(canonicalDeviceHeartbeatDigest(body), null, JSON.stringify(body).slice(0, 150));
   }
+  assert.deepEqual(canonicalHeartbeatCapabilities(["agent.status","ordax.surface.status"]),
+    ["agent.status","ordax.surface.status"]);
+  for (const malformed of [[],["z","a"],["agent.status","agent.status"],
+      ["computer.windows",null],["bad control"],"no-array"]) {
+    assert.equal(canonicalHeartbeatCapabilities(malformed),null);
+  }
+  // A digest without matching canonical names is rejected by the device
+  // transport BEFORE the authenticated SQL heartbeat.
+  assert.match(fs.readFileSync(SRC, "utf8"), /sha256Hex\(JSON\.stringify\(actions\)\) !== capabilityDigest/);
 });
 test("PostgreSQL report JSONB rejects NUL recursively without rejecting text escaped for display", () => {
   const nul = String.fromCharCode(0);

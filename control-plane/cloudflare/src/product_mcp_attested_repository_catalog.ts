@@ -1,3 +1,4 @@
+import { runtimeCapabilityAvailability } from "./product_runtime_capability_availability.ts";
 /**
  * Least-privilege Product-MCP repository discovery boundary.
  *
@@ -154,6 +155,10 @@ export function createAttestedRepositoryCatalogHandler(
         clientId: identity.clientId,
       });
       if (!catalogAllowsRepositoryCatalog(catalog, targetDeviceId)) return grantRequired();
+      if (runtimeCapabilityAvailability(catalog, targetDeviceId, ACTION) === "unavailable") {
+        return json({ ok: false, error: "product_runtime_capability_unavailable",
+          action_dispatched: false, owner_action: "choose_device_with_runtime_capability_or_update_runtime" }, 409);
+      }
 
       const opId = retryDigest ?? operationId().toLowerCase();
       if (retryDigest === undefined && !isCanonicalUuid(opId))

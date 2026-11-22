@@ -436,6 +436,14 @@ const RPC_SPECS = {
     ],
     casts: ["uuid", "text", "boolean", "text", "text", "text", "boolean", "integer"],
   },
+  ordax_authenticated_product_heartbeat_v2: {
+    keys: [
+      "p_device_id", "p_token_sha256", "p_online", "p_runtime_kind",
+      "p_agent_version", "p_capability_digest", "p_force", "p_max_concurrent_jobs",
+      "p_actions",
+    ],
+    casts: ["uuid", "text", "boolean", "text", "text", "text", "boolean", "integer", "text[]"],
+  },
   ordax_record_product_capacity_v1: {
     keys: ["p_device_id", "p_max_concurrent_jobs"],
     casts: ["uuid", "integer"],
@@ -1224,13 +1232,13 @@ export async function recordProductHeartbeatAuthenticated(
     capabilityDigest: string;
     force: boolean;
     maxConcurrentJobs: number;
+    actions?: readonly string[];
   },
 ): Promise<{ok: boolean; recorded?: boolean; error?: string}> {
   if (!Number.isInteger(input.maxConcurrentJobs)
       || input.maxConcurrentJobs < 1 || input.maxConcurrentJobs > 32)
     throw new ProductPostgresError("product_device_capacity_invalid", 400);
-  return callRpc<{ok: boolean; recorded?: boolean; error?: string}>(
-    env, "ordax_authenticated_product_heartbeat_v1", {
+  const inputArgs = {
       p_device_id: input.deviceId,
       p_token_sha256: input.tokenSha256,
       p_online: input.online,
@@ -1239,8 +1247,17 @@ export async function recordProductHeartbeatAuthenticated(
       p_capability_digest: input.capabilityDigest,
       p_force: input.force,
       p_max_concurrent_jobs: input.maxConcurrentJobs,
-    },
-  );
+  };
+  // A real registered Runtime may supply its canonical action set only at
+  // startup or when the digest changes. Both RPCs retain ONE authenticated
+  // PostgreSQL statement; neither manifest nor digest grants execution.
+  return input.actions === undefined
+    ? callRpc<{ok: boolean; recorded?: boolean; error?: string}>(
+        env, "ordax_authenticated_product_heartbeat_v1", inputArgs)
+    : callRpc<{ok: boolean; recorded?: boolean; error?: string}>(
+        env, "ordax_authenticated_product_heartbeat_v2", {
+        ...inputArgs, p_actions: [...input.actions],
+      });
 }
 
 export async function recordProductHeartbeat(

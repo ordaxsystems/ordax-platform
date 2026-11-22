@@ -1,3 +1,4 @@
+import { runtimeCapabilityAvailability } from "./product_runtime_capability_availability.ts";
 /**
  * Attested Product-MCP -> canonical device action enqueue boundary.
  *
@@ -535,6 +536,10 @@ export function createAttestedDeviceActionHandler(
       });
       if (!catalogAllowsAttestedDeviceAction(catalog, targetDeviceId, body.action)) {
         return grantRequired(body.action);
+      }
+      if (runtimeCapabilityAvailability(catalog, targetDeviceId, body.action) === "unavailable") {
+        return json({ ok: false, error: "product_runtime_capability_unavailable",
+          action_dispatched: false, owner_action: "choose_device_with_runtime_capability_or_update_runtime" }, 409);
       }
 
       // Reads are observational and must execute fresh even when the MCP client
