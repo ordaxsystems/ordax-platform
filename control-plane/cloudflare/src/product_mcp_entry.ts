@@ -125,6 +125,8 @@ export const PRODUCT_MCP_CORE_READ_TOOLS: ReadonlySet<string> = new Set([
   "ordax_session", "ordax_profile", "ordax_targets", "ordax_action_status",
 ]);
 const ATTESTED_DEVICE_OBSERVE_TOOLS: ReadonlySet<string> = new Set([
+  "usb_list",
+  "usb_inspect",
   "computer_access_status",
   "computer_active_window",
   "computer_processes",

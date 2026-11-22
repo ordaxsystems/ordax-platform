@@ -10,6 +10,7 @@ import {
   PROJECT_ARTIFACT_ACTIONS,
   PROJECT_CONTINUITY_ACTIONS,
   REPOSITORY_CATALOG_DEVICE_ACTIONS,
+  USB_MEDIA_DEVICE_ACTIONS,
 } from "./product_action_scope.ts";
 
 export type OwnerGrantProfile = Readonly<{
@@ -58,6 +59,7 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
   "ordax-surface-read": profile("device", ["ordax.surface.status"]),
   "ordax-surface-control": profile("device", NATIVE_SURFACE_DEVICE_ACTIONS),
   "ordax-intelligence-consult": profile("device", NATIVE_INTELLIGENCE_DEVICE_ACTIONS),
+  "usb-media-read": profile("device", USB_MEDIA_DEVICE_ACTIONS),
   "repository-catalog-read": profile("device", REPOSITORY_CATALOG_DEVICE_ACTIONS),
   "project-continuity": profile("project", PROJECT_CONTINUITY_ACTIONS),
   "forge-app-read": profile("device", ["forge.app_read"]),

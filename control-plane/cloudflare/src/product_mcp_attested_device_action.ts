@@ -31,6 +31,7 @@ import {
   NATIVE_SURFACE_DEVICE_ACTIONS,
   NATIVE_INTELLIGENCE_DEVICE_ACTIONS,
   DEVICE_BLENDER_ACTIONS,
+  USB_MEDIA_DEVICE_ACTIONS,
 } from "./product_action_scope.ts";
 import { validAttestedBlenderActionArguments } from "./product_mcp_attested_project_action.ts";
 import { productCapabilityAccessMode } from "./product_owner_grant_profiles.ts";
@@ -83,6 +84,7 @@ const ATTESTED_PROCESS_MUTATION_ACTIONS = new Set(["computer.terminate_process"]
 const ATTESTED_TERMINAL_ACTIONS = new Set(["computer.terminal_exec"]);
 const ATTESTED_DEVICE_PROCESS_ACTIONS = new Set(["computer.process_start", "computer.process_status", "computer.process_list", "computer.process_logs", "computer.process_write_stdin", "computer.process_stop"]);
 export const ATTESTED_MCP_DEVICE_ACTIONS: ReadonlySet<string> = new Set([
+  ...USB_MEDIA_DEVICE_ACTIONS,
   "forge.app_read",
   ...NATIVE_SURFACE_DEVICE_ACTIONS,
   ...NATIVE_INTELLIGENCE_DEVICE_ACTIONS,
@@ -117,6 +119,7 @@ function validAttestedDevice(value: AttestedMcpDevice | null): value is Attested
 
 function requiredProfile(action: string): string | null {
   if (DEVICE_BLENDER_ACTIONS.has(action)) return "device-blender-control";
+  if (USB_MEDIA_DEVICE_ACTIONS.has(action)) return "usb-media-read";
   if (action === "forge.app_read") return "forge-app-read";
   if (action === "ordax.surface.status") return "ordax-surface-read";
   if (action === "ordax.surface.open") return "ordax-surface-control";
@@ -181,6 +184,11 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
     return validAttestedBlenderActionArguments(action.replace("computer.blender_", "blender.live_"), value);
   }
   const keys = Object.keys(value);
+  if (action === "usb.list") return keys.length === 0;
+  if (action === "usb.inspect") return keysOnly(value, ["disk_number", "serial"])
+    && boundedInteger(value.disk_number, 0, 999)
+    && typeof value.serial === "string"
+    && /^[A-Za-z0-9_-]{4,64}$/.test(value.serial);
   if (action === "forge.app_read" || action === "ordax.surface.status") return keys.length === 0;
   if (action === "ordax.intelligence.respond") return keysOnly(value, ["prompt", "intent", "maxTokens"])
     && boundedString(value.prompt, 32000)
@@ -477,7 +485,8 @@ export function catalogAllowsAttestedDeviceAction(
     if (expires !== undefined && expires !== null
       && (typeof expires !== "string" || !Number.isFinite(Date.parse(expires)))) return false;
     if (typeof expires === "string" && Date.parse(expires) <= Date.now()) continue;
-    if ((action === "forge.app_read" || DEVICE_BLENDER_ACTIONS.has(action))
+    if ((action === "forge.app_read" || DEVICE_BLENDER_ACTIONS.has(action)
+      || USB_MEDIA_DEVICE_ACTIONS.has(action))
       && rawGroup.profile_key !== profile) continue;
     // OrdaX Native authority cannot be inherited from Windows full-computer-control.
     if ((NATIVE_SURFACE_DEVICE_ACTIONS.has(action) || NATIVE_INTELLIGENCE_DEVICE_ACTIONS.has(action))

@@ -116,7 +116,13 @@ export const COMPUTER_DEVICE_ACTIONS = new Set<string>([
   "computer.windows",
 ]);
 
+export const USB_MEDIA_DEVICE_ACTIONS = new Set<string>([
+  "usb.list",
+  "usb.inspect",
+]);
+
 export const DEVICE_SCOPED_ACTIONS = new Set<string>([
+  ...USB_MEDIA_DEVICE_ACTIONS,
   "forge.app_read",
   ...COMPUTER_DEVICE_ACTIONS,
   ...DEVICE_BLENDER_ACTIONS,
