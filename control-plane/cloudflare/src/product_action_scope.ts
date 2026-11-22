@@ -64,6 +64,12 @@ export const APP_INTELLIGENCE_DEVICE_ACTIONS = new Set<string>([
   "intelligence.app_detail",
 ]);
 
+// OS-owned Aura and MCP consult the same bounded, current-account Intelligence.
+// No tool execution, model selection or Memory writes are granted here.
+export const NATIVE_INTELLIGENCE_DEVICE_ACTIONS = new Set<string>([
+  "ordax.intelligence.respond",
+]);
+
 export const NATIVE_SURFACE_DEVICE_ACTIONS = new Set<string>([
   "ordax.surface.status",
   "ordax.surface.open",
@@ -116,6 +122,7 @@ export const DEVICE_SCOPED_ACTIONS = new Set<string>([
   ...DEVICE_BLENDER_ACTIONS,
   ...APP_INTELLIGENCE_DEVICE_ACTIONS,
   ...NATIVE_SURFACE_DEVICE_ACTIONS,
+  ...NATIVE_INTELLIGENCE_DEVICE_ACTIONS,
   ...REPOSITORY_CATALOG_DEVICE_ACTIONS,
 ]);
 

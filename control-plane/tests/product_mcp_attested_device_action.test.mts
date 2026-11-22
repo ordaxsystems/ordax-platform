@@ -58,6 +58,43 @@ const identity = async () => ({
   expiresAt: 2_000_000_000,
 });
 
+test("Native Aura consultation uses only an exact dedicated Owner grant and prompt envelope", async () => {
+  const action="ordax.intelligence.respond";
+  const args={prompt:"Estado atual",intent:"summarize",maxTokens:512};
+  assert.equal(validAttestedDeviceActionArguments(action,args),true);
+  for(const invalid of [
+    {},{prompt:""},{prompt:"x".repeat(32001)},{prompt:"ask",modelId:"untrusted"},
+    {prompt:"ask",context:[]},{prompt:"ask",subjectId:OWNER},{prompt:"ask",spaceId:DEVICE},
+    {prompt:"ask",provider:"external"},{prompt:"ask",intent:"execute"},
+    {prompt:"ask",maxTokens:0},{prompt:"ask",maxTokens:2049},
+  ])assert.equal(validAttestedDeviceActionArguments(action,invalid),false,JSON.stringify(invalid).slice(0,100));
+  let count=0;
+  const handler=createAttestedDeviceActionHandler(ENV,TRUSTED,{
+    authenticate:identity,
+    listTargets:async()=>catalog(grantGroup("ordax-intelligence-consult",action,"read")),
+    enqueue:async(_env,input)=>{
+      count++;
+      assert.equal(input.capability,action);
+      assert.equal(input.accessMode,"read");
+      assert.equal(input.projectId,null);
+      assert.deepEqual(input.payload,args);
+      return {ok:true,replayed:false,request_id:REQUEST,effect_id:EFFECT,status:"queued"};
+    },
+  });
+  assert.equal((await handler(actionRequest(action,args))).status,202);
+  assert.equal(count,1);
+  for(const name of ["full-computer-control","ordax-surface-control","app-intelligence-read"]){
+    const denied=createAttestedDeviceActionHandler(ENV,TRUSTED,{
+      authenticate:identity,
+      listTargets:async()=>catalog(grantGroup(name,action,"read")),
+      enqueue:async()=>{throw Error("A grant from another authority must never run Aura")},
+    });
+    const response=await denied(actionRequest(action,args));
+    assert.equal(response.status,403,name);
+    assert.equal((await response.json()).required_profile,"ordax-intelligence-consult");
+  }
+});
+
 test("device process lifecycle validates payload and grant scope independently", async () => {
   const proc = "66666666-6666-4666-8666-666666666666";
   const cases: Array<[string, Record<string, unknown>, "read" | "write"]> = [

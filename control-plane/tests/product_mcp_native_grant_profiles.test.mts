@@ -60,6 +60,20 @@ test("OrdaX Native grants are not Windows Computer Control grants",()=>{
   assert.equal(productCapabilityAccessMode("ordax.surface.open"),"write");
 });
 
+test("OrdaX Aura consultation has one dedicated Device grant; no Computer Control inheritance", () => {
+  const ai = ownerMcpGrantProfile("ordax-intelligence-consult");
+  assert.deepEqual(ai,{
+    scope:"device",
+    capabilities:[{capability:"ordax.intelligence.respond",accessMode:"read"}],
+  });
+  for (const name of ["full-computer-control","ordax-surface-control","app-intelligence-read",
+                      "computer-observe","device-native-terminal"]) {
+    assert.equal(ownerMcpGrantProfile(name)?.capabilities.some(
+      item=>item.capability==="ordax.intelligence.respond"),false,name);
+  }
+  assert.equal(productCapabilityAccessMode("ordax.intelligence.respond"),"read");
+});
+
 test("Blender Owner profile is project-scoped, typed, and isolated from Computer Control", () => {
   const blender = ownerMcpGrantProfile("project-blender-control");
   assert.equal(blender?.scope, "project");

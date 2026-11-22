@@ -188,6 +188,7 @@ const TOOLS: ToolSpec[] = [
   { name: "computer_type", description: "Background-targeted input: type printable Unicode text into one verified Win32 Edit control, including when minimized, without stealing focus or typing in the user\'s active window. Requires a window handle and matching PID from computer_windows; unsupported controls fail closed. No global keyboard fallback.", action: "computer.type", properties: { device_id: DEVICE, space_id: SPACE, text: { type: "string", minLength: 1, maxLength: 256 }, handle: { type: "string", pattern: "^0x[0-9A-Fa-f]+$" }, expected_pid: { type: "integer", minimum: 1 }, mode: { type: "string", enum: ["background"] }, wait_for_completion_ms: WAIT }, required: ["device_id", "text", "handle", "expected_pid"] },
   { name: "computer_hotkey", description: "Foreground-only interactive input: send a bounded validated hotkey chord through the global Windows input queue. This may affect the user's active window; call only with explicit user consent and an explicit grant.", action: "computer.hotkey", properties: { device_id: DEVICE, space_id: SPACE, keys: { type: "array", items: STRING, minItems: 1, maxItems: 6 }, wait_for_completion_ms: WAIT }, required: ["device_id", "keys"] },
   { name: "computer_access_status", description: "Read the local ORDAX computer-access policy and allowed filesystem roots.", action: "computer.access_status", properties: { device_id: DEVICE, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
+  { name: "ordax_intelligence_respond", description: "Consult the CURRENT OrdaX Native Aura Intelligence service on the selected device. The OS owns the model, Memory, Identity and Space context. Returns only the verified response and model identity; no arbitrary context, model, provider, filesystem or tool authority can be supplied. Requires a dedicated OrdaX Intelligence Owner grant. Inference may execute asynchronously: preserve request_id and never resubmit an uncertain request.", action: "ordax.intelligence.respond", properties: { device_id: DEVICE, prompt: { type: "string", minLength: 1, maxLength: 32000 }, intent: { type: "string", enum: ["ask","explain","summarize","diagnose"] }, maxTokens: { type: "integer", minimum: 1, maximum: 2048 }, wait_for_completion_ms: WAIT }, required: ["device_id","prompt"] },
   { name: "ordax_surface_status", description: "Read the currently visible Native OrdaX Surface application from the OrdaX Product Device, not from Windows.", action: "ordax.surface.status", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "ordax_surface_open", description: "Open an installed OrdaX Native system app through the internal OS channel. Returns success only after the Surface confirms the visible app, never by Windows mouse or window control.", action: "ordax.surface.open", properties: { device_id: DEVICE, appId: { type: "string", enum: ["account", "settings", "system", "store"] }, wait_for_completion_ms: WAIT }, required: ["device_id", "appId"] },
   { name: "forge_status", description: "Read verified OrdaX Forge status directly through its private service. Requires the dedicated forge-app-read grant and a verified Lab installation. Does not send provider messages.", action: "forge.app_read", properties: { device_id: DEVICE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
@@ -314,6 +315,9 @@ const DESTRUCTIVE_TOOLS = new Set([
 ]);
 
 const NON_DESTRUCTIVE_WRITE_TOOLS = new Set([
+  // Inference consumes the shared Aura engine; it must never be tagged
+  // idempotent even though the separate Owner capability has read scope.
+  "ordax_intelligence_respond",
   "project_create",
   "project_import",
   "handoff_create",
@@ -440,6 +444,7 @@ const TOOL_TITLES: Record<string, string> = {
   computer_type: "Type on desktop",
   computer_hotkey: "Send desktop hotkey",
   computer_access_status: "Inspect computer access policy",
+  ordax_intelligence_respond: "Consult shared Native OrdaX Intelligence (Aura)",
   ordax_surface_status: "Inspect Native OrdaX Surface",
   ordax_surface_open: "Open Native OrdaX system app",
   computer_file_stat: "Inspect computer path",
@@ -941,6 +946,7 @@ const APP_INTELLIGENCE_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-grou
 const PROJECT_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-groups (projeto vinculado)";
 
 const OWNER_GRANT_HINT_BY_ACTION = new Map<string, OwnerGrantHint>([
+  ["ordax.intelligence.respond", { profile: "ordax-intelligence-consult", surface: APP_INTELLIGENCE_GRANT_SURFACE }],
   ...[
     "intelligence.app_catalog",
     "intelligence.app_detail",

@@ -139,7 +139,7 @@ test("trusted binding itself is exact, bounded and cannot infer authority", () =
   ]) assert.equal(validateTrustedIntelligenceRelayBinding(value), null);
 });
 
-test("source-only contract is not advertised as a Product action or public Worker route", async () => {
+test("legacy Web Intelligence relay stays source-only; dedicated Native Aura grant is distinct", async () => {
   const [scope, relayScope, worker, mcp] = await Promise.all([
     readFile(new URL("../cloudflare/src/product_action_scope.ts", import.meta.url), "utf8"),
     readFile(new URL("../cloudflare/src/product_relay_scope.ts", import.meta.url), "utf8"),
@@ -147,7 +147,11 @@ test("source-only contract is not advertised as a Product action or public Worke
     readFile(new URL("../cloudflare/src/mcp_http.ts", import.meta.url), "utf8"),
   ]);
   for (const source of [scope, relayScope, worker, mcp]) {
-    assert.doesNotMatch(source, /intelligence\.respond/);
+    // The unpublished Web relay is not promoted into the Product action layer.
+    assert.doesNotMatch(source, /(?<!ordax\.)intelligence\.respond/);
     assert.doesNotMatch(source, /product_intelligence_relay_contract/);
   }
+  assert.doesNotMatch(relayScope, /ordax\.intelligence\.respond/);
+  assert.match(scope, /"ordax\.intelligence\.respond"/);
+  assert.match(mcp, /action: "ordax\.intelligence\.respond"/);
 });

@@ -179,6 +179,7 @@ const ATTESTED_DEVICE_NATIVE_EXECUTION_TOOLS: ReadonlySet<string> = new Set([
   "computer_process_stop",
 ]);
 const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
+  "ordax_intelligence_respond",
   "ordax_surface_status",
   "ordax_surface_open",
   "forge_status",
