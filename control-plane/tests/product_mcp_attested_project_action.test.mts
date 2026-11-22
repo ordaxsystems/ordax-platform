@@ -165,7 +165,7 @@ test("supervised process reads cannot borrow write-only capability or another pr
     DEVICE, SCOPE, "terminal.exec"), false);
 });
 
-test("model-selected device/slug and mismatch fail before execution", async () => {
+test("ungranted device and untrusted project selectors fail before execution", async () => {
   let enqueued = 0;
   const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
     authenticate: identity, resolveProject,
@@ -173,7 +173,7 @@ test("model-selected device/slug and mismatch fail before execution", async () =
     enqueue: async () => { enqueued++; throw new Error("must not execute"); },
   });
   let response = await handler(actionRequest("terminal.exec", { argv: ["python"] }, { deviceId: REQUEST }));
-  assert.equal(response.status, 400);
+  assert.equal(response.status, 403);
   response = await handler(actionRequest("terminal.exec", { argv: ["python"] }, { project: "local-project-slug" }));
   assert.equal(response.status, 400);
   response = await handler(actionRequest("terminal.exec", { argv: ["python"] }, { spaceId: REQUEST }));
@@ -414,4 +414,28 @@ test("saturated project reports busy instead of fabricating a queued receipt", a
   assert.deepEqual(await response.json(), {
     ok: false, error: "product_device_busy", action_dispatched: false,
   });
+});
+
+test("different granted Owner device resolves its own project scope", async () => {
+  const other = "88888888-8888-4888-8888-888888888888";
+  let targetScope = "", delivery: any = null;
+  const handler = createAttestedProjectActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject: async (_env, _owner, deviceId) => { targetScope = deviceId; return resolveProject(); },
+    listTargets: async () => ({ ok: true, targets: [
+      { device_id: other, grant_groups: [grantGroup("terminal.exec", "write")] },
+    ] }),
+    enqueue: async (_env, input) => {
+      delivery = input;
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => OPERATION,
+  });
+  const response = await handler(actionRequest("terminal.exec", { argv: ["node", "--version"] }, { deviceId: other }));
+  assert.equal(response.status, 202);
+  assert.equal((await response.json()).device_id, other);
+  assert.equal(targetScope, other);
+  assert.equal(delivery.deviceId, other);
+  assert.equal(delivery.spaceId, SPACE);
+  assert.equal(delivery.projectId, PROJECT);
 });

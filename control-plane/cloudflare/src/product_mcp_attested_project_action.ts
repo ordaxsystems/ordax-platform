@@ -346,7 +346,8 @@ function parseScope(value: unknown): ProjectScope | null {
   });
 }
 
-function validCreateBody(body: Json, trusted: AttestedMcpDevice): body is Json & {
+function validCreateBody(body: Json): body is Json & {
+  device_id: string;
   action: string;
   project: string;
   arguments: Json;
@@ -354,7 +355,7 @@ function validCreateBody(body: Json, trusted: AttestedMcpDevice): body is Json &
   const keys = Object.keys(body).sort();
   if (keys.join(",") !== "action,arguments,device_id,project,space_id") return false;
   if (typeof body.action !== "string" || !validAttestedProjectActionArguments(body.action, body.arguments)) return false;
-  if (!isCanonicalUuid(body.device_id) || body.device_id.toLowerCase() !== trusted.deviceId.toLowerCase()) return false;
+  if (!isCanonicalUuid(body.device_id)) return false;
   if (canonicalGithubRepositoryFullName(body.project) === null) return false;
   return body.space_id === null || isCanonicalUuid(body.space_id);
 }
@@ -463,14 +464,15 @@ export function createAttestedProjectActionHandler(
     }
 
     const body = await readBoundedJsonObject(request, 96 * 1024);
-    if (!body || !validCreateBody(body, trusted)) {
+    if (!body || !validCreateBody(body)) {
       return json({ ok: false, error: "product_project_action_invalid" }, 400);
     }
+    const targetDeviceId = body.device_id.toLowerCase();
     const repository = canonicalGithubRepositoryFullName(body.project)!;
 
     let resolvedRaw: Json;
     try {
-      resolvedRaw = await resolveProject(env, identity.ownerUserId, trusted.deviceId, repository);
+      resolvedRaw = await resolveProject(env, identity.ownerUserId, targetDeviceId, repository);
     } catch {
       return json({ ok: false, error: "product_project_scope_unavailable" }, 503);
     }
@@ -499,7 +501,7 @@ export function createAttestedProjectActionHandler(
         clientKind: identity.clientKind,
         clientId: identity.clientId,
       });
-      if (!catalogAllowsAttestedProjectAction(catalog, trusted.deviceId, scope, body.action)) {
+      if (!catalogAllowsAttestedProjectAction(catalog, targetDeviceId, scope, body.action)) {
         return grantRequired(body.action);
       }
 
@@ -520,7 +522,7 @@ export function createAttestedProjectActionHandler(
         ownerUserId: identity.ownerUserId,
         spaceId: scope.spaceId,
         projectId: scope.projectId,
-        deviceId: trusted.deviceId,
+        deviceId: targetDeviceId,
         clientKind: identity.clientKind,
         clientId: identity.clientId,
         capability: body.action,
@@ -553,6 +555,7 @@ export function createAttestedProjectActionHandler(
       }
       return json({
         ok: true,
+        device_id: targetDeviceId,
         request_id: result.request_id,
         effect_id: result.effect_id,
         status: result.status,

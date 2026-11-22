@@ -452,7 +452,7 @@ test("explicit Space never borrows a global device grant (#118)", async () => {
   assert.equal(enqueues, 0);
 });
 
-test("model-selected device never overrides the attested Product device", async () => {
+test("ungranted target cannot borrow the conversation device grant", async () => {
   let touched = false;
   const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
     authenticate: identity,
@@ -462,19 +462,8 @@ test("model-selected device never overrides the attested Product device", async 
   const other = "66666666-6666-4666-8666-666666666666";
   const response = await handler(actionRequest("computer.click", { x: 1, y: 2 }, other));
   assert.equal(response.status, 403);
-  assert.deepEqual(await response.json(), {
-    ok: false,
-    error: "product_attested_device_mismatch",
-    required_action: "establish_attested_session_for_requested_device",
-    owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
-    selection_location: "ordax_owner",
-    selection_scope: "new_unbound_session_only",
-    owner_confirmation_required: true,
-    action_dispatched: false,
-    attested_device_id: DEVICE,
-    requested_device_id: other,
-  });
-  assert.equal(touched, false);
+  assert.equal((await response.json()).error, "product_grant_not_resolved");
+  assert.equal(touched, true);
 });
 
 test("missing grant returns the capability family's owner remediation without enqueue", async () => {
@@ -632,7 +621,7 @@ test("Orchestrator status enqueues only a dedicated read grant with no model ide
   }
 });
 
-test("cross-device request requires target attestation before grant lookup or dispatch", async () => {
+test("cross-device without specific target grant never dispatches", async () => {
   const other = "99999999-9999-4999-8999-999999999999";
   let catalogQueries = 0;
   let enqueues = 0;
@@ -650,25 +639,14 @@ test("cross-device request requires target attestation before grant lookup or di
 
   const response = await handler(actionRequest("computer.terminal_exec", { argv: ["id"] }, other));
   assert.equal(response.status, 403);
-  assert.deepEqual(await response.json(), {
-    ok: false,
-    error: "product_attested_device_mismatch",
-    required_action: "establish_attested_session_for_requested_device",
-    owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
-    selection_location: "ordax_owner",
-    selection_scope: "new_unbound_session_only",
-    owner_confirmation_required: true,
-    action_dispatched: false,
-    attested_device_id: DEVICE,
-    requested_device_id: other,
-  });
-  assert.equal(catalogQueries, 0);
+  assert.equal((await response.json()).error, "product_grant_not_resolved");
+  assert.equal(catalogQueries, 1);
   assert.equal(enqueues, 0);
 
   const malformed = await handler(actionRequest("computer.terminal_exec", { argv: [] }));
   assert.equal(malformed.status, 400);
   assert.equal((await malformed.json()).error, "product_device_action_invalid");
-  assert.equal(catalogQueries, 0);
+  assert.equal(catalogQueries, 1);
 });
 
 test("attested device write retries preserve one PostgreSQL key and replay the original receipt", async () => {
@@ -861,4 +839,27 @@ test("local Blender uses a separate device grant, typed arguments and null proje
   assert.equal((await handler(actionRequest(action, { ...args, project: "fake" }))).status, 400);
   assert.equal((await handler(actionRequest(action, args))).status, 202);
   assert.equal(calls, 1);
+});
+
+test("second granted Owner device is routed without borrowing the bound device", async () => {
+  const other = "99999999-9999-4999-8999-999999999999";
+  let delivered: any = null;
+  const handler = createAttestedDeviceActionHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => ({ ok: true, targets: [
+      { device_id: DEVICE, grant_groups: [grantGroup("computer-observe", "computer.windows", "read")] },
+      { device_id: other, grant_groups: [grantGroup("device-native-terminal", "computer.terminal_exec", "write")] },
+    ] }),
+    enqueue: async (_env, input) => {
+      delivered = input;
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => OPERATION,
+  });
+  const response = await handler(actionRequest("computer.terminal_exec", { argv: ["whoami"] }, other));
+  assert.equal(response.status, 202);
+  assert.equal((await response.json()).device_id, other);
+  assert.equal(delivered.deviceId, other);
+  assert.equal(delivered.ownerUserId, OWNER);
+  assert.equal(delivered.capability, "computer.terminal_exec");
 });

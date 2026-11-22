@@ -58,13 +58,12 @@ function validTrusted(value: AttestedMcpDevice | null): value is AttestedMcpDevi
     && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/.test(value!.clientId);
 }
 
-function validCreateBody(body: Json, trusted: AttestedMcpDevice): boolean {
+function validCreateBody(body: Json): body is Json & { device_id: string } {
   if (Object.keys(body).sort().join(",") !== "action,arguments,device_id,project,space_id") return false;
   return body.action === ACTION
     && isRecord(body.arguments)
     && Object.keys(body.arguments).length === 0
     && isCanonicalUuid(body.device_id)
-    && body.device_id.toLowerCase() === trusted.deviceId.toLowerCase()
     && body.project === null
     && body.space_id === null;
 }
@@ -143,9 +142,10 @@ export function createAttestedRepositoryCatalogHandler(
     }
 
     const body = await readBoundedJsonObject(request, 16 * 1024);
-    if (!body || !validCreateBody(body, trusted)) {
+    if (!body || !validCreateBody(body)) {
       return json({ ok: false, error: "product_repository_catalog_action_invalid" }, 400);
     }
+    const targetDeviceId = body.device_id.toLowerCase();
 
     try {
       const catalog = await listTargets(env, {
@@ -153,7 +153,7 @@ export function createAttestedRepositoryCatalogHandler(
         clientKind: identity.clientKind,
         clientId: identity.clientId,
       });
-      if (!catalogAllowsRepositoryCatalog(catalog, trusted.deviceId)) return grantRequired();
+      if (!catalogAllowsRepositoryCatalog(catalog, targetDeviceId)) return grantRequired();
 
       const opId = retryDigest ?? operationId().toLowerCase();
       if (retryDigest === undefined && !isCanonicalUuid(opId))
@@ -163,7 +163,7 @@ export function createAttestedRepositoryCatalogHandler(
         ownerUserId: identity.ownerUserId,
         spaceId: null,
         projectId: null,
-        deviceId: trusted.deviceId,
+        deviceId: targetDeviceId,
         clientKind: identity.clientKind,
         clientId: identity.clientId,
         capability: ACTION,
@@ -190,6 +190,7 @@ export function createAttestedRepositoryCatalogHandler(
       }
       return json({
         ok: true,
+        device_id: targetDeviceId,
         request_id: result.request_id,
         effect_id: result.effect_id,
         status: result.status,

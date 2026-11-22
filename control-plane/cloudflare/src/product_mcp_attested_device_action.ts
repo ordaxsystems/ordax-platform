@@ -2,10 +2,10 @@
  * Attested Product-MCP -> canonical device action enqueue boundary.
  *
  * The model may request only capabilities explicitly published by the Product
- * MCP. Device identity comes from the Runtime-attested Product-MCP session;
- * the model never selects the authoritative device. Current PostgreSQL grants
- * are re-resolved before every enqueue and the canonical enqueue RPC performs
- * the final capability/access-mode authorization again.
+ * MCP. A Runtime-attested session establishes the signed Owner/client context;
+ * the explicit device_id selects a destination only within that Owner account.
+ * Current per-device PostgreSQL grants are re-resolved before every enqueue,
+ * and the canonical enqueue RPC rechecks device ownership, capability and mode.
  */
 import {
   authenticateProductMcpClientRequest,
@@ -415,7 +415,8 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
   return false;
 }
 
-function validCreateBody(body: Json, trusted: AttestedMcpDevice): body is Json & {
+function validCreateBody(body: Json): body is Json & {
+  device_id: string;
   action: string;
   arguments: Json;
 } {
@@ -425,7 +426,6 @@ function validCreateBody(body: Json, trusted: AttestedMcpDevice): body is Json &
     return false;
   }
   return isCanonicalUuid(body.device_id)
-    && body.device_id.toLowerCase() === trusted.deviceId.toLowerCase()
     && body.project === null
     && body.space_id === null;
 }
@@ -521,30 +521,10 @@ export function createAttestedDeviceActionHandler(
     }
 
     const body = await readBoundedJsonObject(request, 96 * 1024);
-    // This MCP session is attested for exactly one device. A different
-    // catalog target is not silently reachable through that attestation,
-    // even if it belongs to the same Owner account or reports online.
-    if (body && isCanonicalUuid(body.device_id)
-      && body.device_id.toLowerCase() !== trusted.deviceId.toLowerCase()) {
-      return json({
-        ok: false,
-        error: "product_attested_device_mismatch",
-        required_action: "establish_attested_session_for_requested_device",
-        // A bound conversation never changes its trusted device from a
-        // model-supplied ID. Give the Owner the exact next authorized step,
-        // including the identity that actually holds this session.
-        owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
-        selection_location: "ordax_owner",
-        selection_scope: "new_unbound_session_only",
-        owner_confirmation_required: true,
-        action_dispatched: false,
-        attested_device_id: trusted.deviceId,
-        requested_device_id: body.device_id,
-      }, 403);
-    }
-    if (!body || !validCreateBody(body, trusted)) {
+    if (!body || !validCreateBody(body)) {
       return json({ ok: false, error: "product_device_action_invalid" }, 400);
     }
+    const targetDeviceId = body.device_id.toLowerCase();
 
     const accessMode = productCapabilityAccessMode(body.action);
     try {
@@ -553,7 +533,7 @@ export function createAttestedDeviceActionHandler(
         clientKind: identity.clientKind,
         clientId: identity.clientId,
       });
-      if (!catalogAllowsAttestedDeviceAction(catalog, trusted.deviceId, body.action)) {
+      if (!catalogAllowsAttestedDeviceAction(catalog, targetDeviceId, body.action)) {
         return grantRequired(body.action);
       }
 
@@ -568,7 +548,7 @@ export function createAttestedDeviceActionHandler(
         ownerUserId: identity.ownerUserId,
         spaceId: null,
         projectId: null,
-        deviceId: trusted.deviceId,
+        deviceId: targetDeviceId,
         clientKind: identity.clientKind,
         clientId: identity.clientId,
         capability: body.action,
@@ -604,6 +584,7 @@ export function createAttestedDeviceActionHandler(
       }
       return json({
         ok: true,
+        device_id: targetDeviceId,
         request_id: result.request_id,
         effect_id: result.effect_id,
         status: result.status,

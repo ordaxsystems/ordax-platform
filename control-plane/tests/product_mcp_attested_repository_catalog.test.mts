@@ -82,7 +82,7 @@ test("repository catalog enqueues read-only action for attested device", async (
   assert.equal(observed.idempotencyKey, `mcp-read-${OPERATION}`);
 });
 
-test("repository catalog rejects model-selected device and extra arguments", async () => {
+test("repository catalog denies ungranted targets and untyped arguments", async () => {
   let touched = false;
   const handler = createAttestedRepositoryCatalogHandler(ENV, TRUSTED, {
     authenticate: identity,
@@ -91,13 +91,13 @@ test("repository catalog rejects model-selected device and extra arguments", asy
   });
 
   const wrongDevice = await handler(request("66666666-6666-4666-8666-666666666666"));
-  assert.equal(wrongDevice.status, 400);
-  assert.equal((await wrongDevice.json()).error, "product_repository_catalog_action_invalid");
+  assert.equal(wrongDevice.status, 403);
+  assert.equal((await wrongDevice.json()).error, "product_grant_not_resolved");
 
   const extra = await handler(request(DEVICE, { query: "no" }));
   assert.equal(extra.status, 400);
   assert.equal((await extra.json()).error, "product_repository_catalog_action_invalid");
-  assert.equal(touched, false);
+  assert.equal(touched, true);
 });
 
 test("repository discovery forwards waitUntil scheduler but never includes it in the canonical payload", async () => {
@@ -163,4 +163,25 @@ test("repository catalog retries reuse the signed MCP correlation instead of que
     assert.equal((await denied.json()).error, "product_mcp_retry_correlation_invalid");
   }
   assert.equal(keys.length, 2);
+});
+
+test("second Owner device repository catalog respects its own read grant", async () => {
+  const other = "66666666-6666-4666-8666-666666666666";
+  let delivered: any = null;
+  const handler = createAttestedRepositoryCatalogHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    listTargets: async () => ({ ok: true, targets: [
+      { device_id: other, grant_groups: catalog().targets[0].grant_groups },
+    ] }),
+    enqueue: async (_env, input) => {
+      delivered = input;
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => OPERATION,
+  });
+  const response = await handler(request(other));
+  assert.equal(response.status, 202);
+  assert.equal((await response.json()).device_id, other);
+  assert.equal(delivered.deviceId, other);
+  assert.equal(delivered.capability, "workspace.repository_catalog");
 });

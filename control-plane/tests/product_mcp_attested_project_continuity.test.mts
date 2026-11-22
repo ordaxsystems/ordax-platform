@@ -179,7 +179,7 @@ test("wrong project, wrong profile and expired grants all fail closed", () => {
   ), false);
 });
 
-test("model-selected device and unresolved repository never reach enqueue", async () => {
+test("unresolved repository device binding never reaches enqueue", async () => {
   let enqueued = false;
   const handler = createAttestedProjectContinuityHandler(ENV, TRUSTED, {
     authenticate: identity,
@@ -193,8 +193,8 @@ test("model-selected device and unresolved repository never reach enqueue", asyn
     { repository_full_name: REPOSITORY },
     "99999999-9999-4999-8999-999999999999",
   ));
-  assert.equal(wrongDevice.status, 400);
-  assert.equal((await wrongDevice.json()).error, "product_project_continuity_action_invalid");
+  assert.equal(wrongDevice.status, 404);
+  assert.equal((await wrongDevice.json()).error, "owner_project_scope_not_found");
 
   const unresolved = await handler(actionRequest("continuity.get", { repository_full_name: REPOSITORY }));
   assert.equal(unresolved.status, 404);
@@ -356,4 +356,28 @@ test("continuity retries preserve one PostgreSQL key and replay one accepted rec
     assert.equal((await denied.json()).error, "product_mcp_retry_correlation_invalid");
   }
   assert.equal(keys.length, 2);
+});
+
+test("second Owner device continuity uses only its own project grant", async () => {
+  const other = "99999999-9999-4999-8999-999999999999";
+  let boundDevice = "", delivered: any = null;
+  const handler = createAttestedProjectContinuityHandler(ENV, TRUSTED, {
+    authenticate: identity,
+    resolveProject: async (_env, _owner, deviceId) => { boundDevice = deviceId; return resolvedProject(); },
+    listTargets: async () => ({ ok: true, targets: [
+      { device_id: other, grant_groups: [grantGroup("continuity.get", "read")] },
+    ] }),
+    enqueue: async (_env, input) => {
+      delivered = input;
+      return { ok: true, replayed: false, request_id: REQUEST, effect_id: EFFECT, status: "queued" };
+    },
+    operationId: () => OPERATION,
+  });
+  const response = await handler(actionRequest("continuity.get", { repository_full_name: REPOSITORY }, other));
+  assert.equal(response.status, 202);
+  assert.equal((await response.json()).device_id, other);
+  assert.equal(boundDevice, other);
+  assert.equal(delivered.deviceId, other);
+  assert.equal(delivered.projectId, PROJECT);
+  assert.equal(delivered.spaceId, SPACE);
 });

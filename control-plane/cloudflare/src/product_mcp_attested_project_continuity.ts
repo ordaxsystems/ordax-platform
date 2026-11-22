@@ -129,7 +129,8 @@ export function validAttestedProjectContinuityArguments(action: string, value: u
   return false;
 }
 
-function validCreateBody(body: Json, trusted: AttestedMcpDevice): body is Json & {
+function validCreateBody(body: Json): body is Json & {
+  device_id: string;
   action: string;
   arguments: Json;
 } {
@@ -139,7 +140,6 @@ function validCreateBody(body: Json, trusted: AttestedMcpDevice): body is Json &
     return false;
   }
   return isCanonicalUuid(body.device_id)
-    && body.device_id.toLowerCase() === trusted.deviceId.toLowerCase()
     && body.project === null
     && body.space_id === null;
 }
@@ -261,9 +261,10 @@ export function createAttestedProjectContinuityHandler(
     }
 
     const body = await readBoundedJsonObject(request, 96 * 1024);
-    if (!body || !validCreateBody(body, trusted)) {
+    if (!body || !validCreateBody(body)) {
       return json({ ok: false, error: "product_project_continuity_action_invalid" }, 400);
     }
+    const targetDeviceId = body.device_id.toLowerCase();
 
     const repositoryFullName = canonicalGithubRepositoryFullName(body.arguments.repository_full_name);
     if (repositoryFullName === null) {
@@ -274,7 +275,7 @@ export function createAttestedProjectContinuityHandler(
       const resolvedRaw = await resolveProject(
         env,
         identity.ownerUserId,
-        trusted.deviceId,
+        targetDeviceId,
         repositoryFullName,
       );
       if (resolvedRaw.ok !== true) {
@@ -296,7 +297,7 @@ export function createAttestedProjectContinuityHandler(
       });
       if (!catalogAllowsAttestedProjectContinuityAction(
         catalog,
-        trusted.deviceId,
+        targetDeviceId,
         resolved.spaceId,
         resolved.projectId,
         body.action,
@@ -321,7 +322,7 @@ export function createAttestedProjectContinuityHandler(
         ownerUserId: identity.ownerUserId,
         spaceId: resolved.spaceId,
         projectId: resolved.projectId,
-        deviceId: trusted.deviceId,
+        deviceId: targetDeviceId,
         clientKind: identity.clientKind,
         clientId: identity.clientId,
         capability: body.action,
@@ -348,6 +349,7 @@ export function createAttestedProjectContinuityHandler(
       }
       return json({
         ok: true,
+        device_id: targetDeviceId,
         request_id: result.request_id,
         effect_id: result.effect_id,
         status: result.status,

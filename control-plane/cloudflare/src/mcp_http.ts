@@ -110,9 +110,9 @@ const REPLACEMENTS = {
 };
 
 const TOOLS: ToolSpec[] = [
-  { name: "ordax_session", description: "Inspect the authenticated ORDAX Product session, the signed non-secret OAuth client_id, the durable Device-attested conversation binding when one exists, and the canonical MCP tool catalog (names, count, revision). A pending owner_selection is only a short-lived challenge code; show it to the user to compare in Conta OrdaX > Dispositivos > Vínculo MCP, where Owner must confirm the desired device. The chat cannot make that choice or treat a challenge as a grant. device_binding resolves routing only; each action still requires its current capability grant. Compare mcp_tool_names with the tools available to this conversation; if different, refresh the MCP connection." },
+  { name: "ordax_session", description: "Inspect the signed ORDAX Product client session, its first Runtime-attested device binding, and the MCP tool catalog. The binding anchors Owner/client trust, not the list of devices usable in a conversation; action destinations are explicit and independently authorized per device. Pending owner_selection remains an Owner-confirmed challenge, never a grant. Compare mcp_tool_names with connected tools; refresh the MCP connection if different." },
   { name: "ordax_profile", description: "Return the authenticated OrdaX account subject id for connector identity display. Compatibility tool: not an OS Profile, Profile Pack, Space or preferences." },
-  { name: "ordax_targets", description: "List OAuth-scoped ORDAX devices, reported presence and Owner grants. client_device_routing is only a grant-catalog preflight and never overrides a durable ordax_session.device_binding. Each complete target has a nonauthoritative connection_diagnostic: online and granted does not prove action dispatch or Runtime attestation. A partially outdated profile retains its old permissions; new capabilities need explicit Owner reauthorization. Never select an execution target solely from discovery." },
+  { name: "ordax_targets", description: "List OAuth-scoped ORDAX devices, reported presence and Owner grants. An explicit device_id may select any target with a current Owner-authorized grant for that exact action; the existing conversation binding authenticates its Owner/client rather than limiting all actions to the first device. Discovery alone grants no execution, and online does not prove Runtime readiness. New capabilities require Owner authorization." },
   { name: "ordax_action_status", description: "Read the status/result of an existing ORDAX request_id. Keep the original ID and poll until terminal; never re-enqueue a potentially non-idempotent command just because status is queued or temporarily unavailable. Optional wait_for_completion_ms long-polls up to 20 seconds without re-executing.", properties: { request_id: STRING, wait_for_completion_ms: { ...WAIT, default: 0, description: "Optional verified status long-poll, 0-20000 milliseconds; default 0 for immediate read." } }, required: ["request_id"] },
   { name: "ordax_action_list", description: "Find original action receipts from the last seven days for the current authenticated client and bound device, even when the Runtime is offline. Use ordax_action_status with the original request_id to verify the live state or recover the result. Never resubmit a command just because the receipt or outcome is uncertain.", properties: {
     pending_only: { type: "boolean", default: false, description: "Return only actions last recorded as queued, leased or running." },
@@ -1506,26 +1506,6 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       const hint = authorizationHintForAction(selectedCapability);
       return textToolResult({ ok: false, error: "product_grant_not_resolved", ...hint }, true);
     }
-    if (createdPayload.error === "product_attested_device_mismatch") {
-      return textToolResult({
-        ok: false,
-        error: "product_attested_device_mismatch",
-        required_action: "establish_attested_session_for_requested_device",
-        // The attested-device action handler denies cross-device dispatch.
-        // Preserve an actionable Owner-only recovery at the MCP tool surface,
-        // but never expose backend identity fields or accept model selection.
-        owner_action: "select_device_for_new_unbound_session_in_ordax_owner",
-        selection_location: "ordax_owner",
-        selection_scope: "new_unbound_session_only",
-        question: "Esta conversa ja esta vinculada a outro dispositivo. Para acessar o dispositivo solicitado, abra uma nova conversa e confirme a escolha na Conta OrdaX.",
-        owner_confirmation_required: true,
-        action_dispatched: false,
-        grant_evaluated: false,
-      // A denied cross-device action is a fulfilled *guidance* result, not a
-      // successful dispatch. MCP clients may hide isError=true behind a generic
-      // tool failure. structuredContent.ok=false prevents success metering.
-      }, false);
-    }
     return textToolResult({ ok: false, error: publicErrorCode(createdPayload.error, "product_action_unavailable") }, true);
   }
   const requestId = typeof createdPayload.request_id === "string" ? createdPayload.request_id : "";
@@ -1545,8 +1525,15 @@ async function callTool(source: Request, name: string, args: JsonObject, handler
       message: pendingActionMessage("queued"),
     });
   }
+  // Wait only on a target echoed by the validated enqueue handler.
+  // The bound session device may differ from this authorized action target.
+  const confirmedTarget = typeof createdPayload.device_id === "string"
+    && isCanonicalUuid(createdPayload.device_id)
+    && createdPayload.device_id.toLowerCase() === deviceId.toLowerCase()
+    ? createdPayload.device_id.toLowerCase() : undefined;
   const finalPayload = await waitForAction(
-    source, requestId, waitMs, handlers, true, createdPayload.status === "queued",
+    source, requestId, waitMs, { ...handlers, verifiedActionDeviceId: confirmedTarget },
+    true, createdPayload.status === "queued",
   );
   const action = finalPayload.action;
   const failed = finalPayload.ok === false || Boolean(action && typeof action === "object" && !Array.isArray(action) && String((action as JsonObject).status ?? "") !== "succeeded" && !finalPayload.pending);
