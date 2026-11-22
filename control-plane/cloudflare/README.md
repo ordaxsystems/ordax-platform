@@ -58,6 +58,10 @@ WebCrypto de chaves **publicas** JWKS, por identidade de objeto e algoritmo.
 A renovacao das chaves substitui os objetos e importa a nova chave; falhas de
 importacao nao ficam armazenadas. Token, assinatura, claims, expiracao e
 autorizacao continuam verificados individualmente em cada requisicao.
+A mesma verificacao OAuth tambem e reutilizada pelas operacoes Central
+resolve/open no ambito da requisicao MCP, por meio do autenticador
+request-scoped existente; a resolucao SQL, os grants e a revogacao
+permanecem atuais e nunca sao compartilhados entre conversas.
 
 **Nao** ativar cache de SQL sensivel no Hyperdrive nem cache de sessoes, grants,
 leases, revogacoes ou estado vivo. Sinais wake nao dispensam claim autorizada

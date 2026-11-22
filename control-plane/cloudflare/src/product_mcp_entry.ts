@@ -491,6 +491,16 @@ export function createCanonicalProductMcpGateway(
       // This closure belongs only to this HTTP request. Its clones share the
       // same verified bearer, never another chat's token or auth outcome.
       const authenticate = requestScopedProductMcpAuthenticator(request, env);
+      // The same request-scoped signed proof serves the MCP dispatcher and
+      // Central session coordination. PostgreSQL resolution remains fresh on
+      // every resolve/open and no OAuth decision crosses request boundaries.
+      const resolveSession: typeof resolveCentralSessionFromMcp =
+        recoveryDependencies.resolve ??
+        ((candidate, candidateEnv) => resolveCentralSessionFromMcp(candidate, candidateEnv, { authenticate }));
+      const openSession: typeof openCentralSessionFromMcp =
+        recoveryDependencies.open ??
+        ((candidate, candidateEnv, options) =>
+          openCentralSessionFromMcp(candidate, candidateEnv, { ...options, authenticate }));
       const reads = providedReads ?? createCanonicalProductMcpReadHandlers(env, { authenticate });
       const deniedHandlers: OrdaxMcpHandlers = {
         ...reads,
@@ -514,7 +524,7 @@ export function createCanonicalProductMcpGateway(
         // challenge/open RPC. The resolver revalidates OAuth and grants.
         const resolveBinding = async (): Promise<boolean> => {
           try {
-            const resolved = await (recoveryDependencies.resolve ?? resolveCentralSessionFromMcp)(
+            const resolved = await resolveSession(
               request.clone(), env,
             );
             if (!resolved.ok) return false;
@@ -534,7 +544,7 @@ export function createCanonicalProductMcpGateway(
         if (!(await resolveBinding())) {
           let openedBound = false;
           try {
-            const opened = await (recoveryDependencies.open ?? openCentralSessionFromMcp)(
+            const opened = await openSession(
               request.clone(), env, wakeDependencies,
             );
             if (opened.ok) {
@@ -573,7 +583,7 @@ export function createCanonicalProductMcpGateway(
           ...handlers,
           async listRecentActions(query) {
             try {
-              const binding = await (recoveryDependencies.resolve ?? resolveCentralSessionFromMcp)(
+              const binding = await resolveSession(
                 historyRequest, env,
               );
               if (!binding.ok) {
@@ -623,7 +633,10 @@ export function createCanonicalProductMcpGateway(
         let ownerChallengeId: string | null = null;
         try {
           const resolved = await resolveOrBootstrapAttestedSession(
-            request.clone(), env, { ...recoveryDependencies, ...wakeDependencies },
+            request.clone(), env, {
+              ...recoveryDependencies, ...wakeDependencies,
+              resolve: resolveSession, open: openSession,
+            },
           );
           if (resolved.ok) {
             trusted = Object.freeze({

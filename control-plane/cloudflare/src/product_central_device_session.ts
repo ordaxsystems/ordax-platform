@@ -56,6 +56,7 @@ type CentralMarkerContext = Readonly<{
 async function centralSessionContext(
   request: Request, env?: Env,
   authorizeNativeClient: NativeClientAuthorization = resolveForgeMcpInstance,
+  authenticateMcp: typeof authenticateProductMcpClientRequest = authenticateProductMcpClientRequest,
 ): Promise<CentralMarkerContext> {
   const denied = { marker: null, nativeClientProof: null } as const;
   const body = await readBoundedJsonObject(request.clone(), MAX_MCP_REQUEST_BYTES);
@@ -70,7 +71,7 @@ async function centralSessionContext(
       || env.FORGE_NATIVE_DELEGATION_ENABLED !== "enabled"
       || typeof native !== "string"
       || !/^[A-Za-z0-9_-]{43}$/.test(native)) return denied;
-    const identity = await authenticateProductMcpClientRequest(request.clone(), env);
+    const identity = await authenticateMcp(request.clone(), env);
     if (!identity.ok) return denied;
     // Reuse the EXACT PostgreSQL Forge consent/instance authority already
     // serving the Forge gateway. No Worker-pinned OAuth ID or second grant.
@@ -108,15 +109,17 @@ export async function openCentralSessionFromMcp(
   deps: {
     open?: typeof openCentralDeviceSession;
     authorizeNativeClient?: NativeClientAuthorization;
+    authenticate?: typeof authenticateProductMcpClientRequest;
     signalWake?: typeof scheduleProductDeviceWake;
     scheduleWake?: (wake: Promise<void>) => void;
   } = {},
 ): Promise<Response> {
-  const context = await centralSessionContext(request, env, deps.authorizeNativeClient);
+  const authenticate = deps.authenticate ?? authenticateProductMcpClientRequest;
+  const context = await centralSessionContext(request, env, deps.authorizeNativeClient, authenticate);
   if (!context.marker) return json({ ok: false, error: "central_session_marker_required" }, 409);
   // Forge Native already checked this exact signed OAuth client while
   // validating its nonce; do not verify the same JWT twice in one request.
-  const identity = context.nativeClientProof ?? await authenticateProductMcpClientRequest(request, env);
+  const identity = context.nativeClientProof ?? await authenticate(request, env);
   if (!identity.ok) return json({ ok: false, error: identity.error }, identity.status);
   try {
     const result = await (deps.open ?? openCentralDeviceSession)(env, {
@@ -155,11 +158,16 @@ export async function openCentralSessionFromMcp(
 export async function resolveCentralSessionFromMcp(
   request: Request,
   env: Env,
-  deps: { resolve?: typeof resolveCentralDeviceSession; authorizeNativeClient?: NativeClientAuthorization } = {},
+  deps: {
+    resolve?: typeof resolveCentralDeviceSession;
+    authorizeNativeClient?: NativeClientAuthorization;
+    authenticate?: typeof authenticateProductMcpClientRequest;
+  } = {},
 ) {
-  const context = await centralSessionContext(request, env, deps.authorizeNativeClient);
+  const authenticate = deps.authenticate ?? authenticateProductMcpClientRequest;
+  const context = await centralSessionContext(request, env, deps.authorizeNativeClient, authenticate);
   if (!context.marker) return { ok: false as const, error: "central_session_marker_required" };
-  const identity = context.nativeClientProof ?? await authenticateProductMcpClientRequest(request, env);
+  const identity = context.nativeClientProof ?? await authenticate(request, env);
   if (!identity.ok) return { ok: false as const, error: identity.error };
   try {
     const result = await (deps.resolve ?? resolveCentralDeviceSession)(env, {

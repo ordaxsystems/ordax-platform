@@ -8,6 +8,7 @@ import {
 } from "../cloudflare/src/product_central_device_session.ts";
 import { env, owner, client, token, withIssuer } from "./product_mcp_test_fixtures.mts";
 import { MAX_MCP_REQUEST_BYTES } from "../cloudflare/src/mcp_http.ts";
+import { requestScopedProductMcpAuthenticator } from "../cloudflare/src/product_auth.ts";
 
 const device="22222222-2222-4222-8222-222222222222";
 const challenge="33333333-3333-4333-8333-333333333333";
@@ -35,6 +36,57 @@ test("provider marker is correlation only and parsed only from tools/call _meta"
     }}),
   })),null);
   assert.equal(await centralSessionMarker(mcpRequest(jwt,"bad marker with spaces")),null);
+});
+
+test("one request-scoped OAuth proof is reused across Central resolve/open while SQL stays fresh", async () => {
+  await withIssuer(async () => {
+    const originalVerify = crypto.subtle.verify;
+    const descriptor = Object.getOwnPropertyDescriptor(crypto.subtle, "verify");
+    const incoming = mcpRequest(await token());
+    const authenticate = requestScopedProductMcpAuthenticator(incoming, env);
+    let verifications = 0;
+    let authorityReads = 0;
+    Object.defineProperty(crypto.subtle, "verify", {
+      configurable: true,
+      value: (...args: unknown[]) => {
+        verifications++;
+        return Reflect.apply(originalVerify, crypto.subtle, args);
+      },
+    });
+    try {
+      const resolved = await resolveCentralSessionFromMcp(incoming.clone(), env, {
+        authenticate,
+        resolve: async (_env, args) => {
+          authorityReads++;
+          assert.equal(args.ownerUserId, owner);
+          assert.equal(args.clientId, client);
+          return { ok: true, device_id: device };
+        },
+      });
+      assert.equal(resolved.ok, true);
+      const opened = await openCentralSessionFromMcp(incoming.clone(), env, {
+        authenticate,
+        open: async (_env, args) => {
+          authorityReads++;
+          assert.equal(args.ownerUserId, owner);
+          assert.equal(args.clientId, client);
+          return { ok: true, status: "bound", device_id: device };
+        },
+      });
+      assert.equal(opened.status, 200);
+      assert.equal(authorityReads, 2, "each Central authority operation still reads SQL");
+      assert.equal(verifications, 1, "the same signed bearer is verified once per MCP request");
+
+      const rejected = await resolveCentralSessionFromMcp(mcpRequest("bad.jwt.token"), env, {
+        authenticate,
+        resolve: async () => { throw Error("different bearer must never reach SQL"); },
+      });
+      assert.equal(rejected.ok, false, "different bearer cannot reuse the verified identity");
+    } finally {
+      if (descriptor) Object.defineProperty(crypto.subtle, "verify", descriptor);
+      else Reflect.deleteProperty(crypto.subtle, "verify");
+    }
+  });
 });
 
 test("oversized but valid tools/call JSON cannot supply a session marker or open/resolve challenge", async () => {
