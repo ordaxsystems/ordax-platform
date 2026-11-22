@@ -18,6 +18,7 @@ import {
   type ProductPostgresEnv,
 } from "./product_postgres_store.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
+import { scheduleProductDeviceWake } from "./product_device_wake.ts";
 import { hasExactQueryParameters } from "./request_query.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv & ProductGithubAppEnv;
@@ -28,6 +29,7 @@ type Dependencies = Readonly<{
   readState?: typeof readOwnerProjectOnboardingState;
   createProject?: typeof createOwnerProject;
   createBindingIntent?: typeof createOwnerProjectDeviceBindingIntent;
+  wake?: typeof scheduleProductDeviceWake;
   randomUUID?: () => string;
   now?: () => number;
 }>;
@@ -277,6 +279,7 @@ export function createOwnerProjectOnboardingHandler(env: Env, deps: Dependencies
   const readState = deps.readState ?? readOwnerProjectOnboardingState;
   const createProject = deps.createProject ?? createOwnerProject;
   const createBindingIntent = deps.createBindingIntent ?? createOwnerProjectDeviceBindingIntent;
+  const wake = deps.wake ?? scheduleProductDeviceWake;
   const randomUUID = deps.randomUUID ?? (() => crypto.randomUUID());
   const now = deps.now ?? Date.now;
 
@@ -358,6 +361,16 @@ export function createOwnerProjectOnboardingHandler(env: Env, deps: Dependencies
           expiresAt,
         });
         const result = ownerProjectDeviceBindingIntentResponse(raw, projectId, deviceId);
+        if (result.ok === true) {
+          // SQL has committed the authorized intent. The existing Device DO
+          // wake only accelerates the authenticated read; it grants nothing.
+          // Lost signals recover through the existing periodic Device read.
+          try {
+            await wake(env, deviceId);
+          } catch {
+            console.error(JSON.stringify({ event: "project_binding_wake_delivery_failed" }));
+          }
+        }
         return json(result, bindingIntentStatus(result));
       } catch (error) {
         if (error instanceof Error && error.message === "product_postgres_invalid_response") {
