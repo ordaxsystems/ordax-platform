@@ -353,14 +353,18 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
         const claimInput={ownerUserId:identity.ownerUserId,
           instanceId:String(body.instance_id).toLowerCase(),
           agentInstanceId:String(body.agent_instance_id).toLowerCase(),bootId:body.boot_id};
-        // Keep the initial claim immediate. Repeated empty results must not
-        // burn Supabase RPC and Worker CPU while the Forge queue is idle.
-        // For a 20s wait: at most six SQL-backed claims, versus up to 41.
+        // Keep the initial claim immediate. After an empty result, bounded
+        // 1s/5s/10s waits preserve recovery without hammering the SQL queue.
+        // A typical 15s Forge wait uses <=3 claims rather than 5; a 20s
+        // wait uses <=4 rather than 6. The next request claims immediately.
+        // No claim, OAuth, grant, lease or queue authority is cached.
+        const emptyClaimDelaysMs=[1000,5000,10000] as const;
         let result=await store.claim(claimInput);
         let emptyRetries=0;
         while(result.ok===true&&result.job===null&&now()<deadline){
           const remainingMs=deadline-now();
-          const delayMs=Math.min(remainingMs,500*2**Math.min(emptyRetries,4));
+          const delayMs=Math.min(remainingMs,
+            emptyClaimDelaysMs[Math.min(emptyRetries,emptyClaimDelaysMs.length-1)]);
           await sleep(Math.max(1,delayMs));
           // Never issue a redundant claim at the request deadline. The next
           // native claim remains immediate, so no work is lost.

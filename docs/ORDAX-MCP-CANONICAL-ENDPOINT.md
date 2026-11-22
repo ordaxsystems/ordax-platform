@@ -358,3 +358,21 @@ Falhas não classificadas continuam recebendo o erro genérico e fail-closed.
 O intervalo informado é um **sinal para clientes**, não um atraso imposto
 pelo Worker. A retomada real depende da autoridade PostgreSQL voltar a
 responder; não equivale a cache de permissão nem contorno de franquia.
+
+### Forge Native: cadência SQL ociosa com primeira tentativa imediata (22/11/2026)
+
+No endpoint canônico `/v1/forge/instance/claim`, o primeiro claim
+continua imediato e autenticado pelo PostgreSQL. Quando a resposta tem
+`job=null`, os intervalos seguintes passam a 1 s, 5 s e 10 s (limitados
+ao prazo da requisição), sem nova consulta no instante do vencimento.
+Para a espera padrão de 15 s, há no máximo **três claims SQL** em vez de
+cinco (40% menos leituras ociosas nesse fluxo); em 20 s, quatro em vez de
+seis. A próxima requisição volta a consultar imediatamente. Não existe
+cache de grants, jobs, tokens nem novo executor, DO ou fila; um claim só
+retorna trabalho efetivamente concedido pela função SQL canônica.
+
+**Limite da métrica:** quando a configuração ativa usa o transporte
+HTTPS autorizado ao Supabase, a economia é de operações no PostgreSQL
+sem passagem por Hyperdrive; não atribuir esses 40% a redução da franquia
+Hyperdrive sem medição de rota. A prontidão e o consumo global precisam
+continuar sendo medidos separadamente.

@@ -425,7 +425,7 @@ test("Forge MCP unauthenticated requests advertise the shared Supabase OAuth res
 });
 
 
-test("Forge native claim caps Supabase RPC polling to six empty checks per 20-second wait",async()=>{
+test("Forge native claim caps Supabase RPC polling to four empty checks per 20-second wait",async()=>{
   let clock=0;
   const sleeps:number[]=[];
   const operations:string[]=[];
@@ -447,8 +447,8 @@ test("Forge native claim caps Supabase RPC polling to six empty checks per 20-se
   },FORGE_INSTANCE_CLAIM_PATH));
   assert.equal(response.status,200);
   assert.deepEqual(await response.json(),{ok:true,job:null});
-  assert.deepEqual(operations,Array(6).fill("native_claim"));
-  assert.deepEqual(sleeps,[500,1000,2000,4000,8000,4500]);
+  assert.deepEqual(operations,Array(4).fill("native_claim"));
+  assert.deepEqual(sleeps,[1000,5000,10000,4000]);
   assert.equal(clock,20000);
 });
 
@@ -475,9 +475,31 @@ test("Forge native claim stays immediate for work and never retries on failure",
     assert.equal(claims,expected>0?expected:1);
     if(expected===3){
       assert.deepEqual((await response.json() as any).job,job);
-      assert.equal(clock,1500);
+      assert.equal(clock,6000);
     }
     if(expected===0)assert.equal(clock,0);
     if(expected===-1)assert.equal(clock,0);
   }
+});
+
+test("Forge 15s idle claim performs only three SQL checks and never invents jobs",async()=>{
+  let clock=0;
+  const sleeps:number[]=[];
+  let claims=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateOwner:(()=>ownerIdentity(FORGE_NATIVE_CLIENT)) as any,
+    now:()=>clock,
+    sleep:async(ms:number)=>{sleeps.push(ms);clock+=ms;},
+    claim:async()=>{claims++;return {ok:true,job:null};},
+  });
+  const response=await gateway(request({
+    instance_id:INSTANCE,
+    agent_instance_id:"99999999-9999-4999-8999-999999999999",
+    boot_id:"forge-test",wait_ms:15000,
+  },FORGE_INSTANCE_CLAIM_PATH));
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{ok:true,job:null});
+  assert.equal(claims,3,"old 15s cadence used five SQL-backed claims");
+  assert.deepEqual(sleeps,[1000,5000,9000]);
+  assert.equal(clock,15000);
 });
