@@ -723,7 +723,9 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
     const action = rawAction as JsonObject;
     if (!matchesId(action.request_id) || !isProductActionStatus(action.status)
       || typeof action.action !== "string" || action.action.length > 120
-      || !/^[a-z][a-z0-9._-]+$/.test(action.action)) return invalid;
+      || !/^[a-z][a-z0-9._-]+$/.test(action.action)
+      || (action.space_id !== undefined && action.space_id !== null
+        && !isCanonicalUuid(action.space_id))) return invalid;
     const status = action.status;
     const pending = !["succeeded", "failed", "cancelled", "expired"].includes(status);
     const runtimeKind = action.execution_runtime_kind;
@@ -745,6 +747,8 @@ function sanitizeActionPayload(payload: JsonObject, requestId?: string): JsonObj
       action: {
         name: typeof action.action === "string" ? action.action : "",
         ...(isCanonicalUuid(action.device_id) ? { device_id: action.device_id } : {}),
+        ...(action.space_id === null || isCanonicalUuid(action.space_id)
+          ? { space_id: action.space_id } : {}),
         project: typeof action.project === "string" ? action.project : null,
         ...(isCanonicalUuid(action.project_id) ? { project_id: action.project_id } : {}),
         status,

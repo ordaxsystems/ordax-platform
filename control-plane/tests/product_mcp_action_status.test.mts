@@ -100,8 +100,9 @@ test("invalid credentials and invalid request UUID are denied before reading act
 test("status preserves published UUIDs and Product result, excluding extra database columns", async () => {
   await withIssuer(async () => {
     const result = { ok: true, summary: "Arquivo consultado", data: { content: "texto autorizado" } };
+    const authorizedSpaceId = "55555555-5555-4555-8555-555555555555";
     const handlers = createCanonicalProductMcpReadHandlers(env, { getAction: async () => actionRecord({
-      status: "succeeded", result, finished_at: "2026-10-09T12:02:00Z",
+      status: "succeeded", result, space_id: authorizedSpaceId, finished_at: "2026-10-09T12:02:00Z",
       private_token: "private-device-token", payload: { api_key: "private-api-key" },
       owner_user_id: owner, grant_id: "internal-grant", client_id: client,
     }) });
@@ -111,6 +112,7 @@ test("status preserves published UUIDs and Product result, excluding extra datab
     assert.equal(body.action.request_id, requestId);
     assert.equal(body.action.device_id, "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
     assert.equal(body.action.project_id, projectId);
+    assert.equal(body.action.space_id, authorizedSpaceId);
     assert.equal(body.action.project, null);
     assert.equal(body.action.action, "project.text_read");
     assert.equal(body.action.status, "succeeded");
