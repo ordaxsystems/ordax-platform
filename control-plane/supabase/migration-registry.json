@@ -1545,6 +1545,18 @@
         "blob_sha": "46bc5c261c5dcd59b1f1dbf063eda823cca337e0"
       },
       "ledger_name": "product_action_space_status_projection_v1"
+    },
+    {
+      "name": "20261122090000_product_runtime_capability_manifest_v1",
+      "applied_version": "20261122092229",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261122090000_product_runtime_capability_manifest_v1.sql",
+        "blob_sha": "023b0b3d7e94cdf7cf08f7c3b8046a944c2bf978"
+      },
+      "ledger_name": "product_runtime_capability_manifest_v1"
     }
   ]
 }
