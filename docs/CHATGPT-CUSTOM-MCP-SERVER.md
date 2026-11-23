@@ -81,8 +81,8 @@ Regras de produto:
 - `forge-mcp.ordax.com.br` é um custom domain do mesmo Worker `ordax-mcp`; Cloudflare é infraestrutura de edge, não login do usuário;
 - OAuth é o mesmo Supabase do OrdaX MCP, portanto a conta é a mesma; o consentimento do Forge continua separado porque é outro cliente/superfície MCP;
 - o Forge instalado se conecta **outbound** à Platform; nenhuma porta pública, certificado Cloudflare ou CNAME por máquina faz parte do produto;
-- a Platform não mantém uma cópia manual do catálogo Forge. Cada instância Forge registra o catálogo MCP canônico e seu SHA-256; `tools/list` projeta esse catálogo e adiciona somente `forge_connection_status` e `forge_action_status`;
-- enquanto nenhuma instância Forge estiver registrada/conectada, o servidor continua instalável e expõe somente essas duas ferramentas de estado;
+- a Platform conserva somente ferramentas de gerenciamento de instâncias e recibos; cada Forge publica seu próprio catálogo MCP e SHA-256. Na versão com seleção explícita, o gateway acrescenta forge_connection_status, forge_action_status, forge_instances_list e forge_instance_select; o catálogo de tarefas continua pertencendo ao Forge.
+- sem uma instância Forge online, o servidor continua instalável e mostra apenas as quatro operações próprias da Platform. Listagem e seleção não executam tarefas nem transferem permissões.
 - OrdaX MCP continua responsável por computador/Runtime; Forge MCP continua responsável por projetos, Tasks, Runs, memória e continuidade do Forge. Não fundir as autoridades.
 
 O antigo Cloudflare Access app, o CNAME `cfargotunnel.com` e o Tunnel por máquina foram retirados em 14/11/2026. Não recriá-los como fallback.
@@ -197,3 +197,29 @@ Esse gate precisa passar sem Desktop Commander como dependência normal do produ
 - configuração de empacotamento compatível com clientes MCP: `plugins/ordax-chatgpt/mcp.json`.
 
 Arquivos históricos que usam a palavra `plugin` podem permanecer enquanto forem necessários para compatibilidade de build/review. Novos documentos e comunicação de produto devem usar **Servidor MCP personalizado do OrdaX / OrdaX MCP** como nomenclatura canônica.
+
+## Seleção explícita de instância Forge
+
+A vinculação entre um cliente ChatGPT e uma instância Forge é persistente e
+pertence exatamente à dupla conta + cliente OAuth. Ela nunca muda porque uma
+instância ficou offline ou porque outra anunciou presença.
+
+- forge_instances_list lista apenas instâncias registradas na mesma conta e
+  informa o ID selecionado. Não entrega tokens, diretórios nem catálogo externo.
+- forge_instance_select exige o ID da nova instância e o ID anteriormente
+  vinculado (expected_instance_id). O ID anterior só pode ser omitido quando
+  não existia vínculo. O banco rejeita instâncias de outra conta, offline,
+  revogadas, alterações concorrentes e solicitações ainda em execução.
+- O novo vínculo determina somente o destino de futuras chamadas do MCP.
+  Tasks, SQLite, grants, ações aceitas e recibos de cada instância continuam
+  sob suas autoridades originais. Reconsultar tools/list mostra o catálogo
+  atualizado, sem inventar ferramentas ou fazer chamadas automaticamente.
+
+**Gate de implantação:** a proposta
+control-plane/supabase/proposals/forge_mcp_explicit_instance_selection_v1.sql
+ainda **não foi aplicada**. Promover seu SQL a migrations/ em PR autorizada,
+aplicar uma única vez no PostgreSQL canônico, registrar a versão real e o blob Git
+em migration-registry.json, validar e só depois promover o Worker com as novas
+operações. Não atualizar os metadados de implantação confirmada na
+production-foundation.json até a prova dos dois lados. Main e testes verdes
+isoladamente não confirmam que o cliente ChatGPT já selecionou outra instância.

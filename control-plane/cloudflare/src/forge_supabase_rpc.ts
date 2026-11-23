@@ -1,5 +1,6 @@
 import type {
   ForgeActionReceipt,ForgeInstanceResolution,claimForgeAction,enqueueForgeAction,
+  listForgeMcpInstances,selectForgeMcpInstance,
   getForgeAction,registerForgeInstance,renewForgeAction,reportForgeAction,
   startForgeAction,updateForgePresence,
 } from "./forge_mcp_store.ts";
@@ -9,6 +10,8 @@ type Json=Record<string,unknown>;
 type RegisterInput=Parameters<typeof registerForgeInstance>[1];
 type PresenceInput=Parameters<typeof updateForgePresence>[1];
 type ResolveInput=Parameters<import("./forge_mcp_store.ts").resolveForgeMcpInstance>[1];
+type ListInput=Parameters<typeof listForgeMcpInstances>[1];
+type SelectInput=Parameters<typeof selectForgeMcpInstance>[1];
 type EnqueueInput=Parameters<typeof enqueueForgeAction>[1];
 type ClaimInput=Parameters<typeof claimForgeAction>[1];
 type StartInput=Parameters<typeof startForgeAction>[1];
@@ -120,6 +123,15 @@ export function createForgeSupabaseRpcClient(
     },
     async resolve(_input:ResolveInput):Promise<ForgeInstanceResolution>{
       return await rpc(env,authorization,"mcp_resolve",{},fetchImpl) as ForgeInstanceResolution;
+    },
+    async listInstances(_input:ListInput):Promise<Json>{
+      return rpc(env,authorization,"mcp_instances_list",{},fetchImpl);
+    },
+    async selectInstance(input:SelectInput):Promise<Json>{
+      return rpc(env,authorization,"mcp_instance_select",{
+        target_instance_id:input.targetInstanceId,
+        expected_instance_id:input.expectedInstanceId,
+      },fetchImpl);
     },
     async enqueue(input:EnqueueInput):Promise<ForgeActionReceipt>{
       return await rpc(env,authorization,"mcp_enqueue",{

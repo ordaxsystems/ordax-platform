@@ -8,6 +8,7 @@ import {verifiedMcpRetryDigest} from "./mcp_http.ts";
 import {productPostgresConfigured,type ProductPostgresEnv} from "./product_postgres_store.ts";
 import {
   registerForgeInstance,updateForgePresence,resolveForgeMcpInstance,
+  listForgeMcpInstances,selectForgeMcpInstance,
   enqueueForgeAction,claimForgeAction,startForgeAction,renewForgeAction,
   reportForgeAction,getForgeAction,type ForgeInstanceResolution,type ForgeActionReceipt,
 } from "./forge_mcp_store.ts";
@@ -54,7 +55,25 @@ const ACTION_STATUS_TOOL:ForgeTool=Object.freeze({
   inputSchema:{type:"object",properties:{request_id:{type:"string",format:"uuid"}},required:["request_id"],additionalProperties:false},
   annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
 });
-const META_NAMES=new Set([CONNECTION_TOOL.name,ACTION_STATUS_TOOL.name]);
+// Client-selected routing never silently follows another local Forge
+// instance. Listing is read-only; a switch needs an explicit CAS target.
+const INSTANCES_TOOL:ForgeTool=Object.freeze({
+  name:"forge_instances_list",
+  description:"List Forge instances registered to this authenticated account and which one this ChatGPT client is bound to. Does not switch, execute work, or grant access.",
+  inputSchema:{type:"object",properties:{},required:[],additionalProperties:false},
+  annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+});
+const SELECT_INSTANCE_TOOL:ForgeTool=Object.freeze({
+  name:"forge_instance_select",
+  description:"Explicitly bind only this authenticated ChatGPT client to one owned, online Forge instance. Supply instance_id from forge_instances_list and expected_instance_id from the current binding (omit expected_instance_id only if unbound). Fails closed on races, active requests or other accounts; does not transfer tasks or grants.",
+  inputSchema:{type:"object",properties:{
+    instance_id:{type:"string",format:"uuid"},
+    expected_instance_id:{type:"string",format:"uuid"},
+  },required:["instance_id"],additionalProperties:false},
+  annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+});
+const META_NAMES=new Set([CONNECTION_TOOL.name,ACTION_STATUS_TOOL.name,
+  INSTANCES_TOOL.name,SELECT_INSTANCE_TOOL.name]);
 
 function json(body:unknown,status=200,headers:Record<string,string>={}):Response{
   return Response.json(body,{status,headers:{
@@ -100,7 +119,7 @@ export function validForgeCatalog(value:unknown):value is ForgeTool[]{
   if(!Array.isArray(value)||value.length<1||value.length>64)return false;
   const names=new Set<string>();
   for(const tool of value){
-    if(!validCatalogTool(tool)||names.has(tool.name))return false;
+    if(!validCatalogTool(tool)||names.has(tool.name)||META_NAMES.has(tool.name))return false;
     names.add(tool.name);
   }
   return !names.has("forge_work_send")&&!names.has("forge_forjador_send");
@@ -213,6 +232,8 @@ type Dependencies=Readonly<{
   register?:typeof registerForgeInstance;
   presence?:typeof updateForgePresence;
   resolve?:typeof resolveForgeMcpInstance;
+  listInstances?:typeof listForgeMcpInstances;
+  selectInstance?:typeof selectForgeMcpInstance;
   enqueue?:typeof enqueueForgeAction;
   claim?:typeof claimForgeAction;
   start?:typeof startForgeAction;
@@ -231,6 +252,8 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
   const register=deps.register??registerForgeInstance;
   const presence=deps.presence??updateForgePresence;
   const resolve=deps.resolve??resolveForgeMcpInstance;
+  const listInstances=deps.listInstances??listForgeMcpInstances;
+  const selectInstance=deps.selectInstance??selectForgeMcpInstance;
   const enqueue=deps.enqueue??enqueueForgeAction;
   const claim=deps.claim??claimForgeAction;
   const start=deps.start??startForgeAction;
@@ -254,6 +277,8 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
       register:(input:Parameters<typeof register>[1])=>register(env,input),
       presence:(input:Parameters<typeof presence>[1])=>presence(env,input),
       resolve:(input:Parameters<typeof resolve>[1])=>resolve(env,input),
+      listInstances:(input:Parameters<typeof listInstances>[1])=>listInstances(env,input),
+      selectInstance:(input:Parameters<typeof selectInstance>[1])=>selectInstance(env,input),
       enqueue:(input:Parameters<typeof enqueue>[1])=>enqueue(env,input),
       claim:(input:Parameters<typeof claim>[1])=>claim(env,input),
       start:(input:Parameters<typeof start>[1])=>start(env,input),
@@ -454,7 +479,7 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
 
     if(message.method==="tools/list"){
       const resolution=await resolveFor(identity,store);
-      const tools=[CONNECTION_TOOL,ACTION_STATUS_TOOL,
+      const tools=[CONNECTION_TOOL,ACTION_STATUS_TOOL,INSTANCES_TOOL,SELECT_INSTANCE_TOOL,
         ...(resolution.ok&&instancePresenceFresh(resolution,now())&&
            validForgeCatalog(resolution.catalog)?resolution.catalog:[])];
       return rpcResult(id,{tools});
@@ -474,6 +499,29 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
       return rpcResult(id,toolResult(receipt,receipt.ok!==true));
     }
 
+    if(name===INSTANCES_TOOL.name){
+      if(Object.keys(args).length!==0)return rpcError(id,-32602,"Invalid Forge instance list arguments");
+      const candidates=await store.listInstances({
+        ownerUserId:identity.ownerUserId,clientId:identity.clientId,
+      });
+      return rpcResult(id,toolResult(candidates,candidates.ok!==true));
+    }
+    if(name===SELECT_INSTANCE_TOOL.name){
+      const keys=Object.keys(args).sort();
+      if(!isCanonicalUuid(args.instance_id)||
+         (keys.join("|")!=="instance_id"&&
+          keys.join("|")!=="expected_instance_id|instance_id")||
+         (Object.hasOwn(args,"expected_instance_id")&&
+          !isCanonicalUuid(args.expected_instance_id)))
+        return rpcError(id,-32602,"Invalid Forge instance selection arguments");
+      const selected=await store.selectInstance({
+        ownerUserId:identity.ownerUserId,clientId:identity.clientId,
+        targetInstanceId:String(args.instance_id).toLowerCase(),
+        expectedInstanceId:Object.hasOwn(args,"expected_instance_id")
+          ?String(args.expected_instance_id).toLowerCase():null,
+      });
+      return rpcResult(id,toolResult(selected,selected.ok!==true));
+    }
     // Status lookup is independently OAuth/grant scoped by the SQL authority.
     // Only catalog, connection, and tool dispatch need instance resolution.
     const resolution=await resolveFor(identity,store);
