@@ -70,6 +70,39 @@ Princípios obrigatórios:
 - não existe fallback silencioso para o Worker legado;
 - o Runtime aplica uma política local adicional antes da execução.
 
+### Diagnóstico de grants de continuidade (22/11/2026)
+
+Se `repository_catalog` responder `product_grant_not_resolved`,
+consultar `ordax_session` (vínculo e catálogo) e `ordax_targets` (grant
+do **cliente OAuth atual**, não de outro chat/cliente) antes de agir.
+O Owner deve selecionar **o cliente e o dispositivo corretos** na
+superfície autenticada de permissões `OrdaX Owner`,
+`/v3/owner/remote-grant-groups`:
+
+- `repository-catalog-read` — perfil **de dispositivo**, concede apenas
+  `workspace.repository_catalog` em modo leitura.
+- `project-continuity` — perfil **de projeto**, exige associação vigente
+  Owner/Space/projeto/repositório/dispositivo, autoriza apenas as ações
+  `agent.project_briefing`, `continuity.get/update` e `handoff.get/create`,
+  com seus modos de acesso próprios.
+
+Os perfis e capacidades acima **derivam de**
+`product_owner_grant_profiles.ts` e `product_action_scope.ts`; não são
+um segundo catálogo de autorização. O retorno de erro em `mcp_http.ts`
+deve incluir `required_owner_profile` e `authorization_surface`.
+`full-computer-control` não substitui qualquer um desses grants.
+O Worker e o Runtime **nunca concedem permissão ao próprio cliente**
+para satisfazer uma chamada; não inserir linhas de grant manualmente.
+
+Se `ordax_session` informar o catálogo atualizado, mas o ChatGPT ainda
+mostrar `continuity_update` sem `expected_revision`, atualizar a
+conexão do **mesmo** servidor MCP personalizado no cliente, sem criar
+outro endpoint, token ou grants. Só gravar continuidade com
+`expected_revision` da leitura `continuity_state`. Conceder o grant
+não comprova a operação: após autorização, repetir somente a leitura
+de catálogo e validar uma atualização CAS real em projeto autorizado,
+sem repetir tarefas com efeito incerto.
+
 ## Medição de uso e planos
 
 O OrdaX MCP está recebendo um medidor de chamadas para dimensionar os planos e
