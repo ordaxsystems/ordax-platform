@@ -216,8 +216,8 @@ instância ficou offline ou porque outra anunciou presença.
   atualizado, sem inventar ferramentas ou fazer chamadas automaticamente.
 
 **Gate de implantação:** a proposta
-control-plane/supabase/proposals/forge_mcp_explicit_instance_selection_v1.sql
-ainda **não foi aplicada**. Promover seu SQL a migrations/ em PR autorizada,
+control-plane/supabase/migrations/20261123100000_forge_mcp_explicit_instance_selection_v1.sql
+deve ser aplicada uma única vez como SQL canônico no projeto autorizado,
 aplicar uma única vez no PostgreSQL canônico, registrar a versão real e o blob Git
 em migration-registry.json, validar e só depois promover o Worker com as novas
 operações. Não atualizar os metadados de implantação confirmada na
