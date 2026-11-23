@@ -152,10 +152,14 @@ test("mission process list must not acknowledge legacy agents that silently igno
         { ok: true, data: { ...good.data, next_offset: undefined } },
       ]) {
         const response = await get(capability, invalid);
-        assert.equal(response.status, 502);
-        assert.deepEqual(await response.json(), {
+        assert.equal(response.status, 200);
+        const body = await response.json();
+        assert.equal(body.action.request_id, requestId);
+        assert.equal(body.action.status, "failed");
+        assert.equal(body.action.error_code, "runtime_action_failed");
+        assert.deepEqual(body.action.result, {
           ok: false, error: "product_runtime_process_list_contract_mismatch",
-          request_id: requestId, action_dispatched: true,
+          source_status: "succeeded",
           owner_action: "update_target_runtime_to_current_process_list_contract",
         });
       }
@@ -166,6 +170,31 @@ test("mission process list must not acknowledge legacy agents that silently igno
     }
     const untouched = await get("computer.process_status", legacy);
     assert.equal(untouched.status, 200);
+  });
+});
+
+test("MCP status presents an incompatible Native list as terminal contract failure", async () => {
+  await withIssuer(async () => {
+    const handlers = createCanonicalProductMcpReadHandlers(env, {
+      getAction: async () => actionRecord({
+        capability: "computer.process_list", status: "succeeded",
+        result: { ok: true, data: { total_registered: 7, returned: 7, truncated: false, processes: [] } },
+      }),
+    });
+    const response = await handleOrdaxMcp(new Request("https://ordax.example/mcp", {
+      method: "POST",
+      headers: { authorization: "Bearer " + await token(), "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: "ordax_action_status", arguments: { request_id: requestId } } }),
+    }), handlers);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    const status = body.result.structuredContent;
+    assert.equal(status.pending, false);
+    assert.equal(status.request_id, requestId);
+    assert.equal(status.action.status, "failed");
+    assert.equal(status.action.result.error, "product_runtime_process_list_contract_mismatch");
+    assert.notEqual(status.error, "action_status_unavailable");
   });
 });
 

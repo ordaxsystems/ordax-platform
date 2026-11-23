@@ -206,15 +206,8 @@ export function createCanonicalProductMcpReadHandlers(
         if (!validAction(result, requestId)) {
           return json({ ok: false, error: "product_postgres_invalid_response" }, 502);
         }
-        // Older Native agents silently ignored mission_id/offset and returned
-        // unfiltered history as a successful lookup. Never advertise that as
-        // a successful mission discovery; the stored request remains read-only.
-        if (!validMissionListReceipt(result)) {
-          return json({ ok: false, error: "product_runtime_process_list_contract_mismatch",
-            request_id: result.request_id, action_dispatched: true,
-            owner_action: "update_target_runtime_to_current_process_list_contract" }, 502);
-        }
-        return json({ ok: true, action: {
+        const mismatch = !validMissionListReceipt(result);
+        const action = {
           request_id: result.request_id,
           device_id: result.device_id,
           space_id: result.space_id,
@@ -230,7 +223,20 @@ export function createCanonicalProductMcpReadHandlers(
           created_at: timestamp(result.created_at),
           started_at: timestamp(result.started_at),
           finished_at: timestamp(result.finished_at),
+        };
+        // The stored executor status remains available inside source_status.
+        // The Product tool fails terminally when its result violates the
+        // promised filter/pagination contract; never turn a verified receipt
+        // into an indefinite action_status_unavailable HTTP 502.
+        if (mismatch) return json({ ok: true, action: {
+          ...action, status: "failed", error_code: "runtime_action_failed",
+          result: {
+            ok: false, error: "product_runtime_process_list_contract_mismatch",
+            source_status: result.status,
+            owner_action: "update_target_runtime_to_current_process_list_contract",
+          },
         } });
+        return json({ ok: true, action });
       } catch (error) {
         return unavailable(error, "product_action_status_unavailable");
       }
