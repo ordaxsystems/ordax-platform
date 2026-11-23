@@ -49,6 +49,8 @@ function resolution(lastSeenAt:string=new Date().toISOString()){
 test("Forge catalog validator accepts the App-owned MCP projection and rejects direct GPT send",()=>{
   assert.equal(validForgeCatalog(CATALOG),true);
   assert.equal(validForgeCatalog([...CATALOG,{...CATALOG[0],name:"forge_work_send"}]),false);
+  assert.equal(validForgeCatalog([{...CATALOG[0],name:"forge_instance_select"}]),false);
+  assert.equal(validForgeCatalog([{...CATALOG[0],name:"forge_instances_list"}]),false);
 });
 
 test("Forge MCP initialize matches the ChatGPT-compatible OrdaX MCP protocol",async()=>{
@@ -73,7 +75,7 @@ test("Forge MCP tools/list projects the instance catalog without duplicating it 
   assert.equal(response.status,200);
   const body:any=await response.json();
   const names=body.result.tools.map((x:any)=>x.name);
-  assert.deepEqual(names,["forge_connection_status","forge_action_status","forge_projects_list"]);
+  assert.deepEqual(names,["forge_connection_status","forge_action_status","forge_instances_list","forge_instance_select","forge_projects_list"]);
 });
 
 test("Forge status and tool execution require recent physical executor heartbeat",async()=>{
@@ -314,7 +316,7 @@ test("Forge MCP stays installable when no Forge instance is registered",async()=
   const response=await gateway(request({jsonrpc:"2.0",id:1,method:"tools/list",params:{}}));
   const body:any=await response.json();
   assert.deepEqual(body.result.tools.map((x:any)=>x.name),
-    ["forge_connection_status","forge_action_status"]);
+    ["forge_connection_status","forge_action_status","forge_instances_list","forge_instance_select"]);
 });
 
 test("Forge native registration accepts only a catalog whose digest matches exact canonical bytes",async()=>{
@@ -420,7 +422,7 @@ test("Forge MCP tools/list uses Supabase HTTPS RPC instead of Hyperdrive when co
   assert.equal(response.status,200);
   const body:any=await response.json();
   assert.deepEqual(body.result.tools.map((x:any)=>x.name),
-    ["forge_connection_status","forge_action_status","forge_projects_list"]);
+    ["forge_connection_status","forge_action_status","forge_instances_list","forge_instance_select","forge_projects_list"]);
   assert.equal(remoteCalls,1);
   assert.equal(legacyResolves,0);
 });
@@ -555,4 +557,121 @@ test("Forge 15s idle claim performs only three SQL checks and never invents jobs
   assert.equal(claims,3,"old 15s cadence used five SQL-backed claims");
   assert.deepEqual(sleeps,[1000,5000,9000]);
   assert.equal(clock,15000);
+});
+
+
+test("Forge instance choice is explicit even when the selected old instance is offline",async()=>{
+  const TARGET="77777777-7777-4777-8777-777777777777";
+  const observed:any[]=[];
+  let binding=INSTANCE,queueCalls=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,
+    resolve:async()=>({...resolution("2026-11-21T00:00:00Z"),
+      instance_id:binding,online:false}),
+    listInstances:async(_env,input:any)=>{
+      observed.push(["list",input]);
+      return {ok:true,bound_instance_id:binding,candidate_count:2,
+        instances:[
+          {instance_id:INSTANCE,display_name:"OrdaX Forge",online:false,selected:binding===INSTANCE},
+          {instance_id:TARGET,display_name:"Forge Achegue-se",online:true,selected:binding===TARGET},
+        ]};
+    },
+    selectInstance:async(_env,input:any)=>{
+      observed.push(["select",input]);
+      if(input.expectedInstanceId!==binding)
+        return {ok:false,error:"forge_instance_binding_conflict"};
+      if(input.targetInstanceId!==TARGET)
+        return {ok:false,error:"forge_instance_target_unavailable"};
+      binding=TARGET;
+      return {ok:true,instance_id:TARGET,previous_instance_id:INSTANCE,changed:true};
+    },
+    enqueue:async()=>{queueCalls++;throw Error("routing selection must not enqueue a task");},
+  });
+  const list=await gateway(request({jsonrpc:"2.0",id:1,method:"tools/list"}));
+  const names=(await list.json() as any).result.tools.map((x:any)=>x.name);
+  assert.deepEqual(names,["forge_connection_status","forge_action_status",
+    "forge_instances_list","forge_instance_select"],"only meta tools are exposed offline");
+  assert.equal(binding,INSTANCE);
+  const candidates=await gateway(request({jsonrpc:"2.0",id:2,method:"tools/call",
+    params:{name:"forge_instances_list",arguments:{}}}));
+  const listed:any=(await candidates.json()).result.structuredContent;
+  assert.equal(listed.bound_instance_id,INSTANCE);
+  assert.equal(listed.instances[1].display_name,"Forge Achegue-se");
+  assert.equal(binding,INSTANCE,"read-only listing must not change binding");
+  const noCAS=await gateway(request({jsonrpc:"2.0",id:3,method:"tools/call",
+    params:{name:"forge_instance_select",arguments:{instance_id:TARGET}}}));
+  const rejected:any=(await noCAS.json()).result;
+  assert.equal(rejected.isError,true);
+  assert.equal(rejected.structuredContent.error,"forge_instance_binding_conflict");
+  assert.equal(binding,INSTANCE);
+  const selected=await gateway(request({jsonrpc:"2.0",id:4,method:"tools/call",
+    params:{name:"forge_instance_select",
+      arguments:{instance_id:TARGET,expected_instance_id:INSTANCE}}}));
+  const receipt:any=(await selected.json()).result;
+  assert.equal(receipt.isError,undefined);
+  assert.equal(receipt.structuredContent.instance_id,TARGET);
+  assert.equal(binding,TARGET);
+  assert.equal(queueCalls,0);
+  assert.deepEqual(observed.map(x=>x[1].ownerUserId),[OWNER,OWNER,OWNER]);
+  assert.deepEqual(observed.map(x=>x[1].clientId),[CLIENT,CLIENT,CLIENT]);
+  assert.equal(observed[2][1].expectedInstanceId,INSTANCE);
+});
+
+test("Forge instance selection rejects invalid inputs before any DB mutation",async()=>{
+  let calls=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,
+    selectInstance:async()=>{calls++;return {ok:true};},
+    listInstances:async()=>{calls++;return {ok:true,instances:[]};},
+  });
+  for(const [tool,args] of [
+    ["forge_instance_select",{}],
+    ["forge_instance_select",{instance_id:"not-a-uuid"}],
+    ["forge_instance_select",{instance_id:INSTANCE,expected_instance_id:"stale"}],
+    ["forge_instance_select",{instance_id:INSTANCE,expected_instance_id:null}],
+    ["forge_instance_select",{instance_id:INSTANCE,client_id:CLIENT}],
+    ["forge_instances_list",{client_id:CLIENT}],
+  ]){
+    const response=await gateway(request({jsonrpc:"2.0",id:12,method:"tools/call",
+      params:{name:tool,arguments:args}}));
+    const result:any=await response.json();
+    assert.equal(result.error?.code,-32602,tool+" "+JSON.stringify(args));
+  }
+  assert.equal(calls,0);
+});
+
+
+test("HTTPS Forge instance selection passes only verified OAuth and exact CAS arguments",async()=>{
+  const operations:string[]=[];
+  const destination="77777777-7777-4777-8777-777777777777";
+  const gateway=createForgeMcpGateway({...env,
+    FORGE_SUPABASE_PUBLISHABLE_KEY:"sb_publishable_test"},{
+    authenticateMcp:mcpIdentity as any,
+    fetchImpl:(async(url:any,init:any)=>{
+      assert.match(String(url),/\/rest\/v1\/rpc\/ordax_forge_http_rpc_v1$/);
+      assert.equal(init.headers.authorization,"Bearer test");
+      const body=JSON.parse(String(init.body));
+      operations.push(body.p_operation);
+      if(body.p_operation==="mcp_instances_list"){
+        assert.deepEqual(body.p_payload,{});
+        return Response.json({ok:true,bound_instance_id:INSTANCE,candidate_count:2,
+          instances:[{instance_id:INSTANCE,online:false},
+            {instance_id:destination,online:true}]});
+      }
+      assert.equal(body.p_operation,"mcp_instance_select");
+      assert.deepEqual(body.p_payload,
+        {target_instance_id:destination,expected_instance_id:INSTANCE});
+      return Response.json({ok:true,instance_id:destination,
+        previous_instance_id:INSTANCE,changed:true});
+    }) as any,
+  });
+  const listed=await gateway(request({jsonrpc:"2.0",id:1,method:"tools/call",
+    params:{name:"forge_instances_list",arguments:{}}}));
+  const candidates:any=(await listed.json()).result.structuredContent;
+  assert.equal(candidates.candidate_count,2);
+  const switched=await gateway(request({jsonrpc:"2.0",id:2,method:"tools/call",
+    params:{name:"forge_instance_select",
+      arguments:{instance_id:destination,expected_instance_id:INSTANCE}}}));
+  assert.equal((await switched.json() as any).result.structuredContent.instance_id,destination);
+  assert.deepEqual(operations,["mcp_instances_list","mcp_instance_select"]);
 });

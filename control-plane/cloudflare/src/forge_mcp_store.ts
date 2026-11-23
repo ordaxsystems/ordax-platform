@@ -84,6 +84,22 @@ export async function resolveForgeMcpInstance(env:ProductPostgresEnv,input:Reado
   ]);
 }
 
+export async function listForgeMcpInstances(env:ProductPostgresEnv,input:Readonly<{
+  ownerUserId:string;clientId:string;
+}>):Promise<Json>{
+  return rpc<Json>(env,"ordax_list_forge_mcp_instances_v1",[
+    input.ownerUserId,input.clientId,
+  ]);
+}
+
+export async function selectForgeMcpInstance(env:ProductPostgresEnv,input:Readonly<{
+  ownerUserId:string;clientId:string;targetInstanceId:string;expectedInstanceId:string|null;
+}>):Promise<Json>{
+  return rpc<Json>(env,"ordax_select_forge_mcp_instance_v1",[
+    input.ownerUserId,input.clientId,input.targetInstanceId,input.expectedInstanceId,
+  ]);
+}
+
 export async function enqueueForgeAction(env:ProductPostgresEnv,input:Readonly<{
   ownerUserId:string;clientId:string;instanceId:string;toolName:string;
   accessMode:"read"|"write";arguments:Json;idempotencyKey:string;expiresAt:string;
