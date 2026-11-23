@@ -19,6 +19,27 @@ const valid = {
 const auth = (value:string, method="GET", url=endpoint) =>
   new Request(url,{method,headers:{authorization:"Bearer "+value}});
 
+test("every canonical PostgreSQL RPC call has a registry spec, including Owner device inventory", () => {
+  // The real ownerDevices handler is dependency-injected in the route tests.
+  // Production previously returned HTTP 503 because the SQL RPC was present
+  // but its local cast/key spec was missing; mock-based route tests missed it.
+  const source = readFileSync(path.resolve(here,
+    "../cloudflare/src/product_postgres_store.ts"), "utf8");
+  const start = source.indexOf("const RPC_SPECS = {");
+  const end = source.indexOf("} as const;", start);
+  assert.ok(start >= 0 && end > start, "canonical SQL registry must exist");
+  const registry = source.slice(start, end);
+  const registered = new Set([...registry.matchAll(/^\s+(ordax_[a-z0-9_]+):\s*\{/gm)]
+    .map(match => match[1]));
+  const called = [...source.matchAll(/callRpc(?:<[^>]+>)?\(\s*env,\s*"([^"]+)"/g)]
+    .map(match => match[1]);
+  assert.ok(called.length > 35, "verify all real typed RPC callsites");
+  assert.deepEqual([...new Set(called.filter(name => !registered.has(name)))], [],
+    "no RPC callsite may lack canonical SQL parameter types");
+  assert.match(registry,
+    /ordax_owner_mcp_devices_v1:\s*\{\s*keys:\s*\["p_owner_user_id"\],\s*casts:\s*\["uuid"\],\s*\}/);
+});
+
 test("MCP Owner inventory is routed through the canonical trusted ingress", () => {
   assert.equal(isProductTrustedClientPath("/v3/owner/devices"),true);
   assert.equal(isProductTrustedClientPath("/v3/owner/devices/other"),false);
