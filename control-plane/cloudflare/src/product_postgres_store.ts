@@ -383,6 +383,12 @@ const RPC_SPECS = {
     keys: ["p_owner_user_id", "p_grant_group_id"],
     casts: ["uuid", "uuid"],
   },
+  // Read-only Owner inventory; its SQL authority is already applied and
+  // grants EXECUTE only to the canonical edge executor role.
+  ordax_owner_mcp_devices_v1: {
+    keys: ["p_owner_user_id"],
+    casts: ["uuid"],
+  },
   ordax_owner_mcp_remote_authority_v1: {
     keys: ["p_owner_user_id", "p_device_id"],
     casts: ["uuid", "uuid"],
