@@ -81,6 +81,36 @@ function validAction(value: unknown, requestId: string): value is Record<string,
     && Object.hasOwn(action, "result") && action.result !== undefined;
 }
 
+function validMissionListReceipt(action: Record<string, unknown>): boolean {
+  if (action.status !== "succeeded" ||
+      (action.capability !== "computer.process_list" && action.capability !== "process.list")) {
+    return true;
+  }
+  const receipt = action.result;
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
+  const envelope = receipt as Record<string, unknown>;
+  const raw = envelope.data;
+  if (envelope.ok !== true || !raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const data = raw as Record<string, unknown>;
+  const count = (value: unknown) =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  if (!Array.isArray(data.processes) || data.processes.length > 24 ||
+      !count(data.total_registered) || !count(data.total_matching) ||
+      !count(data.offset) || !count(data.returned) ||
+      data.returned !== data.processes.length ||
+      Number(data.total_matching) > Number(data.total_registered) ||
+      (Number(data.returned) > 0 &&
+        Number(data.offset) + Number(data.returned) > Number(data.total_matching)) ||
+      data.offset > 1_000_000 ||
+      typeof data.truncated !== "boolean" ||
+      !Object.hasOwn(data, "next_offset")) return false;
+  if (data.next_offset === null) return data.truncated === false;
+  return count(data.next_offset) &&
+    Number(data.next_offset) > Number(data.offset) &&
+    Number(data.next_offset) <= Number(data.total_matching) &&
+    data.truncated === true;
+}
+
 function unavailable(error: unknown, code: string): Response {
   const unconfigured = error instanceof ProductPostgresError
     && error.code === "product_postgres_unconfigured";
@@ -175,6 +205,14 @@ export function createCanonicalProductMcpReadHandlers(
         }
         if (!validAction(result, requestId)) {
           return json({ ok: false, error: "product_postgres_invalid_response" }, 502);
+        }
+        // Older Native agents silently ignored mission_id/offset and returned
+        // unfiltered history as a successful lookup. Never advertise that as
+        // a successful mission discovery; the stored request remains read-only.
+        if (!validMissionListReceipt(result)) {
+          return json({ ok: false, error: "product_runtime_process_list_contract_mismatch",
+            request_id: result.request_id, action_dispatched: true,
+            owner_action: "update_target_runtime_to_current_process_list_contract" }, 502);
         }
         return json({ ok: true, action: {
           request_id: result.request_id,
