@@ -215,9 +215,11 @@ instância ficou offline ou porque outra anunciou presença.
   sob suas autoridades originais. Reconsultar tools/list mostra o catálogo
   atualizado, sem inventar ferramentas ou fazer chamadas automaticamente.
 
-**Gate de implantação:** aplicar e validar
-control-plane/supabase/migrations/20261123020000_forge_mcp_explicit_instance_selection_v1.sql
-no PostgreSQL de produção **antes** de promover o Worker com as novas
+**Gate de implantação:** a proposta
+control-plane/supabase/proposals/forge_mcp_explicit_instance_selection_v1.sql
+ainda **não foi aplicada**. Promover seu SQL a migrations/ em PR autorizada,
+aplicar uma única vez no PostgreSQL canônico, registrar a versão real e o blob Git
+em migration-registry.json, validar e só depois promover o Worker com as novas
 operações. Não atualizar os metadados de implantação confirmada na
 production-foundation.json até a prova dos dois lados. Main e testes verdes
 isoladamente não confirmam que o cliente ChatGPT já selecionou outra instância.

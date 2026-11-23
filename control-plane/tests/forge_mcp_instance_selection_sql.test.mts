@@ -7,10 +7,10 @@ import {fileURLToPath} from "node:url";
 
 const require=createRequire(new URL("../cloudflare/package.json",import.meta.url));
 const {PGlite}=require("@electric-sql/pglite");
-const folder=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"../supabase/migrations");
+const folder=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"../supabase/proposals");
 const migration=fs.readFileSync(path.join(folder,
-  "20261123020000_forge_mcp_explicit_instance_selection_v1.sql"),"utf8");
-const original=fs.readFileSync(path.join(folder,
+  "forge_mcp_explicit_instance_selection_v1.sql"),"utf8");
+const original=fs.readFileSync(path.join(path.resolve(folder,"../migrations"),
   "20261114210500_forge_https_rpc_transport_v1.sql"),"utf8");
 const OWNER="11111111-1111-4111-8111-111111111111";
 const OTHER="99999999-9999-4999-8999-999999999999";
