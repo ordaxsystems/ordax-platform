@@ -125,6 +125,50 @@ test("status preserves published UUIDs and Product result, excluding extra datab
   });
 });
 
+test("mission process list must not acknowledge legacy agents that silently ignore filters", async () => {
+  await withIssuer(async () => {
+    const good = { ok: true, data: {
+      total_registered: 473, total_matching: 1, offset: 0, next_offset: null,
+      returned: 1, truncated: false, processes: [{ process_id: requestId }],
+    } };
+    const legacy = { ok: true, data: {
+      total_registered: 7, returned: 7, truncated: false, processes: Array(7).fill({ process_id: requestId }),
+    } };
+    const get = async (capability: string, result: unknown, status = "succeeded") => {
+      const handlers = createCanonicalProductMcpReadHandlers(env, {
+        getAction: async () => actionRecord({ capability, status, result }),
+      });
+      return handlers.getAction(request(await token()), requestId);
+    };
+    for (const capability of ["computer.process_list", "process.list"]) {
+      const accepted = await get(capability, good);
+      assert.equal(accepted.status, 200);
+      assert.deepEqual((await accepted.json()).action.result, good);
+      for (const invalid of [
+        legacy,
+        { ok: true, data: { ...good.data, total_matching: 0 } },
+        { ok: true, data: { ...good.data, returned: 2 } },
+        { ok: true, data: { ...good.data, next_offset: 0, truncated: true } },
+        { ok: true, data: { ...good.data, next_offset: undefined } },
+      ]) {
+        const response = await get(capability, invalid);
+        assert.equal(response.status, 502);
+        assert.deepEqual(await response.json(), {
+          ok: false, error: "product_runtime_process_list_contract_mismatch",
+          request_id: requestId, action_dispatched: true,
+          owner_action: "update_target_runtime_to_current_process_list_contract",
+        });
+      }
+      const pending = await get(capability, null, "running");
+      assert.equal(pending.status, 200);
+      const failed = await get(capability, null, "failed");
+      assert.equal(failed.status, 200);
+    }
+    const untouched = await get("computer.process_status", legacy);
+    assert.equal(untouched.status, 200);
+  });
+});
+
 test("MCP polls the same accepted action through all statuses without dispatch or device discovery", async () => {
   await withIssuer(async () => {
     let status = "queued";
