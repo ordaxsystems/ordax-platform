@@ -51,6 +51,8 @@ test("Forge catalog validator accepts the App-owned MCP projection and rejects d
   assert.equal(validForgeCatalog([...CATALOG,{...CATALOG[0],name:"forge_work_send"}]),false);
   assert.equal(validForgeCatalog([{...CATALOG[0],name:"forge_instance_select"}]),false);
   assert.equal(validForgeCatalog([{...CATALOG[0],name:"forge_instances_list"}]),false);
+  assert.equal(validForgeCatalog([{...CATALOG[0],name:"forge_catalog_tools"}]),false);
+  assert.equal(validForgeCatalog([{...CATALOG[0],name:"forge_tool_dispatch"}]),false);
 });
 
 test("Forge MCP initialize matches the ChatGPT-compatible OrdaX MCP protocol",async()=>{
@@ -75,7 +77,7 @@ test("Forge MCP tools/list projects the instance catalog without duplicating it 
   assert.equal(response.status,200);
   const body:any=await response.json();
   const names=body.result.tools.map((x:any)=>x.name);
-  assert.deepEqual(names,["forge_connection_status","forge_action_status","forge_instances_list","forge_instance_select","forge_projects_list"]);
+  assert.deepEqual(names,["forge_connection_status","forge_action_status","forge_instances_list","forge_instance_select","forge_catalog_tools","forge_tool_dispatch","forge_projects_list"]);
 });
 
 test("Forge status and tool execution require recent physical executor heartbeat",async()=>{
@@ -316,7 +318,7 @@ test("Forge MCP stays installable when no Forge instance is registered",async()=
   const response=await gateway(request({jsonrpc:"2.0",id:1,method:"tools/list",params:{}}));
   const body:any=await response.json();
   assert.deepEqual(body.result.tools.map((x:any)=>x.name),
-    ["forge_connection_status","forge_action_status","forge_instances_list","forge_instance_select"]);
+    ["forge_connection_status","forge_action_status","forge_instances_list","forge_instance_select","forge_catalog_tools","forge_tool_dispatch"]);
 });
 
 test("Forge native registration accepts only a catalog whose digest matches exact canonical bytes",async()=>{
@@ -422,7 +424,7 @@ test("Forge MCP tools/list uses Supabase HTTPS RPC instead of Hyperdrive when co
   assert.equal(response.status,200);
   const body:any=await response.json();
   assert.deepEqual(body.result.tools.map((x:any)=>x.name),
-    ["forge_connection_status","forge_action_status","forge_instances_list","forge_instance_select","forge_projects_list"]);
+    ["forge_connection_status","forge_action_status","forge_instances_list","forge_instance_select","forge_catalog_tools","forge_tool_dispatch","forge_projects_list"]);
   assert.equal(remoteCalls,1);
   assert.equal(legacyResolves,0);
 });
@@ -590,7 +592,8 @@ test("Forge instance choice is explicit even when the selected old instance is o
   const list=await gateway(request({jsonrpc:"2.0",id:1,method:"tools/list"}));
   const names=(await list.json() as any).result.tools.map((x:any)=>x.name);
   assert.deepEqual(names,["forge_connection_status","forge_action_status",
-    "forge_instances_list","forge_instance_select"],"only meta tools are exposed offline");
+    "forge_instances_list","forge_instance_select","forge_catalog_tools",
+    "forge_tool_dispatch"],"stable meta tools are exposed offline");
   assert.equal(binding,INSTANCE);
   const candidates=await gateway(request({jsonrpc:"2.0",id:2,method:"tools/call",
     params:{name:"forge_instances_list",arguments:{}}}));
@@ -674,4 +677,129 @@ test("HTTPS Forge instance selection passes only verified OAuth and exact CAS ar
       arguments:{instance_id:destination,expected_instance_id:INSTANCE}}}));
   assert.equal((await switched.json() as any).result.structuredContent.instance_id,destination);
   assert.deepEqual(operations,["mcp_instances_list","mcp_instance_select"]);
+});
+
+
+test("Forge stable catalog exposes the exact live App tool schemas without new effects",async()=>{
+  let resolutions=0,enqueues=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,resolve:async()=>{resolutions++;return resolution();},
+    enqueue:async()=>{enqueues++;throw Error("catalog never enqueues");},
+  });
+  const good=await gateway(request({jsonrpc:"2.0",id:500,method:"tools/call",
+    params:{name:"forge_catalog_tools",arguments:{}}}));
+  const listed:any=(await good.json()).result.structuredContent;
+  assert.equal(listed.ok,true);
+  assert.equal(listed.instance_id,INSTANCE);
+  assert.equal(listed.catalog_digest,"a".repeat(64));
+  assert.deepEqual(listed.tools,CATALOG);
+  assert.equal(enqueues,0);
+  assert.equal(resolutions,1);
+  const bad=await gateway(request({jsonrpc:"2.0",id:501,method:"tools/call",
+    params:{name:"forge_catalog_tools",arguments:{unexpected:true}}}));
+  assert.equal((await bad.json() as any).error.code,-32602);
+  assert.equal(enqueues,0);
+});
+
+test("Forge stable dispatch routes read tools through the existing instance ledger",async()=>{
+  const enqueued:any[]=[];
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,resolve:async()=>resolution(),
+    randomUUID:()=> "66666666-6666-4666-8666-666666666666",
+    enqueue:async(_env,record:any)=>{
+      enqueued.push(record);
+      return {ok:true,request_id:REQUEST,effect_id:EFFECT,status:"queued"};
+    },
+    getAction:async()=>({ok:true,request_id:REQUEST,effect_id:EFFECT,
+      status:"succeeded",result:{projects:[{name:"Achegue-se"}]},error_code:null}),
+  });
+  const result=await gateway(request({jsonrpc:"2.0",id:502,method:"tools/call",
+    params:{name:"forge_tool_dispatch",
+      arguments:{tool_name:"forge_projects_list",arguments:{}}}}));
+  const value:any=(await result.json()).result;
+  assert.equal(value.isError,undefined);
+  assert.deepEqual(value.structuredContent,{projects:[{name:"Achegue-se"}]});
+  assert.equal(enqueued.length,1);
+  assert.equal(enqueued[0].instanceId,INSTANCE);
+  assert.equal(enqueued[0].toolName,"forge_projects_list");
+  assert.equal(enqueued[0].accessMode,"read");
+  assert.deepEqual(enqueued[0].arguments,{});
+  assert.equal(enqueued[0].idempotencyKey,
+    "forge:read:66666666-6666-4666-8666-666666666666");
+});
+
+test("Forge stable dispatch rejects spoofed, cross-surface or unlisted operations before any effect",async()=>{
+  let enqueued=0;
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,resolve:async()=>resolution(),
+    enqueue:async()=>{enqueued++;throw Error("no action expected");},
+  });
+  for(const input of [
+    {tool_name:"forge_connection_status",arguments:{}},
+    {tool_name:"forge_tool_dispatch",arguments:{}},
+    {tool_name:"forge_undisclosed_operation",arguments:{}},
+    {tool_name:"forge_work_send",arguments:{}},
+    {tool_name:"forge_projects_list",arguments:{extraneous:true}},
+    {tool_name:"forge_projects_list",arguments:"not an object"},
+    {tool_name:"forge_projects_list"},
+    {tool_name:"forge_projects_list",arguments:{},unsafe:true},
+  ]){
+    const response=await gateway(request({jsonrpc:"2.0",id:503,method:"tools/call",
+      params:{name:"forge_tool_dispatch",arguments:input}}));
+    const body:any=await response.json();
+    assert.equal(body.error?.code,-32602,JSON.stringify(input));
+  }
+  assert.equal(enqueued,0);
+  const stale=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,
+    resolve:async()=>({...resolution("2026-11-21T00:00:00Z"),online:false}),
+    enqueue:async()=>{enqueued++;throw Error("stale instance denied");},
+  });
+  const offline=await stale(request({jsonrpc:"2.0",id:504,method:"tools/call",
+    params:{name:"forge_tool_dispatch",
+      arguments:{tool_name:"forge_projects_list",arguments:{}}}}));
+  assert.equal((await offline.json() as any).result.structuredContent.error,"forge_instance_offline");
+  assert.equal(enqueued,0);
+});
+
+test("Forge stable dispatch retains authentic GPT retry correlation for WRITE and rejects absent proof",async()=>{
+  const WRITE_TOOL={
+    name:"forge_work_create",description:"Create one scoped Task only with a verified session.",
+    inputSchema:{type:"object",properties:{projectId:{type:"string"}},
+      required:["projectId"],additionalProperties:false},
+    annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+  };
+  let enqueued=0;
+  const rows:any[]=[];
+  const gateway=createForgeMcpGateway(env,{
+    authenticateMcp:mcpIdentity as any,
+    resolve:async()=>({...resolution(),catalog:[...CATALOG,WRITE_TOOL]}),
+    enqueue:async(_env,record:any)=>{
+      enqueued++;rows.push(record);
+      return {ok:true,request_id:REQUEST,effect_id:EFFECT,status:"queued"};
+    },
+    getAction:async()=>({ok:true,request_id:REQUEST,effect_id:EFFECT,
+      status:"succeeded",result:{status:"succeeded",result:{taskId:"task_1"}}}),
+  });
+  const wrapperArgs={tool_name:"forge_work_create",arguments:{projectId:"acheguese"}};
+  const missing=await gateway(request({jsonrpc:"2.0",id:505,method:"tools/call",
+    params:{name:"forge_tool_dispatch",arguments:wrapperArgs}}));
+  assert.equal((await missing.json() as any).result.structuredContent.error,
+    "forge_mcp_retry_correlation_required");
+  assert.equal(enqueued,0);
+  const correlated={jsonrpc:"2.0",id:505,method:"tools/call",
+    params:{name:"forge_tool_dispatch",arguments:wrapperArgs,
+      _meta:{"openai/session":"chatgpt-attested-session-123"}}};
+  const result=await gateway(request(correlated));
+  assert.equal((await result.json() as any).result.structuredContent.status,"succeeded");
+  assert.equal(enqueued,1);
+  assert.equal(rows[0].toolName,"forge_work_create");
+  assert.equal(rows[0].accessMode,"write");
+  assert.deepEqual(rows[0].arguments,{projectId:"acheguese"});
+  assert.match(rows[0].idempotencyKey,/^forge:write:[0-9a-f]{64}$/);
+  const repeat=await gateway(request(correlated));
+  assert.equal((await repeat.json() as any).result.structuredContent.status,"succeeded");
+  assert.equal(rows[1].idempotencyKey,rows[0].idempotencyKey,
+    "same authenticated GPT retry must use identical gateway idempotency key");
+  assert.equal(enqueued,2,"the SQL ledger remains final replay arbiter");
 });

@@ -72,8 +72,26 @@ const SELECT_INSTANCE_TOOL:ForgeTool=Object.freeze({
   },required:["instance_id"],additionalProperties:false},
   annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
 });
+// Stable introspection/dispatch contract for OAuth clients whose MCP tool
+// discovery is cached before an edition goes online. No second execution path:
+// dispatch resolves and validates the exact live App-owned tool below.
+const CATALOG_TOOL:ForgeTool=Object.freeze({
+  name:"forge_catalog_tools",
+  description:"List the canonical tools and input schemas currently published by the selected online Forge App. No task is created and no permissions are granted. Use forge_tool_dispatch for an operation that ChatGPT has not loaded as a direct tool.",
+  inputSchema:{type:"object",properties:{},required:[],additionalProperties:false},
+  annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+});
+const DISPATCH_TOOL:ForgeTool=Object.freeze({
+  name:"forge_tool_dispatch",
+  description:"Execute exactly one Forge App-owned operation from forge_catalog_tools, with its original arguments. The same OAuth, live instance, Git/Task grants and command ledger apply. Writes additionally require a verified GPT session retry marker; this gateway cannot invent one.",
+  inputSchema:{type:"object",properties:{
+    tool_name:{type:"string",pattern:"^forge_[a-z0-9_]{2,112}$"},
+    arguments:{type:"object"},
+  },required:["tool_name","arguments"],additionalProperties:false},
+  annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false},
+});
 const META_NAMES=new Set([CONNECTION_TOOL.name,ACTION_STATUS_TOOL.name,
-  INSTANCES_TOOL.name,SELECT_INSTANCE_TOOL.name]);
+  INSTANCES_TOOL.name,SELECT_INSTANCE_TOOL.name,CATALOG_TOOL.name,DISPATCH_TOOL.name]);
 
 function json(body:unknown,status=200,headers:Record<string,string>={}):Response{
   return Response.json(body,{status,headers:{
@@ -473,13 +491,14 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
         protocolVersion:"2025-06-18",
         capabilities:{tools:{listChanged:false}},
         serverInfo:{name:"ordax-forge",title:"OrdaX Forge",version:"1"},
-        instructions:"Forge MCP controls the user's connected Forge instance. Platform receipts are authoritative for transport; Forge remains authoritative for project, Task, Run, memory and workspace semantics.",
+        instructions:"Forge MCP controls the selected Forge App. Platform receipts are authoritative for transport; Forge owns project, Task, Git grants and evidence. When the client has cached only static tools, call forge_catalog_tools to inspect live App-owned input schemas, then forge_tool_dispatch with the exact tool_name and arguments. Writes still need authentic GPT retry metadata and a valid Task claim.",
       });
     }
 
     if(message.method==="tools/list"){
       const resolution=await resolveFor(identity,store);
       const tools=[CONNECTION_TOOL,ACTION_STATUS_TOOL,INSTANCES_TOOL,SELECT_INSTANCE_TOOL,
+        CATALOG_TOOL,DISPATCH_TOOL,
         ...(resolution.ok&&instancePresenceFresh(resolution,now())&&
            validForgeCatalog(resolution.catalog)?resolution.catalog:[])];
       return rpcResult(id,{tools});
@@ -545,9 +564,26 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
     // executor. Existing request receipts remain readable by request_id.
     if(!instancePresenceFresh(resolution,now()))
       return rpcResult(id,toolResult({ok:false,error:"forge_instance_offline"},true));
-    const tool=toolFromCatalog(resolution,name);
+    if(name===CATALOG_TOOL.name){
+      if(Object.keys(args).length!==0)return rpcError(id,-32602,"Invalid Forge catalog arguments");
+      if(!validForgeCatalog(resolution.catalog))
+        return rpcResult(id,toolResult({ok:false,error:"forge_catalog_unavailable"},true));
+      return rpcResult(id,toolResult({ok:true,instance_id:resolution.instance_id,
+        catalog_digest:resolution.catalog_digest,tools:resolution.catalog}));
+    }
+    // Keep the original envelope for verifiedMcpRetryDigest. It hashes the
+    // authenticated GPT marker + original tool name and exact arguments,
+    // including dispatch parameters, for collision-safe retry reconciliation.
+    const dispatched=name===DISPATCH_TOOL.name;
+    if(dispatched&&(!exactKeys(args,["tool_name","arguments"])||
+      typeof args.tool_name!=="string"||!TOOL_NAME.test(args.tool_name)||
+      META_NAMES.has(args.tool_name)||!isRecord(args.arguments)))
+      return rpcError(id,-32602,"Invalid Forge dispatch arguments");
+    const resolvedName=dispatched?String(args.tool_name):name;
+    const resolvedArgs=dispatched?args.arguments:args;
+    const tool=toolFromCatalog(resolution,resolvedName);
     if(!tool)return rpcError(id,-32602,"Unknown Forge tool");
-    if(!shallowSchemaAllows(tool.inputSchema,args))
+    if(!shallowSchemaAllows(tool.inputSchema,resolvedArgs))
       return rpcError(id,-32602,"Invalid Forge tool arguments");
 
     const mode=accessMode(tool);
@@ -562,8 +598,8 @@ export function createForgeMcpGateway(env:Env,deps:Dependencies={}){
 
     const queued=await store.enqueue({
       ownerUserId:identity.ownerUserId,clientId:identity.clientId,
-      instanceId:resolution.instance_id.toLowerCase(),toolName:name,accessMode:mode,
-      arguments:args,idempotencyKey:`forge:${mode}:${opId}`,
+      instanceId:resolution.instance_id.toLowerCase(),toolName:resolvedName,accessMode:mode,
+      arguments:resolvedArgs,idempotencyKey:`forge:${mode}:${opId}`,
       expiresAt:new Date(now()+ACTION_TTL_MS).toISOString(),
     });
     if(!queued.ok||!isCanonicalUuid(queued.request_id))

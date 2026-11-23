@@ -212,8 +212,18 @@ instância ficou offline ou porque outra anunciou presença.
   revogadas, alterações concorrentes e solicitações ainda em execução.
 - O novo vínculo determina somente o destino de futuras chamadas do MCP.
   Tasks, SQLite, grants, ações aceitas e recibos de cada instância continuam
-  sob suas autoridades originais. Reconsultar tools/list mostra o catálogo
-  atualizado, sem inventar ferramentas ou fazer chamadas automaticamente.
+  sob suas autoridades originais. O resultado de tools/list depende do vínculo,
+  mas o ChatGPT pode manter em cache as ferramentas descobertas antes da troca.
+- Duas ferramentas estáveis resolvem o uso após **um refresh do conector**:
+  forge_catalog_tools lista o catálogo ativo de origem no Forge App; e
+  forge_tool_dispatch encaminha uma operação desse catálogo para a mesma
+  autorização OAuth, motor de recibos e política de Task, sem outro executor.
+  Nem o catálogo nem o dispatcher habilitam ferramentas não publicadas pelo
+  App. Escrita continua exigindo correlação de sessão ChatGPT atestada.
+- Como o gateway HTTP não mantém uma assinatura de notificações MCP aberta,
+  não anuncia notificações tools/list_changed que não consegue entregar.
+  **Refresh do catálogo no ChatGPT é uma ação do cliente** após a alteração
+  do MCP. Não alterar o vínculo por SQL privilegiado nem inventar tokens.
 
 **Gate de implantação:** a proposta
 control-plane/supabase/migrations/20261123100000_forge_mcp_explicit_instance_selection_v1.sql
