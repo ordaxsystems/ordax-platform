@@ -225,11 +225,12 @@ instância ficou offline ou porque outra anunciou presença.
   **Refresh do catálogo no ChatGPT é uma ação do cliente** após a alteração
   do MCP. Não alterar o vínculo por SQL privilegiado nem inventar tokens.
 
-**Gate de implantação:** a proposta
+**Migração de seleção já homologada:** o SQL canônico
 control-plane/supabase/migrations/20261123100000_forge_mcp_explicit_instance_selection_v1.sql
-deve ser aplicada uma única vez como SQL canônico no projeto autorizado,
-aplicar uma única vez no PostgreSQL canônico, registrar a versão real e o blob Git
-em migration-registry.json, validar e só depois promover o Worker com as novas
-operações. Não atualizar os metadados de implantação confirmada na
-production-foundation.json até a prova dos dois lados. Main e testes verdes
-isoladamente não confirmam que o cliente ChatGPT já selecionou outra instância.
+foi aplicado ao projeto Supabase autorizado uma única vez, sob versão real
+20261123052843, e reconciliado com a origem Git em migration-registry.json
+pela PR #446. O Worker foi publicado e validado pelo workflow
+https://github.com/ordaxsystems/ordax-platform/actions/runs/45118337573.
+**Não reaplicar a migração.** Integrações futuras devem checar o ledger real,
+a revisão do Worker e a seleção OAuth por cliente; main e testes verdes
+isoladamente não provam que o ChatGPT recarregou o catálogo.
