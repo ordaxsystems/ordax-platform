@@ -1,4 +1,10 @@
-import { OWNER_DEVICE_COMPUTER_GRANT_PROFILES, DEVICE_BLENDER_ACTIONS, deviceBlenderAction } from "./product_action_scope.ts";
+import {
+  OWNER_DEVICE_COMPUTER_GRANT_PROFILES,
+  DEVICE_BLENDER_ACTIONS,
+  PROJECT_CONTINUITY_ACTIONS,
+  REPOSITORY_CATALOG_DEVICE_ACTIONS,
+  deviceBlenderAction,
+} from "./product_action_scope.ts";
 import { OWNER_MCP_GRANT_PROFILES } from "./product_owner_grant_profiles.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
@@ -952,6 +958,13 @@ const APP_INTELLIGENCE_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-grou
 const PROJECT_GRANT_SURFACE = "OrdaX Owner: /v3/owner/remote-grant-groups (projeto vinculado)";
 
 const OWNER_GRANT_HINT_BY_ACTION = new Map<string, OwnerGrantHint>([
+  // Reuse the same canonical capability sets as Owner profile issuance and
+  // the attested action handlers. A computer-control grant is NOT an
+  // alternative to either repository discovery or project continuity.
+  ...[...REPOSITORY_CATALOG_DEVICE_ACTIONS].map((action) =>
+    [action, { profile: "repository-catalog-read", surface: COMPUTER_GRANT_SURFACE }] as const),
+  ...[...PROJECT_CONTINUITY_ACTIONS].map((action) =>
+    [action, { profile: "project-continuity", surface: PROJECT_GRANT_SURFACE }] as const),
   ["ordax.intelligence.respond", { profile: "ordax-intelligence-consult", surface: APP_INTELLIGENCE_GRANT_SURFACE }],
   ["usb.list", { profile: "usb-media-read", surface: COMPUTER_GRANT_SURFACE }],
   ["usb.inspect", { profile: "usb-media-read", surface: COMPUTER_GRANT_SURFACE }],

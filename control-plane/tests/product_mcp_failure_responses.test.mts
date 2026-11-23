@@ -500,6 +500,45 @@ test("grant denial still points to owner authorization without exporting arbitra
   for (const secret of ["secret", "C:/private", "private_token"]) assert.equal(JSON.stringify(body).includes(secret), false);
 });
 
+test("missing repository and continuity grants identify the exact Owner profile without bypass", async () => {
+  const cases: readonly [string, Record<string, unknown>, string, string][] = [
+    ["repository_catalog", {}, "repository-catalog-read", "dispositivo"],
+    ["continuity_state", { repository_full_name: "ordaxsystems/ordax-runtime" },
+      "project-continuity", "projeto vinculado"],
+    ["continuity_update", {
+      repository_full_name: "ordaxsystems/ordax-runtime", summary: "verified status",
+      expected_revision: 0,
+    }, "project-continuity", "projeto vinculado"],
+    ["handoff_get", {
+      repository_full_name: "ordaxsystems/ordax-runtime", handoff_id: "handoff-1",
+    }, "project-continuity", "projeto vinculado"],
+  ];
+  let calls = 0;
+  for (const [name, args, profile, scope] of cases) {
+    const { body } = await call(name, {
+      createAction: async () => {
+        calls++;
+        return Response.json({
+          ok: false, error: "product_grant_not_resolved",
+          private_owner_id: "secret", raw_grant: "private",
+        }, { status: 403 });
+      },
+      getAction: async () => { assert.fail("denied grant must not poll an action"); },
+    }, args);
+    const result = body.result.structuredContent;
+    assert.equal(body.result.isError, true, name);
+    assert.equal(result.error, "product_grant_not_resolved", name);
+    assert.equal(result.authorization_required, true, name);
+    assert.equal(result.required_owner_profile, profile, name);
+    assert.match(result.authorization_surface, /\/v3\/owner\/remote-grant-groups/, name);
+    assert.ok(result.authorization_surface.includes(scope), name);
+    assert.equal("alternative_owner_profile" in result, false,
+      "computer-control must not authorize a project or repository grant");
+    assert.doesNotMatch(JSON.stringify(body), /secret|private_owner_id|raw_grant/);
+  }
+  assert.equal(calls, cases.length);
+});
+
 test("unregistered project explains exact Owner setup without inventing grants or device bindings", async () => {
   let dispatched = 0;
   for (const action of ["process_list", "terminal_exec"]) {
