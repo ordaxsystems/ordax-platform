@@ -37,6 +37,7 @@ import { validAttestedBlenderActionArguments } from "./product_mcp_attested_proj
 import { productCapabilityAccessMode } from "./product_owner_grant_profiles.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
+import { validMissionProcessListQuery } from "./product_mcp_mission_list_query.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
 type Json = Record<string, unknown>;
@@ -249,7 +250,7 @@ export function validAttestedDeviceActionArguments(action: string, value: unknow
   }
   if (ATTESTED_DEVICE_PROCESS_ACTIONS.has(action)) {
     const identifierValid = isCanonicalUuid(value.process_id);
-    if (action === "computer.process_list") return keysOnly(value, []);
+    if (action === "computer.process_list") return validMissionProcessListQuery(value);
     if (action === "computer.process_status" || action === "computer.process_stop")
       return keysOnly(value, ["process_id"]) && identifierValid;
     if (action === "computer.process_logs")
