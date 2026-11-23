@@ -28,6 +28,7 @@ import { productCapabilityAccessMode } from "./product_owner_grant_profiles.ts";
 import { PROJECT_ARTIFACT_ACTIONS, PROJECT_BLENDER_ACTIONS, PROJECT_BROWSER_ACTIONS } from "./product_action_scope.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
+import { validMissionProcessListQuery } from "./product_mcp_mission_list_query.ts";
 import type { AttestedMcpDevice } from "./product_mcp_attested_device_action.ts";
 
 type Env = ProductAuthEnv & ProductPostgresEnv;
@@ -321,7 +322,7 @@ export function validAttestedProjectActionArguments(action: string, value: unkno
       && (value.wait_seconds === undefined || (typeof value.wait_seconds === "number"
           && Number.isFinite(value.wait_seconds) && value.wait_seconds >= 0.1 && value.wait_seconds <= 5));
   }
-  if (action === "process.list") return Object.keys(value).length === 0;
+  if (action === "process.list") return validMissionProcessListQuery(value);
   if (action === "process.status" || action === "process.stop")
     return keysOnly(value, ["process_id"]) && isCanonicalUuid(value.process_id);
   if (action === "process.logs")
