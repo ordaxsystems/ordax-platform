@@ -104,6 +104,7 @@ This document is reviewer-facing evidence for the OpenAI plugin submission. The 
 | `computer_path_remove` | false | true | false | Removes an allowed local file or directory; recursive directory removal must be explicit and configured roots cannot be removed. |
 | `artifacts_list` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
 | `artifact_preview` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
+| `artifact_local_service_preview` | true | false | false | Reads bounded images only from an explicitly configured local service under an attested Project and dedicated Owner read grant. Returns an in-memory sheet and review-only similarity hints; accepts no arbitrary origin or write operation. |
 | `blender_status` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
 | `blender_scene_snapshot` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
 | `blender_object_inspect` | true | false | false | Reads or computes bounded data from the authenticated ORDAX account/device/project and does not modify external state. |
