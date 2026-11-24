@@ -54,3 +54,29 @@ test("artifact grant does not inherit authority from other profiles or projects"
     grant_groups:[{...group,valid_until:"2020-01-01T00:00:00Z"}]}]},device,scope,"artifact.preview"),false);
   assert.equal(catalogAllowsAttestedProjectAction(catalog, device, scope, "terminal.exec"), false);
 });
+
+test("local service preview requires its own project grant and bounded route arguments", () => {
+  const action = "artifact.local_service_preview";
+  const args = { service_id: "curation", requests: [{ route: "/thumb/42", query: { w: 256 } }] };
+  assert.equal(PRODUCT_MCP_DIRECT_TOOLS.has("artifact_local_service_preview"), true);
+  assert.equal(OWNER_MCP_GRANT_PROFILES["project-local-service-read"].scope, "project");
+  assert.deepEqual(OWNER_MCP_GRANT_PROFILES["project-local-service-read"].capabilities,
+    [{ capability: action, accessMode: "read" }]);
+  assert.equal(validAttestedProjectActionArguments(action, args), true);
+  for (const invalid of [
+    { ...args, url: "http://127.0.0.1:8769" },
+    { ...args, requests: [{ route: "http://127.0.0.1:8769/thumb/42" }] },
+    { ...args, requests: [{ route: "/thumb/../secret" }] },
+    { ...args, requests: [{ route: "/thumb/%2f42" }] },
+    { ...args, requests: [{ route: "/thumb/42", method: "POST" }] },
+    { ...args, requests: Array(9).fill(args.requests[0]) },
+    { ...args, max_bytes: 262145 },
+  ]) assert.equal(validAttestedProjectActionArguments(action, invalid), false);
+  assert.equal(catalogAllowsAttestedProjectAction(catalog, device, scope, action), false);
+  const specific = { ...group, profile_key: "project-local-service-read",
+    capabilities: [{ capability: action, access_mode: "read" }] };
+  const allowed = { ok: true, targets: [{ device_id: device, grant_groups: [specific] }] };
+  assert.equal(catalogAllowsAttestedProjectAction(allowed, device, scope, action), true);
+  assert.equal(catalogAllowsAttestedProjectAction(allowed, device, { ...scope, projectId: space }, action), false);
+  assert.equal(catalogAllowsAttestedProjectAction(allowed, device, scope, "artifact.preview"), false);
+});

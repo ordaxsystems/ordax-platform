@@ -8,6 +8,7 @@ import {
   PROJECT_BLENDER_ACTIONS,
   DEVICE_BLENDER_ACTIONS,
   PROJECT_ARTIFACT_ACTIONS,
+  PROJECT_LOCAL_SERVICE_ACTIONS,
   PROJECT_CONTINUITY_ACTIONS,
   REPOSITORY_CATALOG_DEVICE_ACTIONS,
   USB_MEDIA_DEVICE_ACTIONS,
@@ -68,6 +69,7 @@ export const OWNER_MCP_GRANT_PROFILES: Readonly<Record<string, OwnerGrantProfile
   "project-workspace-read": profile("project", ["workspace.project_snapshot"]),
   // Does not inherit project snapshots or terminal authority.
   "project-artifact-read": profile("project", PROJECT_ARTIFACT_ACTIONS),
+  "project-local-service-read": profile("project", PROJECT_LOCAL_SERVICE_ACTIONS),
   "project-browser-automation": profile("project", PROJECT_BROWSER_ACTIONS),
   "device-native-terminal": profile("device", ["computer.terminal_exec"]),
   "device-native-process": profile("device", [
