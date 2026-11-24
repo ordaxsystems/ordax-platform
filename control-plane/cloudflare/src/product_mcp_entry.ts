@@ -194,7 +194,7 @@ const ATTESTED_DEVICE_ACTION_TOOLS: ReadonlySet<string> = new Set([
   ...ATTESTED_DEVICE_PROCESS_TOOLS,
   ...ATTESTED_DEVICE_NATIVE_EXECUTION_TOOLS,
 ]);
-const ATTESTED_PROJECT_ARTIFACT_TOOLS: ReadonlySet<string> = new Set(["artifacts_list", "artifact_preview"]);
+const ATTESTED_PROJECT_ARTIFACT_TOOLS: ReadonlySet<string> = new Set(["artifacts_list", "artifact_preview", "artifact_local_service_preview"]);
 export const ATTESTED_PROJECT_NATIVE_TOOLS: ReadonlySet<string> = new Set([
   "terminal_exec", "process_start", "process_status", "process_list",
   "process_logs", "process_write_stdin", "process_stop",

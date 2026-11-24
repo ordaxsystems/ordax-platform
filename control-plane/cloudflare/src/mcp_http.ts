@@ -221,6 +221,7 @@ const TOOLS: ToolSpec[] = [
   { name: "computer_path_remove", description: "Remove an allowed computer path. Recursive directory removal requires recursive=true.", action: "computer.path_remove", properties: { device_id: DEVICE, space_id: SPACE, path: STRING, recursive: BOOLEAN, expected_sha256: STRING, wait_for_completion_ms: WAIT }, required: ["device_id", "path"] },
   { name: "artifacts_list", description: "List bounded artifact metadata for a GitHub-connected project with an explicit project-artifact-read grant.", action: "artifacts.list", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, max_items: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
   { name: "artifact_preview", description: "Preview one granted project artifact or up to 100 project images as a labeled, SHA-256 deduplicated JPEG contact sheet. Paths in project_artifact_paths must be relative to Artifacts and cannot be combined with artifact_name/project_artifact_path. Successful images return native MCP image content with original-item metadata. Requires an attested project and explicit project-artifact-read Owner grant.", action: "artifact.preview", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, artifact_name: STRING, project_artifact_path: STRING, project_artifact_paths: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1, maxItems: 100 }, thumbnail: BOOLEAN, max_bytes: { type: "integer", minimum: 1, maximum: 262144 }, max_width: { type: "integer", minimum: 1, maximum: 4096 }, max_height: { type: "integer", minimum: 1, maximum: 4096 }, quality: { type: "integer", minimum: 1, maximum: 100 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project"] },
+  { name: "artifact_local_service_preview", description: "Read up to eight image responses from a locally configured project service and return one in-memory contact sheet with response digests and review-only similarity candidates. Requires attested project, explicit project-local-service-read grant and host-owned service configuration. No arbitrary URL or port, no writes. Response digests identify fetched previews, not original media.", action: "artifact.local_service_preview", projectRequired: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, service_id: { type: "string", minLength: 1, maxLength: 64 }, requests: { type: "array", minItems: 1, maxItems: 8, items: { type: "object", properties: { route: { type: "string", minLength: 1, maxLength: 512 }, query: { type: "object", maxProperties: 16, additionalProperties: { anyOf: [{ type: "string", maxLength: 256 }, { type: "integer" }] } } }, required: ["route"], additionalProperties: false } }, max_bytes: { type: "integer", minimum: 4096, maximum: 262144 }, max_width: { type: "integer", minimum: 64, maximum: 4096 }, max_height: { type: "integer", minimum: 64, maximum: 4096 }, quality: { type: "integer", minimum: 30, maximum: 92 }, wait_for_completion_ms: WAIT }, required: ["device_id", "project", "service_id", "requests"] },
   { name: "blender_status", description: "Read sanitized live Blender status for the device or a linked project.", action: "blender.live_status", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "blender_scene_snapshot", description: "Inspect a bounded snapshot of the live Blender scene.", action: "blender.live_scene_snapshot", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, max_objects: { type: "integer", minimum: 1, maximum: 10000 }, object_names: { type: "array", items: STRING, maxItems: 256 }, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id"] },
   { name: "blender_object_inspect", description: "Inspect one live Blender object by name or ORDAX object id.", action: "blender.live_object_inspect", projectOptional: true, properties: { device_id: DEVICE, project: REPOSITORY_PROJECT, space_id: SPACE, object_name: STRING, ordax_object_id: STRING, timeout_seconds: NUMBER, wait_for_completion_ms: WAIT }, required: ["device_id"] },
@@ -260,6 +261,7 @@ const READ_ONLY_TOOLS = new Set([
   "git_diff",
   "artifacts_list",
   "artifact_preview",
+  "artifact_local_service_preview",
   "blender_status",
   "blender_scene_snapshot",
   "blender_object_inspect",
@@ -475,6 +477,7 @@ const TOOL_TITLES: Record<string, string> = {
   computer_path_remove: "Remove computer path",
   artifacts_list: "List project artifacts",
   artifact_preview: "Preview project artifact",
+  artifact_local_service_preview: "Preview authorized local service images",
   blender_status: "Inspect Blender status",
   blender_scene_snapshot: "Inspect Blender scene",
   blender_object_inspect: "Inspect Blender object",
@@ -826,7 +829,7 @@ function nativeArtifactImageReceipt(payload: unknown): { metadata: JsonObject; m
   const action = receipt.action;
   if (!action || typeof action !== "object" || Array.isArray(action)) return null;
   const completed = action as JsonObject;
-  if (!["artifact.preview", "computer.screenshot", "browser.screenshot"].includes(String(completed.name))
+  if (!["artifact.preview", "artifact.local_service_preview", "computer.screenshot", "browser.screenshot"].includes(String(completed.name))
     || completed.status !== "succeeded") return null;
   const result = completed.result;
   if (!result || typeof result !== "object" || Array.isArray(result)) return null;
@@ -994,6 +997,8 @@ const OWNER_GRANT_HINT_BY_ACTION = new Map<string, OwnerGrantHint>([
   ...[...DEVICE_BLENDER_ACTIONS].map((action) => [action, { profile: "device-blender-control", surface: COMPUTER_GRANT_SURFACE }] as const),
   ["artifact.preview", "artifacts.list"].map((action) =>
     [action, { profile: "project-artifact-read", surface: PROJECT_GRANT_SURFACE }] as const),
+  ["artifact.local_service_preview"].map((action) =>
+    [action, { profile: "project-local-service-read", surface: PROJECT_GRANT_SURFACE }] as const),
   ["terminal.exec"].map((action) =>
     [action, { profile: "project-native-terminal", surface: PROJECT_GRANT_SURFACE }] as const),
   ["process.start", "process.status", "process.list", "process.logs",

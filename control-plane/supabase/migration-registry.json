@@ -1569,6 +1569,18 @@
         "blob_sha": "1a4fd2a553f07edc20e444af7411f3db03f29fa4"
       },
       "ledger_name": "forge_mcp_explicit_instance_selection_v1"
+    },
+    {
+      "name": "20261124015000_project_local_service_read_capability_v1",
+      "applied_version": "20261124030423",
+      "state": "applied",
+      "ledger_source_relation": "exact",
+      "source": {
+        "repository": "ordaxsystems/ordax-platform",
+        "path": "control-plane/supabase/migrations/20261124015000_project_local_service_read_capability_v1.sql",
+        "blob_sha": "5abeb8b34f526ea0e77fb99370f7eb444228d7f1"
+      },
+      "ledger_name": "project_local_service_read_capability_v1"
     }
   ]
 }

@@ -25,7 +25,7 @@ import {
   resolveOwnerProjectScope,
 } from "./product_owner_project_scope.ts";
 import { productCapabilityAccessMode } from "./product_owner_grant_profiles.ts";
-import { PROJECT_ARTIFACT_ACTIONS, PROJECT_BLENDER_ACTIONS, PROJECT_BROWSER_ACTIONS } from "./product_action_scope.ts";
+import { PROJECT_ARTIFACT_ACTIONS, PROJECT_LOCAL_SERVICE_ACTIONS, PROJECT_BLENDER_ACTIONS, PROJECT_BROWSER_ACTIONS } from "./product_action_scope.ts";
 import { isCanonicalUuid } from "./product_remote_grant_contract.ts";
 import { readBoundedJsonObject } from "./request_json.ts";
 import { validMissionProcessListQuery } from "./product_mcp_mission_list_query.ts";
@@ -60,6 +60,7 @@ function profileForAction(action: string): string | null {
   if (PROJECT_BLENDER_ACTIONS.has(action)) return "project-blender-control";
   if (PROJECT_BROWSER_ACTIONS.has(action)) return "project-browser-automation";
   if (PROJECT_ARTIFACT_ACTIONS.has(action)) return "project-artifact-read";
+  if (PROJECT_LOCAL_SERVICE_ACTIONS.has(action)) return "project-local-service-read";
   if (action === "terminal.exec") return TERMINAL_PROFILE;
   return PROJECT_NATIVE_ACTIONS.has(action) ? PROCESS_PROFILE : null;
 }
@@ -300,7 +301,32 @@ function validProjectArtifactArgs(action: string, value: unknown): value is Json
     && (value.quality === undefined || boundedInteger(value.quality, 30, 92));
 }
 
+function validLocalServicePreviewArgs(value: unknown): value is Json {
+  if (!isRecord(value) || !keysOnly(value, ["service_id", "requests", "max_width", "max_height", "quality", "max_bytes"])
+    || typeof value.service_id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(value.service_id)
+    || !Array.isArray(value.requests) || value.requests.length < 1 || value.requests.length > 8) return false;
+  for (const request of value.requests) {
+    if (!isRecord(request) || !keysOnly(request, ["route", "query"])
+      || typeof request.route !== "string" || request.route.length > 512
+      || !/^\/[A-Za-z0-9_./-]*$/.test(request.route) || request.route.includes("//")
+      || request.route.split("/").some(part => part === "." || part === "..")) return false;
+    if (request.query !== undefined) {
+      if (!isRecord(request.query) || Object.keys(request.query).length > 16) return false;
+      for (const [key, field] of Object.entries(request.query)) {
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(key)
+          || !(typeof field === "string" && field.length <= 256 && !/[\x00-\x1f\x7f]/.test(field)
+            || typeof field === "number" && Number.isSafeInteger(field))) return false;
+      }
+    }
+  }
+  return (value.max_width === undefined || boundedInteger(value.max_width, 64, 4096))
+    && (value.max_height === undefined || boundedInteger(value.max_height, 64, 4096))
+    && (value.quality === undefined || boundedInteger(value.quality, 30, 92))
+    && (value.max_bytes === undefined || boundedInteger(value.max_bytes, 4096, 262144));
+}
+
 export function validAttestedProjectActionArguments(action: string, value: unknown): value is Json {
+  if (PROJECT_LOCAL_SERVICE_ACTIONS.has(action)) return validLocalServicePreviewArgs(value);
   if (PROJECT_ARTIFACT_ACTIONS.has(action)) return validProjectArtifactArgs(action, value);
   if (PROJECT_BROWSER_ACTIONS.has(action)) return validBrowserArgs(action, value);
   if (PROJECT_BLENDER_ACTIONS.has(action)) return validAttestedBlenderActionArguments(action, value);
@@ -386,7 +412,8 @@ export function catalogAllowsAttestedProjectAction(
     || catalog.targets.length < 1 || catalog.targets.length > 128
     || !isCanonicalUuid(trustedDeviceId)
     || (!PROJECT_NATIVE_ACTIONS.has(action) && !PROJECT_BLENDER_ACTIONS.has(action)
-      && !PROJECT_BROWSER_ACTIONS.has(action) && !PROJECT_ARTIFACT_ACTIONS.has(action))) return false;
+      && !PROJECT_BROWSER_ACTIONS.has(action) && !PROJECT_ARTIFACT_ACTIONS.has(action)
+      && !PROJECT_LOCAL_SERVICE_ACTIONS.has(action))) return false;
 
   const accessMode = productCapabilityAccessMode(action);
   const ids = new Set<string>();

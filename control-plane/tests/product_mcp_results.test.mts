@@ -434,3 +434,17 @@ test("screenshot without preview remains metadata-only and cannot manufacture an
   assert.equal(receipt.content.length, 1);
   assert.equal(receipt.structuredContent.action.result.data.width, 1920);
 });
+
+test("local service preview returns native image content without duplicating pixels", async () => {
+  const receipt = await imageStatusReceipt({
+    ...previewData, source_kind: "local_service_response",
+    items: [{ image_id: "I001", tile_id: "I001", request_index: 0,
+      response_sha256: "a".repeat(64) }],
+  }, "artifact.local_service_preview") as any;
+  assert.equal(receipt.content.length, 2);
+  assert.equal(receipt.content[1].type, "image");
+  assert.equal(receipt.content[1].data, previewBase64);
+  assert.equal(receipt.structuredContent.action.result.data.base64, undefined);
+  assert.equal(receipt.structuredContent.action.result.data.items[0].response_sha256, "a".repeat(64));
+  assert.equal(receipt.content[0].text.includes(previewBase64), false);
+});

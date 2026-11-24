@@ -25,8 +25,14 @@ const artifactCeilingMigration = fs.readFileSync(
   "utf8",
 );
 
+const localServiceCeilingMigration = fs.readFileSync(
+  new URL("../supabase/migrations/20261124015000_project_local_service_read_capability_v1.sql", import.meta.url),
+  "utf8",
+);
+
 const EXPECTED_PROJECT_CAPABILITIES = [
   "agent.project_briefing",
+  "artifact.local_service_preview",
   "artifact.preview",
   "artifacts.list",
   "blender.live_create_primitive",
@@ -72,7 +78,7 @@ test("Project binding capability ceiling exactly matches canonical project grant
   )].sort();
   assert.deepEqual(canonical, EXPECTED_PROJECT_CAPABILITIES);
 
-  const match = artifactCeilingMigration.match(
+  const match = localServiceCeilingMigration.match(
     /v_allowed_capabilities text\[\] := array\[([\s\S]*?)\]::text\[\];/,
   );
   assert.ok(match, "migration capability ceiling missing");
@@ -80,10 +86,10 @@ test("Project binding capability ceiling exactly matches canonical project grant
   assert.deepEqual(sqlCapabilities, canonical,
     "binding ceiling must not add or omit a canonical Project capability");
 
-  assert.doesNotMatch(artifactCeilingMigration, /insert\s+into\s+public\.ordax_remote_capability_grants/i,
+  assert.doesNotMatch(localServiceCeilingMigration, /insert\s+into\s+public\.ordax_remote_capability_grants/i,
     "binding must never mint Product grants");
-  assert.match(artifactCeilingMigration, /p_local_project_ref !~ '\^project-\[1-9\]\[0-9\]\*\$'/);
-  assert.doesNotMatch(artifactCeilingMigration, /local_project_path|filesystem_path|workspace_path/i);
+  assert.match(localServiceCeilingMigration, /p_local_project_ref !~ '\^project-\[1-9\]\[0-9\]\*\$'/);
+  assert.doesNotMatch(localServiceCeilingMigration, /local_project_path|filesystem_path|workspace_path/i);
 });
 
 test("Owner request plus enrolled Device confirmation creates exactly one canonical binding and no grant", async () => {
@@ -203,6 +209,7 @@ test("Owner request plus enrolled Device confirmation creates exactly one canoni
     await db.exec(blenderCeilingMigration);
     await db.exec(browserCeilingMigration);
     await db.exec(artifactCeilingMigration);
+    await db.exec(localServiceCeilingMigration);
 
     await db.query("insert into auth.users(id) values($1),($2)", [owner, other]);
     await db.query(
